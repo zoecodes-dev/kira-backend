@@ -38,6 +38,7 @@ services:
 
   # Layer 2: KIRA 에이전트 통합 백엔드
   app:
+    platform: linux/amd64
     build: 
       context: .
       dockerfile: Dockerfile
