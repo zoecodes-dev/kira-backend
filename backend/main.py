@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from backend.infrastructure.queue import close_pools
 
 app = FastAPI(
     title="KIRA Compliance Intelligence Platform API",
@@ -13,3 +14,7 @@ async def health_check():
         "environment": "development",
         "version": "1.0.0"
     }
+    
+@app.on_event("shutdown")
+async def on_shutdown():
+    await close_pools()
