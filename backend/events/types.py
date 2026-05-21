@@ -60,3 +60,9 @@ class HITLRejected: payload: Dict[str, Any]
 class DPPReadinessUpdated: payload: Dict[str, Any]
 @dataclass
 class DPPIssued: payload: Dict[str, Any]
+
+# Audit Domain
+@dataclass
+class AuditStepRecorded: payload: Dict[str, Any]
+@dataclass
+class GapAnalysisCompleted: payload: Dict[str, Any]
