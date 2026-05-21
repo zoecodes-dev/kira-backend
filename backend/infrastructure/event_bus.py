@@ -16,7 +16,7 @@ from typing import Awaitable, Callable, Dict, List
 
 from sqlalchemy import text
 
-from infrastructure.database import engine
+from backend.infrastructure.database import engine
 
 # NOTIFY 채널명. .env의 KIRA_EVENT_CHANNEL과 일치.
 EVENT_CHANNEL = os.getenv("KIRA_EVENT_CHANNEL", "kira_events")
