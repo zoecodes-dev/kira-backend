@@ -11,15 +11,12 @@ W1 범위: publish만 동작. subscribe는 핸들러 등록만(실제 LISTEN 루
 이벤트 이름·payload는 events/types.py 및 spec 7장 계약을 따른다.
 """
 import json
-import os
 from typing import Awaitable, Callable, Dict, List
 
 from sqlalchemy import text
 
+from backend.core.config import config
 from backend.infrastructure.database import engine
-
-# NOTIFY 채널명. .env의 KIRA_EVENT_CHANNEL과 일치.
-EVENT_CHANNEL = os.getenv("KIRA_EVENT_CHANNEL", "kira_events")
 
 # W1: 구독 핸들러 등록만. 실제 디스패치는 W2 LISTEN 루프에서.
 _subscribers: Dict[str, List[Callable[[dict], Awaitable[None]]]] = {}
@@ -40,10 +37,10 @@ async def publish(event_name: str, payload: dict) -> None:
     async with engine.connect() as conn:
         await conn.execute(
             text("SELECT pg_notify(:channel, :msg)"),
-            {"channel": EVENT_CHANNEL, "msg": envelope},
+            {"channel": config.KIRA_EVENT_CHANNEL, "msg": envelope},
         )
         await conn.commit()
-    print(f"[EVENT PUBLISHED] {event_name} -> NOTIFY {EVENT_CHANNEL}")
+    print(f"[EVENT PUBLISHED] {event_name} -> NOTIFY {config.KIRA_EVENT_CHANNEL}")
 
 
 async def subscribe(
