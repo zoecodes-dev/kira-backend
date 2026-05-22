@@ -1,311 +1,206 @@
 # =============================================================================
 # backend/domains/product/crud.py
 #
-# KIRA Compliance Intelligence Platform — Product Domain CRUD / Query Layer
+# KIRA Compliance Intelligence Platform — Product Domain DB Query Layer
 #
-# 현재 구현 상태: DB 미연결 Mock Stub
-#   - get_bom_tree()는 5계층 중첩 JSON을 하드코딩으로 반환.
-#   - 실제 DB 연결 시 이 파일의 Mock 블록을 재귀 CTE 쿼리로 교체.
+# 역할: 실제 PostgreSQL DB를 조회하여 5계층 BOM 트리를 반환.
 #
-# 설계 원칙 (PROJECT_CORE.md 5-1 준수):
-#   - 도메인 격리 — product 도메인 외부 import 없음.
-#   - database.py Base 연결 인지 — 실제 쿼리 전환 시 AsyncSession inject.
-#   - N차 트리 탐색은 재귀 CTE 사용 예정 (현재는 Mock으로 대체).
+# 구현 방식:
+#   1. WITH RECURSIVE CTE — parts.parent_part_id 기반 전 계층 플랫 조회
+#   2. Python 내 트리 조립 — 플랫 rows → children 중첩 구조 변환
+#
+# 도메인 격리 원칙 (PROJECT_CORE.md 5-1):
+#   - 타 도메인 import 없음.
+#   - infrastructure.database는 인프라 레이어이므로 허용.
 # =============================================================================
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 # ---------------------------------------------------------------------------
 # get_bom_tree
 # ---------------------------------------------------------------------------
 
-def get_bom_tree(product_id: UUID) -> Dict[str, Any]:
+async def get_bom_tree(
+    db: AsyncSession,
+    product_id: UUID,
+) -> Optional[Dict[str, Any]]:
     """
+    product_id에 해당하는 제품의 active BOM 버전 기준
     5계층 BOM 트리를 반환한다.
 
-    [현재 상태 — Mock Stub]
-    실제 DB 조회(재귀 CTE) 구현 전까지 하드코딩된 가짜 데이터를 반환.
-    product_id 인자는 수신만 하고 아직 쿼리에 사용되지 않음.
+    [쿼리 전략]
+    1단계 — products + bom_versions 조회
+        product_id로 제품 정보와 active BOM 버전을 가져온다.
+        active 버전이 없으면 None 반환.
 
-    [실제 DB 전환 시 교체 계획]
-    1. AsyncSession을 인자로 추가: get_bom_tree(db: AsyncSession, product_id: UUID)
-       from backend.infrastructure.database import AsyncSessionLocal
-    2. Mock 반환 블록을 아래 재귀 CTE로 교체:
+    2단계 — WITH RECURSIVE CTE
+        bom_version_id 기준으로 bom_items에 속한 루트 부품(parent_part_id IS NULL)
+        을 앵커로 잡고, parent_part_id 관계를 따라 전 계층을 플랫하게 조회한다.
 
+    3단계 — Python 트리 조립
+        플랫한 rows를 part_id / parent_part_id 관계 기반으로
+        children 배열 중첩 구조로 조립한다.
+
+    [반환값]
+    active BOM 버전이 존재하면 5계층 중첩 딕셔너리 반환.
+    제품 또는 active BOM이 없으면 None 반환.
+    """
+
+    # ------------------------------------------------------------------
+    # 1단계: 제품 정보 + active BOM 버전 조회
+    # ------------------------------------------------------------------
+    product_query = text("""
+        SELECT
+            p.product_id,
+            p.product_code,
+            p.product_name,
+            bv.bom_version_id,
+            bv.version_number,
+            bv.status
+        FROM products p
+        JOIN bom_versions bv
+            ON bv.product_id = p.product_id
+        WHERE p.product_id  = :product_id
+          AND bv.status     = 'active'
+        LIMIT 1
+    """)
+
+    product_result = await db.execute(
+        product_query,
+        {"product_id": str(product_id)},
+    )
+    product_row = product_result.mappings().first()
+
+    if not product_row:
+        return None
+
+    bom_version_id = product_row["bom_version_id"]
+
+    # ------------------------------------------------------------------
+    # 2단계: WITH RECURSIVE CTE — 전 계층 플랫 조회
+    #
+    # 앵커: bom_version에 속한 부품 중 parent_part_id IS NULL (루트)
+    # 재귀: 방금 찾은 부품의 part_id = 다음 부품의 parent_part_id
+    #
+    # bom_items 컬럼(required_quantity, origin_country 등)은
+    # parts와 JOIN하여 각 노드에 병합.
+    # ------------------------------------------------------------------
+    recursive_query = text("""
         WITH RECURSIVE bom_tree AS (
-            -- 앵커: product_id 기준 active BOM 버전의 루트 부품
-            SELECT p.*, bi.required_quantity, bi.required_quantity_unit,
-                   bi.origin_country, bi.direct_material_cost, 0 AS depth
+
+            -- 앵커: 루트 부품 (parent_part_id IS NULL)
+            SELECT
+                p.part_id,
+                p.part_code,
+                p.part_name,
+                p.tier_level,
+                p.parent_part_id,
+                p.hs_code,
+                p.material_type,
+                p.unit_price,
+                bi.required_quantity,
+                bi.required_quantity_unit,
+                bi.origin_country,
+                bi.direct_material_cost
             FROM parts p
-            JOIN bom_items bi ON bi.part_id = p.part_id
-            JOIN bom_versions bv ON bv.bom_version_id = bi.bom_version_id
-            WHERE bv.product_id = :product_id
-              AND bv.status = 'active'
-              AND p.parent_part_id IS NULL
+            JOIN bom_items bi
+                ON bi.part_id          = p.part_id
+               AND bi.bom_version_id   = :bom_version_id
+            WHERE p.parent_part_id IS NULL
 
             UNION ALL
 
-            -- 재귀: 자식 부품 순회
-            SELECT p.*, bi.required_quantity, bi.required_quantity_unit,
-                   bi.origin_country, bi.direct_material_cost, bt.depth + 1
+            -- 재귀: 직전 계층 부품의 자식 탐색
+            SELECT
+                p.part_id,
+                p.part_code,
+                p.part_name,
+                p.tier_level,
+                p.parent_part_id,
+                p.hs_code,
+                p.material_type,
+                p.unit_price,
+                bi.required_quantity,
+                bi.required_quantity_unit,
+                bi.origin_country,
+                bi.direct_material_cost
             FROM parts p
-            JOIN bom_items bi ON bi.part_id = p.part_id
-            JOIN bom_tree bt ON p.parent_part_id = bt.part_id
+            JOIN bom_items bi
+                ON bi.part_id          = p.part_id
+               AND bi.bom_version_id   = :bom_version_id
+            JOIN bom_tree bt
+                ON p.parent_part_id    = bt.part_id
+
         )
-        SELECT * FROM bom_tree ORDER BY depth, part_code;
+        SELECT * FROM bom_tree
+        ORDER BY tier_level, part_code
+    """)
 
-    [반환 구조]
-    {
-        "product_id": str,
-        "product_code": str,
-        "product_name": str,
-        "bom_version": str,
-        "bom_status": str,          # BomVersionStatus: draft / active / deprecated
-        "tree": {                   # 루트 노드 (tier_level=1, Pack)
-            "part_id": str,
-            "part_code": str,
-            "part_name": str,
-            "tier_level": int,      # 1=Pack / 2=Module / 3=Cell / 4=전구체 / 5=광물
-            "parent_part_id": str | None,
-            "hs_code": str,         # 6자리 이상 필수 (FTA CTC 판정 키)
-            "material_type": str | None,
-            "unit_price": float | None,
-            "required_quantity": float,     # bom_items 소속
-            "required_quantity_unit": str,  # bom_items 소속
-            "origin_country": str,          # bom_items 소속 (ISO 3166-1 alpha-2)
-            "direct_material_cost": float | None,  # bom_items 소속 (RVC 계산용)
-            "children": [ ... ]     # 빈 배열이면 터미널 노드 (광물, tier_level=5)
-        }
-    }
-    """
+    tree_result = await db.execute(
+        recursive_query,
+        {"bom_version_id": str(bom_version_id)},
+    )
+    rows = tree_result.mappings().all()
+
+    if not rows:
+        return None
 
     # ------------------------------------------------------------------
-    # Mock Data — 5계층 중첩 트리
+    # 3단계: 플랫 rows → children 중첩 트리 조립
     #
-    # 시나리오: NCM811 배터리 팩 100Ah
-    #   Tier 1 — Pack          : PACK-NCM811-100Ah    (원산지: KR)
-    #   Tier 2 — Module        : MOD-NCM811-10S4P     (원산지: KR)
-    #   Tier 3 — Cell          : CELL-NCM811-21700    (원산지: KR)
-    #   Tier 4 — 전구체         : PRE-NCM811-CAM       (원산지: KR)
-    #   Tier 5 — 광물(코발트)   : MIN-CO-DRC-001       (원산지: CD ← DRC, UFLPA 주의)
-    #   Tier 5 — 광물(니켈)     : MIN-NI-PH-001        (원산지: PH)
-    #   Tier 5 — 광물(리튬)     : MIN-LI-CL-001        (원산지: CL ← 칠레)
+    # 전략:
+    #   - 모든 row를 part_id 키의 노드 딕셔너리로 변환 (node_map)
+    #   - parent_part_id가 있으면 부모 노드의 children에 append
+    #   - parent_part_id가 None이면 루트 노드
     # ------------------------------------------------------------------
+    node_map: Dict[str, Dict[str, Any]] = {}
 
+    for row in rows:
+        node = {
+            "part_id":                str(row["part_id"]),
+            "part_code":              row["part_code"],
+            "part_name":              row["part_name"],
+            "tier_level":             row["tier_level"],
+            "parent_part_id":         str(row["parent_part_id"]) if row["parent_part_id"] else None,
+            "hs_code":                row["hs_code"],
+            "material_type":          row["material_type"],
+            "unit_price":             float(row["unit_price"]) if row["unit_price"] is not None else None,
+            "required_quantity":      float(row["required_quantity"]) if row["required_quantity"] is not None else None,
+            "required_quantity_unit": row["required_quantity_unit"],
+            "origin_country":         row["origin_country"],
+            "direct_material_cost":   float(row["direct_material_cost"]) if row["direct_material_cost"] is not None else None,
+            "children":               [],
+        }
+        node_map[str(row["part_id"])] = node
+
+    # 부모-자식 연결
+    root_node: Optional[Dict[str, Any]] = None
+
+    for node in node_map.values():
+        parent_id = node["parent_part_id"]
+        if parent_id and parent_id in node_map:
+            node_map[parent_id]["children"].append(node)
+        else:
+            root_node = node
+
+    if not root_node:
+        return None
+
+    # ------------------------------------------------------------------
+    # 최종 응답 조립
+    # ------------------------------------------------------------------
     return {
-        "product_id": str(product_id),
-        "product_code": "BAT-NCM811-100Ah",
-        "product_name": "NCM811 배터리 팩 100Ah",
-        "bom_version": "v1.0",
-        "bom_status": "active",
-        "tree": {
-            # --------------------------------------------------------
-            # Tier 1 — Pack
-            # --------------------------------------------------------
-            "part_id": "a1000000-0000-0000-0000-000000000001",
-            "part_code": "PACK-NCM811-100Ah",
-            "part_name": "NCM811 배터리 팩",
-            "tier_level": 1,
-            "parent_part_id": None,
-            "hs_code": "850760",
-            "material_type": None,
-            "unit_price": 850000.0,
-            "required_quantity": 1.0,
-            "required_quantity_unit": "개",
-            "origin_country": "KR",
-            "direct_material_cost": 720000.0,
-            "children": [
-                {
-                    # ------------------------------------------------
-                    # Tier 2 — Module
-                    # ------------------------------------------------
-                    "part_id": "a2000000-0000-0000-0000-000000000001",
-                    "part_code": "MOD-NCM811-10S4P",
-                    "part_name": "NCM811 모듈 10S4P",
-                    "tier_level": 2,
-                    "parent_part_id": "a1000000-0000-0000-0000-000000000001",
-                    "hs_code": "850760",
-                    "material_type": None,
-                    "unit_price": 180000.0,
-                    "required_quantity": 4.0,
-                    "required_quantity_unit": "개",
-                    "origin_country": "KR",
-                    "direct_material_cost": 152000.0,
-                    "children": [
-                        {
-                            # ----------------------------------------
-                            # Tier 3 — Cell
-                            # ----------------------------------------
-                            "part_id": "a3000000-0000-0000-0000-000000000001",
-                            "part_code": "CELL-NCM811-21700",
-                            "part_name": "NCM811 원통형 셀 21700",
-                            "tier_level": 3,
-                            "parent_part_id": "a2000000-0000-0000-0000-000000000001",
-                            "hs_code": "850760",
-                            "material_type": "NCM 811",
-                            "unit_price": 4200.0,
-                            "required_quantity": 40.0,
-                            "required_quantity_unit": "개",
-                            "origin_country": "KR",
-                            "direct_material_cost": 3800.0,
-                            "children": [
-                                {
-                                    # ------------------------------------
-                                    # Tier 4 — 전구체 (양극재)
-                                    # ------------------------------------
-                                    "part_id": "a4000000-0000-0000-0000-000000000001",
-                                    "part_code": "PRE-NCM811-CAM",
-                                    "part_name": "NCM811 양극재 전구체",
-                                    "tier_level": 4,
-                                    "parent_part_id": "a3000000-0000-0000-0000-000000000001",
-                                    "hs_code": "282739",
-                                    "material_type": "NCM 전구체",
-                                    "unit_price": 28000.0,
-                                    "required_quantity": 0.85,
-                                    "required_quantity_unit": "kg",
-                                    "origin_country": "KR",
-                                    "direct_material_cost": 25000.0,
-                                    "children": [
-                                        {
-                                            # --------------------------
-                                            # Tier 5 — 광물: 코발트
-                                            # origin_country = "CD" (콩고민주공화국)
-                                            # → Geo Audit Agent 고위험 지역 판정 대상
-                                            # → UFLPA 규제 모니터링 대상
-                                            # --------------------------
-                                            "part_id": "a5000000-0000-0000-0000-000000000001",
-                                            "part_code": "MIN-CO-DRC-001",
-                                            "part_name": "코발트 원광",
-                                            "tier_level": 5,
-                                            "parent_part_id": "a4000000-0000-0000-0000-000000000001",
-                                            "hs_code": "260500",
-                                            "material_type": "코발트",
-                                            "unit_price": 38000.0,
-                                            "required_quantity": 0.18,
-                                            "required_quantity_unit": "kg",
-                                            "origin_country": "CD",
-                                            "direct_material_cost": None,
-                                            "children": [],  # 터미널 노드
-                                        },
-                                        {
-                                            # --------------------------
-                                            # Tier 5 — 광물: 니켈
-                                            # origin_country = "PH" (필리핀)
-                                            # --------------------------
-                                            "part_id": "a5000000-0000-0000-0000-000000000002",
-                                            "part_code": "MIN-NI-PH-001",
-                                            "part_name": "니켈 원광",
-                                            "tier_level": 5,
-                                            "parent_part_id": "a4000000-0000-0000-0000-000000000001",
-                                            "hs_code": "260400",
-                                            "material_type": "니켈",
-                                            "unit_price": 21000.0,
-                                            "required_quantity": 0.08,
-                                            "required_quantity_unit": "kg",
-                                            "origin_country": "PH",
-                                            "direct_material_cost": None,
-                                            "children": [],  # 터미널 노드
-                                        },
-                                        {
-                                            # --------------------------
-                                            # Tier 5 — 광물: 리튬
-                                            # origin_country = "CL" (칠레)
-                                            # --------------------------
-                                            "part_id": "a5000000-0000-0000-0000-000000000003",
-                                            "part_code": "MIN-LI-CL-001",
-                                            "part_name": "리튬 원광",
-                                            "tier_level": 5,
-                                            "parent_part_id": "a4000000-0000-0000-0000-000000000001",
-                                            "hs_code": "260190",
-                                            "material_type": "리튬",
-                                            "unit_price": 15000.0,
-                                            "required_quantity": 0.07,
-                                            "required_quantity_unit": "kg",
-                                            "origin_country": "CL",
-                                            "direct_material_cost": None,
-                                            "children": [],  # 터미널 노드
-                                        },
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ],
-        },
+        "product_id":   str(product_row["product_id"]),
+        "product_code": product_row["product_code"],
+        "product_name": product_row["product_name"],
+        "bom_version":  product_row["version_number"],
+        "bom_status":   product_row["status"],
+        "tree":         root_node,
     }
-
-
-# =============================================================================
-# 로컬 단독 실행 테스트 (도커 불필요)
-# 실행: python backend/domains/product/crud.py
-# =============================================================================
-
-if __name__ == "__main__":
-    import json
-    from pprint import pprint
-    from uuid import uuid4
-
-    print("=" * 60)
-    print("  KIRA — get_bom_tree() Mock Stub 로컬 테스트")
-    print("=" * 60)
-
-    # 임시 product_id (실제 DB 없이 아무 UUID나 사용 가능)
-    test_product_id = uuid4()
-    print(f"\n▶ 입력 product_id : {test_product_id}\n")
-
-    result = get_bom_tree(product_id=test_product_id)
-
-    # ------------------------------------------------------------------
-    # 1) pprint — 딕셔너리 구조 확인
-    # ------------------------------------------------------------------
-    print("[ pprint 출력 ]")
-    pprint(result, width=100, sort_dicts=False)
-
-    # ------------------------------------------------------------------
-    # 2) JSON 직렬화 — 프론트엔드 전달 형태 확인
-    # ------------------------------------------------------------------
-    print("\n[ JSON 직렬화 출력 ]")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-    # ------------------------------------------------------------------
-    # 3) 간단한 구조 검증
-    # ------------------------------------------------------------------
-    print("\n[ 구조 검증 ]")
-
-    tree = result["tree"]
-    assert tree["tier_level"] == 1,          "루트는 tier_level=1 (Pack) 이어야 함"
-    assert tree["parent_part_id"] is None,   "루트의 parent_part_id는 None 이어야 함"
-
-    module = tree["children"][0]
-    assert module["tier_level"] == 2,        "2계층은 Module 이어야 함"
-
-    cell = module["children"][0]
-    assert cell["tier_level"] == 3,          "3계층은 Cell 이어야 함"
-
-    precursor = cell["children"][0]
-    assert precursor["tier_level"] == 4,     "4계층은 전구체 이어야 함"
-
-    minerals = precursor["children"]
-    assert len(minerals) == 3,               "광물 노드는 3개(Co/Ni/Li) 이어야 함"
-
-    for mineral in minerals:
-        assert mineral["tier_level"] == 5,   "5계층은 광물 이어야 함"
-        assert mineral["children"] == [],    "광물 노드는 터미널(children=[]) 이어야 함"
-        assert len(mineral["hs_code"]) >= 6, "HS Code는 6자리 이상 이어야 함"
-
-    # origin_country 확인 — 코발트는 CD (DRC 고위험 지역)
-    cobalt = next(m for m in minerals if m["part_code"] == "MIN-CO-DRC-001")
-    assert cobalt["origin_country"] == "CD", "코발트 원산지는 CD (콩고민주공화국) 이어야 함"
-
-    print("  ✅ 모든 검증 통과")
-    print(f"  ✅ 5계층 트리 구조 정상 (Pack→Module→Cell→전구체→광물)")
-    print(f"  ✅ 광물 노드 3개 모두 터미널 확인 (children=[])")
-    print(f"  ✅ HS Code 6자리 이상 확인")
-    print(f"  ✅ 코발트 원산지 CD (Geo Audit 고위험 지역 판정 대상) 확인")
-    print("\n  → DB 연결 후 이 Mock 블록을 재귀 CTE 쿼리로 교체하세요.")
-    print("=" * 60)
