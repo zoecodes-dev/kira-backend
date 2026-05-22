@@ -11,15 +11,17 @@
 #
 # 도메인 격리 원칙 (PROJECT_CORE.md 5-1):
 #   - 타 도메인 import 없음.
-#   - crud.py 하나만 참조.
+#   - crud.py와 infrastructure.database만 참조.
 # =============================================================================
 
 from typing import Any, Dict
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.infrastructure.database import get_db
 from backend.domains.product.crud import get_bom_tree
 
 router = APIRouter(tags=["Product"])
@@ -39,6 +41,10 @@ router = APIRouter(tags=["Product"])
 배터리 제품의 전체 자재명세서(BOM)를 **Pack → Module → Cell → 전구체 → 광물**
 5계층 중첩 JSON 구조로 반환합니다.
 
+### 조회 기준
+- 해당 제품의 `status = 'active'` BOM 버전을 기준으로 조회합니다.
+- active BOM 버전이 없는 제품은 **404**를 반환합니다.
+
 ### 반환 구조
 ```
 {
@@ -56,7 +62,6 @@ router = APIRouter(tags=["Product"])
           "tier_level": 4,  ← 전구체
           "children": [
             { "tier_level": 5, "children": [] },  ← 광물 (터미널)
-            ...
           ]
         }]
       }]
@@ -74,10 +79,6 @@ router = APIRouter(tags=["Product"])
 | `origin_country` | bom_items | 원산지 국가 코드 ISO 3166-1 alpha-2 |
 | `required_quantity` | bom_items | 소요 수량 |
 | `direct_material_cost` | bom_items | 직접재료비 (RVC 계산용) |
-
-### ⚠️ 현재 구현 상태
-현재는 **Mock Stub** 단계입니다. DB 연결 없이 하드코딩된 샘플 데이터를 반환합니다.
-실제 DB 재귀 CTE 쿼리 연결은 인프라 레이어 완성 후 `crud.py`에서 교체됩니다.
 """,
     response_description="5계층 중첩 BOM 트리 JSON",
     responses={
@@ -99,6 +100,16 @@ router = APIRouter(tags=["Product"])
                             "origin_country": "KR",
                             "children": ["..."]
                         }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "제품 또는 active BOM 버전 없음",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "제품 또는 active BOM을 찾을 수 없습니다."
                     }
                 }
             }
@@ -127,13 +138,20 @@ async def get_product_bom_tree(
         description="조회할 제품의 UUID. 예: `550e8400-e29b-41d4-a716-446655440000`",
         example="550e8400-e29b-41d4-a716-446655440000",
     ),
+    db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     product_id에 해당하는 제품의 5계층 BOM 트리를 반환한다.
 
-    [현재 상태 — Mock Stub]
-    product_id 수신 후 crud.get_bom_tree()에 위임.
-    실제 DB 조회는 crud.py 교체 후 자동 반영되며 이 함수는 변경 불필요.
+    - crud.get_bom_tree()에 db 세션과 product_id를 위임.
+    - 결과가 None이면 404 반환.
     """
-    result = get_bom_tree(product_id=product_id)
+    result = await get_bom_tree(db=db, product_id=product_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="제품 또는 active BOM을 찾을 수 없습니다.",
+        )
+
     return result
