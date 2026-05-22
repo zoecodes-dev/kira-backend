@@ -11,11 +11,12 @@ Queue 이름 6종: ocr / validation / risk / hitl / notification / dpp_publish
 Retry: 지수 백오프, 최대 3회. 3회 실패 시 dead_letter_queue.
 Idempotency: 각 작업 함수는 동일 인자로 두 번 호출돼도 같은 결과를 내야 한다.
 """
-import os
 from typing import Optional
 
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
+
+from backend.core.config import config
 
 # ----- Queue 이름 상수 (스펙 1-3) -----
 OCR_QUEUE = "ocr_queue"
@@ -35,8 +36,6 @@ QUEUE_NAMES = {
     DPP_PUBLISH_QUEUE,
 }
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-
 _redis_pool: Optional[ArqRedis] = None
 
 
@@ -44,7 +43,7 @@ async def get_redis_pool() -> ArqRedis:
     """ARQ Redis 풀 싱글톤."""
     global _redis_pool
     if _redis_pool is None:
-        _redis_pool = await create_pool(RedisSettings.from_dsn(REDIS_URL))
+        _redis_pool = await create_pool(RedisSettings.from_dsn(config.REDIS_URL))
     return _redis_pool
 
 
