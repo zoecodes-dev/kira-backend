@@ -6,8 +6,8 @@ from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, NUM
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
-from infrastructure.database import Base
-from infrastructure.trace import trace_node
+from backend.infrastructure.database import Base
+from backend.infrastructure.trace import trace_node
 
 # ============================================================
 # 영역 2. 협력사 마스터 및 CTI 상세
@@ -40,14 +40,15 @@ class Supplier(Base):
     feoc_status: Mapped[str] = mapped_column(String(20), default="unknown")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
+    
     # CTI Relationships
     manufacturer_detail = relationship("SupplierManufacturerDetail", back_populates="supplier", uselist=False)
     recycler_detail = relationship("SupplierRecyclerDetail", back_populates="supplier", uselist=False)
     trader_detail = relationship("SupplierTraderDetail", back_populates="supplier", uselist=False)
     miner_detail = relationship("SupplierMinerDetail", back_populates="supplier", uselist=False)
     factories = relationship("SupplierFactory", back_populates="supplier")
-
+    parent_supplier = relationship("Supplier", remote_side=[supplier_id], back_populates="child_suppliers")
+    child_suppliers = relationship("Supplier", back_populates="parent_supplier")
 
 class SupplierFactory(Base):
     __tablename__ = "supplier_factories"
