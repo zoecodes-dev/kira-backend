@@ -15,44 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.database import get_db
 from backend.domains.supplier import service
+# 스키마 클래스들을 models 내부 하단에서 안전하게 import
+from backend.domains.supplier.models import (
+    SupplierCreateRequest,
+    SupplierBrief,
+    RiskProfileResponse,
+    RiskScoreUpdateRequest
+)
 
 router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
 
-
-# ── 요청/응답 스키마 ────────────────────────────────────────
-class SupplierCreateRequest(BaseModel):
-    tenant_id: UUID
-    company_name: str
-    supplier_type: str
-    email: str
-
-
-class SupplierBrief(BaseModel):
-    """
-    목록·단건 응답용 직렬화 스키마.
-    ORM 객체를 그대로 반환하면 CTI relationship lazy load에서 직렬화 에러가
-    날 수 있으므로, 명시적 스키마로 변환해 반환한다(직렬화 안전).
-    from_attributes=True 로 ORM 인스턴스에서 바로 만든다.
-    """
-    supplier_id: UUID
-    company_name: str
-    supplier_type: str
-    tier: Optional[int] = None
-    status: str
-    risk_level: str
-
-    model_config = {"from_attributes": True}
-
-class RiskProfileResponse(BaseModel):
-    supplier_id: UUID
-    overall_risk_score: int
-    risk_level: str
-    feoc_status: str
- 
-    model_config = {"from_attributes": True}
- 
-class RiskScoreUpdateRequest(BaseModel):
-    score: int  # 0~100, 높을수록 위험
 
 @router.post("", status_code=201)
 async def create_supplier_endpoint(
@@ -68,7 +40,7 @@ async def create_supplier_endpoint(
     supplier = await service.create_supplier_and_invite(
         db, supplier_data, request.email
     )
-    # ★ 여기서 db.commit() 하지 않는다 — service가 이미 커밋했다.
+    # ★ 여기서 db.commit() 하지 않는다 — service가 이미 커밋
     return {"supplier_id": supplier.supplier_id, "status": supplier.status}
 
 
@@ -98,10 +70,6 @@ async def list_suppliers_endpoint(
     return await service.list_suppliers(
         db, status, tier, risk_level, feoc_status, page, size
     )
- 
-  
-
- 
  
 @router.get("/{supplier_id}/risk-profile", response_model=RiskProfileResponse)
 async def get_risk_profile_endpoint(

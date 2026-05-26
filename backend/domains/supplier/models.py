@@ -2,6 +2,7 @@ from datetime import datetime
 import uuid
 from typing import Optional, Dict, Any
 from geoalchemy2 import Geometry
+from pydantic import BaseModel, Field
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, NUMERIC
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -10,7 +11,11 @@ from backend.infrastructure.database import Base
 from backend.infrastructure.trace import trace_node
 
 # ============================================================
-# 영역 2. 협력사 마스터 및 CTI 상세
+# [1] SQLAlchemy ORM 모델 영역
+# ============================================================
+
+# ============================================================
+# 협력사 마스터 및 CTI 상세
 # ============================================================
 
 class Supplier(Base):
@@ -105,7 +110,7 @@ class SupplierMinerDetail(Base):
     supplier = relationship("Supplier", back_populates="miner_detail")
 
 # ============================================================
-# 영역 4. 협력사 리스크 프로필  ← models.py 하단(깡통 함수 위)에 추가
+# 협력사 리스크 프로필
 # ============================================================
 
 class SupplierRiskProfile(Base):
@@ -139,7 +144,48 @@ class SupplierRiskProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 # ============================================================
-# 검증용 깡통 함수
+# [2] Pydantic 입출력 스키마(DTO) 영역
+# ============================================================
+
+class SupplierCreateRequest(BaseModel):
+    tenant_id: uuid.UUID
+    company_name: str
+    supplier_type: str
+    email: str
+
+
+class SupplierBrief(BaseModel):
+    """
+    목록·단건 응답용 직렬화 스키마.
+    ORM 객체를 그대로 반환하면 CTI relationship lazy load에서 직렬화 에러가
+    날 수 있으므로, 명시적 스키마로 변환해 반환한다(직렬화 안전).
+    from_attributes=True 로 ORM 인스턴스에서 바로 만든다.
+    """
+    supplier_id: uuid.UUID
+    company_name: str
+    supplier_type: str
+    tier: Optional[int] = None
+    status: str
+    risk_level: str
+
+    model_config = {"from_attributes": True}
+
+
+class RiskProfileResponse(BaseModel):
+    supplier_id: uuid.UUID
+    overall_risk_score: int
+    risk_level: str
+    feoc_status: Optional[str] = "unknown"  # Optional 안전 가드 추가
+
+    model_config = {"from_attributes": True}
+
+
+class RiskScoreUpdateRequest(BaseModel):
+    score: int
+
+
+# ============================================================
+# [3] 검증용 파이프라인 깡통 함수
 # ============================================================
 
 @trace_node(node_name="create_supplier_onboarding", node_type="agent")
