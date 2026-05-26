@@ -60,6 +60,17 @@ async def create_supplier_and_invite(
     # 1) DB 변경
     supplier = await repository.create_supplier(db, supplier_data)
 
+    # 기본 리스크 프로필 함께 초기화
+    # 협력사 생성 시점에 빈 프로필을 미리 만들어 두어 조회 시 값이 없는 현상을 방지합니다.
+    default_profile = SupplierRiskProfile(
+        supplier_id=supplier.supplier_id,
+        overall_risk_score=0,
+        risk_level="low",
+        feoc_status="unknown",
+        is_high_risk_flag=False
+    )
+    db.add(default_profile)
+
     # 2) 커밋 — 영속화 확정 (repository가 커밋하지 않는다는 전제로 service가 책임진다)
     await db.commit()
     await db.refresh(supplier)  # DB가 채운 기본값(생성 시각·기본 status 등) 반영
