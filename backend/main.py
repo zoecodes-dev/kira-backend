@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from backend.infrastructure.database import verify_extensions
 from backend.domains.supplychain.router import router as supplychain_router
+from backend.domains.submission.router import router as submission_router
 
 
 @asynccontextmanager
@@ -28,6 +29,7 @@ app = FastAPI(
 
 # 도메인 라우터 등록 (도메인 추가 시 여기에 include)
 app.include_router(supplychain_router)
+app.include_router(submission_router)
 
 
 @app.get("/health")
