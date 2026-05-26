@@ -16,8 +16,6 @@ from backend.events.types import (
     SubmissionRequestedEvent,
     SubmissionStartedEvent,
     SubmissionCompletedEvent,
-    SubmissionApprovedEvent,
-    SubmissionRejectedEvent,
     ValidationStartedEvent,
     ValidationFailedEvent,
     ValidationCompletedEvent,
@@ -63,7 +61,6 @@ async def create_and_request_submission(
             reason="최초 공급망 데이터 제출 요청 생성"
         )
         await db.commit()
-        await db.refresh(req_log)
     except IntegrityError as e:
         await db.rollback()
         raise ValueError("참조 무결성 위반: 존재하지 않는 협력사 또는 사용자 ID입니다.") from e
@@ -136,7 +133,6 @@ async def update_submission_status(
             batch_id=batch_id
         )
         await db.commit()
-        await db.refresh(req_log)
     except Exception:
         await db.rollback()
         raise
@@ -149,14 +145,6 @@ async def update_submission_status(
     elif to_status == SubmissionStatus.SUBMITTED and req_log:
         await publish("SubmissionCompleted", asdict(SubmissionCompletedEvent(
             request_id=request_id, batch_id=batch_id, file_urls=file_urls or []
-        )))
-    elif to_status == SubmissionStatus.APPROVED and req_log:
-        await publish("SubmissionApproved", asdict(SubmissionApprovedEvent(
-            request_id=request_id, supplier_id=req_log.target_supplier_id
-        )))
-    elif to_status == SubmissionStatus.REJECTED and req_log:
-        await publish("SubmissionRejected", asdict(SubmissionRejectedEvent(
-            request_id=request_id, supplier_id=req_log.target_supplier_id, reason=reason
         )))
 
     return req_log

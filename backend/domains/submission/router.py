@@ -1,57 +1,20 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.database import get_db
-from backend.domains.submission.models import SubmissionStatus
+from backend.domains.submission.models import (
+    SubmissionStatus,
+    DataRequestCreateRequest,
+    DataRequestResponse,
+    DataRequestStatusUpdateRequest
+)
 from backend.domains.submission.service import create_and_request_submission, get_submission_detail, update_submission_status, get_submissions_list
 
 router = APIRouter(prefix="/data-requests", tags=["Submission"])
-
-class DataRequestCreateRequest(BaseModel):
-    """
-    [DTO] POST /data-requests 요청 Payload 스키마.
-    클라이언트(또는 다른 서비스)가 새로운 데이터 제출을 요청할 때 전달해야 하는 최소 필수 데이터입니다.
-    """
-    requester_user_id: uuid.UUID
-    target_supplier_id: uuid.UUID
-    requested_data_type: str
-    due_date: datetime
-    actor_id: uuid.UUID
-
-class DataRequestResponse(BaseModel):
-    """
-    [DTO] API 응답용 스키마.
-    ORM 모델인 DataRequestLog를 직렬화하여 클라이언트에게 안전하게 반환합니다.
-    from_attributes = True 설정을 통해 SQLAlchemy 객체에서 바로 값을 읽어올 수 있습니다.
-    """
-    request_id: uuid.UUID
-    requester_user_id: Optional[uuid.UUID] = None
-    target_supplier_id: Optional[uuid.UUID] = None
-    requested_data_type: Optional[str] = None
-    requested_at: Optional[datetime] = None
-    due_date: Optional[datetime] = None
-    response_status: Optional[str] = None
-    submission_status: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-class DataRequestStatusUpdateRequest(BaseModel):
-    """
-    [DTO] PATCH /data-requests/{id}/status 요청 Payload 스키마.
-    상태 변경에 필요한 목표 상태(to_status)와 감사 기록용 주체(actor_id)를 받습니다.
-    SUBMITTED 상태 등 특정 상태로 전이될 때 필요한 부가 정보(batch_id, file_urls 등)도 함께 수신합니다.
-    """
-    to_status: SubmissionStatus
-    actor_id: uuid.UUID
-    reason: Optional[str] = None
-    batch_id: Optional[str] = None
-    file_urls: Optional[List[str]] = None
 
 @router.get("", response_model=List[DataRequestResponse])
 async def list_data_requests_endpoint(
