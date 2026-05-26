@@ -30,7 +30,7 @@ async def transition_submission(
     if not log_record:
         raise ValueError("Data request not found")
         
-    current_status = log_record.submission_status or SubmissionStatus.PENDING
+    current_status = log_record.submission_status
     allowed_transitions = SUBMISSION_TRANSITIONS.get(current_status, [])
     
     if to_status not in allowed_transitions:
@@ -58,7 +58,7 @@ async def transition_submission(
 
     event = SubmissionStatusChangedEvent(
         request_id=request_id,
-        old_status=current_status.value,
+        old_status=current_status.value if current_status else None,
         new_status=to_status.value
     )
     # db 객체를 넘기지 않는 2-인자 인프라 호출 스펙 엄수
