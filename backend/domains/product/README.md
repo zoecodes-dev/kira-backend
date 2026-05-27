@@ -1,7 +1,7 @@
 # Product Domain — 설계 명세서
 
 > **담당**: 팀원 C (Product Domain)
-> **최종 수정**: 2026-05-26 (W2 화·수 작업 반영)
+> **최종 수정**: 2026-05-27 (W2 화·수·목 작업 반영)
 > **참조**: `PROJECT_CORE.md` 4-2절 / `schema.sql` 영역 7
 
 ---
@@ -595,6 +595,96 @@ product_id 자체가 없는 경우 (404):
 | `GET /products` | 없음 | `products` 테이블 SELECT (읽기 전용) |
 | `GET /products/{id}` | 없음 | `products` 테이블 SELECT (읽기 전용) |
 | `GET /products/{id}/bom` | 없음 | `products` + `bom_versions` + `parts` + `bom_items` SELECT (읽기 전용) |
+
+---
+
+## 11. W2 자가검증 4종 (목)
+
+### ① 계약 위반 스캔 결과
+
+**seed SQL 파일**
+
+| 항목 | 결과 |
+|---|---|
+| `embedding_status` 허용값 | ✅ `'pending'` — schema.sql 허용값 `pending` / `indexed` 일치 |
+| ORM/쿼리 컬럼명 schema 일치 | ✅ 위반 0 |
+
+**전체 위반 0**
+
+---
+
+### ② schema 컬럼 대조표
+
+**`regulations` 테이블 (시드 파일 사용 컬럼)**
+
+| 내 코드 컬럼 | schema.sql 컬럼 | 일치 |
+|---|---|---|
+| `regulation_id` | `regulation_id UUID PK` | ✅ |
+| `name` | `name VARCHAR(255)` | ✅ |
+| `regulation_code` | `regulation_code VARCHAR(50)` | ✅ |
+| `region` | `region VARCHAR(10)` | ✅ |
+| `description` | `description TEXT` | ✅ |
+| `version` | `version VARCHAR(50)` | ✅ |
+| `effective_from` | `effective_from DATE` | ✅ |
+| `document_s3_url` | `document_s3_url TEXT` | ✅ |
+| `embedding_status` | `embedding_status VARCHAR(20) DEFAULT 'pending'` | ✅ |
+| `embedding` | `embedding vector(1536)` | ✅ |
+
+**불일치 0건 확인**
+
+---
+
+### ③ 동작 시나리오
+
+이 작업은 API 엔드포인트가 아니라 **DB 초기화 시 실행되는 SQL 시드 파일**입니다. curl 시나리오 대신 적재 확인 쿼리로 대체합니다.
+
+**적재 실행**
+```bash
+# docker compose 환경에서 자동 실행 (docker/ 경로)
+# 또는 수동 실행
+psql -U $POSTGRES_USER -d $POSTGRES_DB -f docker/03_seed_regulations.sql
+psql -U $POSTGRES_USER -d $POSTGRES_DB -f docker/04_seed_regulations_index.sql
+```
+
+**적재 확인 쿼리**
+```sql
+SELECT regulation_code, region, effective_from, embedding_status
+FROM regulations
+ORDER BY region, regulation_code;
+```
+
+예상 결과:
+```
+ regulation_code   | region | effective_from | embedding_status
+-------------------+--------+----------------+------------------
+ CBAM              | EU     | 2026-01-01     | pending
+ CONFLICT_MINERALS | EU     | 2021-01-01     | pending
+ CRMA              | EU     | 2024-05-23     | pending
+ CSDDD             | EU     | 2024-07-25     | pending
+ EU_BATTERY        | EU     | 2023-08-17     | pending
+ EU_BATTERY_ART7   | EU     | 2024-07-18     | pending
+ EU_BATTERY_ART47  | EU     | 2023-08-17     | pending
+ EUDR              | EU     | 2023-06-29     | pending
+ EUDR_FSC          | EU     | 2023-06-29     | pending
+ IRA               | US     | 2024-01-01     | pending
+ UFLPA             | US     | 2022-06-21     | pending
+(11 rows)
+```
+
+> 시드 적재 → 이벤트 없음 → `regulations` 테이블에 11개 row INSERT
+
+---
+
+### ④ 누락 점검 결과
+
+| 체크 항목 | 결과 |
+|---|---|
+| 시드 중복 적재 방지 | ✅ `regulation_code` UNIQUE 제약 + `docker/` 최초 1회 실행 |
+| pgvector 인덱스 중복 생성 방지 | ✅ `IF NOT EXISTS` 옵션 적용 |
+| `uuid_generate_v4()` 함수 사용 가능 여부 | ✅ schema.sql에 `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` 포함 확인 |
+| 파일 실행 순서 보장 | ✅ `03_` → `04_` 숫자 순 정렬로 적재 후 인덱스 생성 순서 보장 |
+
+**누락 0**
 
 ---
 
