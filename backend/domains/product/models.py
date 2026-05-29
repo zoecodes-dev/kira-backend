@@ -164,6 +164,7 @@ class Product(Base):
     # ------------------------------------------------------------------
     source_system = Column(
         String(50),
+        String(100),
         nullable=True,
         comment=(
             "[결정 #1] 데이터 출처 식별자. "
@@ -174,6 +175,7 @@ class Product(Base):
 
     external_id = Column(
         String(100),
+        String(255),
         nullable=True,
         comment=(
             "[결정 #1] 원천 시스템의 원본 PK(문자열 변환). "
@@ -344,6 +346,7 @@ class BomVersion(Base):
     # ------------------------------------------------------------------
     source_system = Column(
         String(50),
+        String(100),
         nullable=True,
         comment=(
             "[결정 #1] 데이터 출처 식별자. "
@@ -354,6 +357,7 @@ class BomVersion(Base):
 
     external_id = Column(
         String(100),
+        String(255),
         nullable=True,
         comment=(
             "[결정 #1] 원천 시스템의 원본 BOM PK(문자열). "
@@ -417,9 +421,9 @@ class Part(Base):
     [FTA 필수 조건]
     hs_code 6자리 이상 필수. Service 레이어에서 6자리 미만 입력 시 422 반환.
 
-    [결정 #1 비적용]
-    parts는 결정 #1 일괄수정 대상(products/bom_versions/batches)에 포함되지 않음.
-    source_system 컬럼 추가하지 않음.
+    [결정 #1 반영 — schema.sql 업데이트로 parts도 대상에 포함됨]
+    schema.sql L436~438 "결정 #1 누락 정형화" 주석과 함께 3컬럼 추가됨.
+    source_system / external_id / synced_at — products/bom_versions/bom_items와 동일 패턴.
     """
 
     __tablename__ = "parts"
@@ -508,6 +512,38 @@ class Part(Base):
         TIMESTAMP(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+    # ------------------------------------------------------------------
+    # [결정 #1] 외부 원천 추적 컬럼 3종
+    # schema.sql L436~438 "결정 #1 누락 정형화" 반영
+    # ------------------------------------------------------------------
+    source_system = Column(
+        String(100),
+        nullable=True,
+        server_default="ERP_PLM",
+        comment=(
+            "[결정 #1] 데이터 출처 식별자. "
+            "허용값: 'ERP_PLM'(기본) / 'SEED'(시연). "
+            "schema DEFAULT 'ERP_PLM' 과 일치."
+        ),
+    )
+
+    external_id = Column(
+        String(255),
+        nullable=True,
+        comment=(
+            "[결정 #1] 원천 시스템의 원본 Part PK(문자열). "
+            "원천 row와 1:1 추적용."
+        ),
+    )
+
+    synced_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment=(
+            "[결정 #1] 이 시스템에 마지막으로 동기화된 UTC 시각. "
+            "fetch_from_source() 호출 시 datetime.now(timezone.utc) 로 갱신."
+        ),
     )
 
     # 자기참조 Relationships
@@ -618,6 +654,34 @@ class BomItem(Base):
         comment="원산지 국가 코드 (ISO 3166-1 alpha-2). FTA 원산지 기준 판정 입력값.",
     )
 
+    # ------------------------------------------------------------------
+    # [결정 #1] 외부 원천 추적 컬럼 3종
+    # schema.sql L454~457 "결정 #1 누락 정형화" 반영
+    # ------------------------------------------------------------------
+    source_system = Column(
+        String(100),
+        nullable=True,
+        server_default="ERP_PLM",
+        comment=(
+            "[결정 #1] 데이터 출처 식별자. "
+            "schema DEFAULT 'ERP_PLM' 과 일치."
+        ),
+    )
+
+    external_id = Column(
+        String(255),
+        nullable=True,
+        comment="[결정 #1] 원천 시스템의 원본 BomItem PK(문자열).",
+    )
+
+    synced_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment=(
+            "[결정 #1] 이 시스템에 마지막으로 동기화된 UTC 시각."
+        ),
+    )    
+    
     bom_version: Mapped["BomVersion"] = relationship(
         "BomVersion",
         back_populates="bom_items",
