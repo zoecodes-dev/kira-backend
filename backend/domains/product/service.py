@@ -89,7 +89,11 @@ async def import_products(
     [이벤트 발행 순서 — 결정 #1]
         각 제품마다:
           1. BOMImported  — bom_version ingest 완료
-          2. LotImported  — batch(Lot) ingest 완료  ※ W2는 products 중심, Lot은 자리만
+          2. LotImported  — batch(Lot) ingest 완료
+             ※ W2: batch_id=None 플레이스홀더. W3 batch ingest 구현 시 반드시 처리:
+                   - batches 레코드 생성 후 실제 batch_id 주입
+                   - batches.source_system = 'MES' (schema DEFAULT와 일치)
+                   - batches.external_id, synced_at 세팅 필수
           3. ProductImported — 제품 전체 ingest 완료 (마지막)
 
         ProductImported를 마지막에 발행하는 이유:
@@ -126,8 +130,10 @@ async def import_products(
 
         # 2. LotImported
         lot_event = LotImportedEvent(
-            batch_id=None,       
-            product_id=product.product_id,
+            batch_id=None,  # TODO(W3): repo.create_batch() 호출 후 실제 batch_id로 교체.   
+                            # batches.source_system='MES', external_id, synced_at 세팅 필수.
+                            # schema.sql batches 테이블 DEFAULT 'MES' 참조.               
+            product_id=product.product_id, 
             external_id=product.external_id,
         )
         await publish(
