@@ -8,11 +8,11 @@ payload는 JSON 직렬화 가능해야 하며, event_bus.publish(event_name, pay
 넣을 dict는 dataclasses.asdict()로 변환해 전달한다.
 
 출처:
-- spec 7장 본문/표: Product, Supplier, Submission, Validation, Risk,
+- spec 7장 본문/표: Product, Supplier, Submission, Verification, Risk,
   GeoRiskDetected, ComplianceCompleted, HITL, DPP
 - backend_md_additions I·E-1절: RiskProfileUpdated, FactoryRegulationChanged,
   SubmissionStatusChanged, OriginCertExpiring, TrainingOverdue
-- 폴더명은 verification/ 이지만 이벤트는 Validation* 이다 (spec 7장 기준).
+- 폴더·큐·도메인·state·이벤트 전부 verification으로 통일 (events/types.py 기준).
 """
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,24 +27,27 @@ def _now_utc() -> datetime:
 # Product (C)
 # ============================================================
 @dataclass
-class ProductCreatedEvent:
+class ProductImportedEvent:
     product_id: Optional[UUID] = None
-    event_name: str = "ProductCreated"
+    external_id: Optional[str] = None   # 원천 ERP/PLM 식별자
+    event_name: str = "ProductImported"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 @dataclass
-class LotCreatedEvent:
-    lot_id: Optional[UUID] = None
+class LotImportedEvent:
+    batch_id: Optional[UUID] = None
     product_id: Optional[UUID] = None
-    event_name: str = "LotCreated"
+    external_id: Optional[str] = None   # 원천 MES 식별자
+    event_name: str = "LotImported"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
 @dataclass
-class BOMMappedEvent:
+class BOMImportedEvent:
     product_id: Optional[UUID] = None
     bom_version_id: Optional[UUID] = None
-    event_name: str = "BOMMapped"
+    external_id: Optional[str] = None   # 원천 PLM 식별자
+    event_name: str = "BOMImported"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
@@ -71,7 +74,8 @@ class SupplierConnectedEvent:
 @dataclass
 class SupplierStatusChangedEvent:
     supplier_id: Optional[UUID] = None
-    new_status: Optional[str] = None
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
     event_name: str = "SupplierStatusChanged"
     occurred_at: datetime = field(default_factory=_now_utc)
 
@@ -126,7 +130,9 @@ class SubmissionStartedEvent:
 class SubmissionCompletedEvent:
     request_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
-    file_urls: list = field(default_factory=list)
+    submission_mode: str = "file"       # 'file' | 'form' — 폼 직접입력(파일 없음) 케이스 수용 (#9-B/#3)
+    file_urls: list = field(default_factory=list)        # submission_mode='file'일 때
+    confirmed_fields: dict = field(default_factory=dict) # 협력사가 AI 파싱결과를 확정한 필드 (#3 확인 루프)
     event_name: str = "SubmissionCompleted"
     occurred_at: datetime = field(default_factory=_now_utc)
 
@@ -155,36 +161,36 @@ class SubmissionStatusChangedEvent:
     발행: E → 수신: Audit, Notification
     """
     request_id: Optional[UUID] = None
-    old_status: Optional[str] = None
-    new_status: Optional[str] = None
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
     event_name: str = "SubmissionStatusChanged"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
 # ============================================================
-# Validation (E) — 폴더는 verification/, 이벤트는 Validation*
+# Verification (E) — 폴더·큐·도메인·state·이벤트 모두 verification
 # ============================================================
 @dataclass
-class ValidationStartedEvent:
+class VerificationStartedEvent:
     batch_id: Optional[UUID] = None
     rules_applied: list = field(default_factory=list)
-    event_name: str = "ValidationStarted"
+    event_name: str = "VerificationStarted"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
 @dataclass
-class ValidationFailedEvent:
+class VerificationFailedEvent:
     batch_id: Optional[UUID] = None
     violated_rules: list = field(default_factory=list)
-    event_name: str = "ValidationFailed"
+    event_name: str = "VerificationFailed"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
 @dataclass
-class ValidationCompletedEvent:
+class VerificationCompletedEvent:
     batch_id: Optional[UUID] = None
     results: list = field(default_factory=list)
-    event_name: str = "ValidationCompleted"
+    event_name: str = "VerificationCompleted"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
@@ -260,14 +266,15 @@ class HITLRequestedEvent:
 
 @dataclass
 class HITLAssignedEvent:
+    review_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
     reviewer_id: Optional[UUID] = None
     event_name: str = "HITLAssigned"
-    occurred_at: datetime = field(default_factory=_now_utc)
 
 
 @dataclass
 class HITLApprovedEvent:
+    review_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
     reviewer_id: Optional[UUID] = None
     note: Optional[str] = None
@@ -277,6 +284,7 @@ class HITLApprovedEvent:
 
 @dataclass
 class HITLRejectedEvent:
+    review_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
     reviewer_id: Optional[UUID] = None
     reason: Optional[str] = None
@@ -314,7 +322,7 @@ class OriginCertExpiringEvent:
     조건: expires_at < now() + 30일
     발행: B(스케줄러) → 수신: E(Readiness 재계산), Notification
     """
-    certificate_id: Optional[UUID] = None
+    cert_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
     expires_at: Optional[datetime] = None
     event_name: str = "OriginCertExpiring"
@@ -331,7 +339,7 @@ class TrainingOverdueEvent:
     조건: due_date < now() AND status != completed
     발행: B(스케줄러) → 수신: Notification
     """
-    training_id: Optional[UUID] = None
+    record_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
     due_date: Optional[datetime] = None
     event_name: str = "TrainingOverdue"
