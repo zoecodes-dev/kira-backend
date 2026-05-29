@@ -37,7 +37,7 @@ app.include_router(submission_router)
 app.include_router(verification_router)
 
 app.include_router(supplier_router)
-app.include_router(product_router, prefix="/api/v1/products")
+app.include_router(product_router)
 app.include_router(audit_router)
 
 @app.get("/health")
