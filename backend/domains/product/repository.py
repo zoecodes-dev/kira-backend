@@ -237,14 +237,14 @@ class ProductRepository:
         [파라미터]
         only_confirmed : bool = True
             [결정 #2] supply_chain_map.link_status 필터 스위치.
-            True  → link_status = 'confirmed' 노드만 포함 (기본값, 운영 화면용).
-            False → pending 포함 전체 트리 (공급망 맵 전체 뷰용).
+            
+            True  → link_status = 'supplychain_confirmed' 노드만 포함 (기본값, 운영 화면용).
+            False → 'supplychain_declared' 포함 전체 트리 (공급망 맵 전체 뷰용).
 
-            ⚠️ 현재 schema.sql의 supply_chain_map에 link_status 컬럼이 없음.
-               결정 #2 일괄수정(schema migration) 완료 후 아래 주석 처리된
-               link_status 필터를 해제한다.
-               그 전까지는 only_confirmed 파라미터를 받되 필터는 미적용.
-
+            schema.sql migration 완료 — supply_chain_map.link_status 컬럼 존재 확인.
+            허용값: 'supplychain_declared' / 'supplychain_confirmed' (chk_link_status).
+            필터 활성화 완료 (L317~323 주석 해제).
+            
         [쿼리 전략]
         1단계 — products + bom_versions 조회
             product_id로 제품 정보와 active BOM 버전을 가져온다.
@@ -300,29 +300,26 @@ class ProductRepository:
         # 2단계: WITH RECURSIVE CTE — 전 계층 플랫 조회
         #
         # [결정 #2] only_confirmed 필터:
-        #   schema migration 완료 후 아래 supply_chain_map LEFT JOIN 블록의
-        #   주석을 해제하고 link_status_filter 조건을 활성화한다.
-        #
-        #   활성화 방법:
-        #     1. supply_chain_map LEFT JOIN 주석 해제
-        #     2. WHERE 절에 link_status_filter 조건 추가:
-        #        AND (scm.link_status = 'confirmed' OR scm.map_id IS NULL)
-        #        -- scm.map_id IS NULL: supply_chain_map에 매핑 없는 부품도 포함
+        #   schema migration 완료. link_status 필터 활성화.
+        #   허용값 주의: schema chk_link_status 기준
+        #     'supplychain_confirmed' (confirmed 상태)
+        #     'supplychain_declared'  (선언만 된 상태, unconfirmed)        
         #
         # [depth 상한]
         #   depth < 5 조건 필수 — parts 자기참조 순환 참조 방어.
         #   5계층(Pack=0 ~ 광물=4) 초과는 데이터 오염으로 간주.
         # ------------------------------------------------------------------
+        # [결정 #2] link_status 필터 문자열 생성
+        # scm.map_id IS NULL 조건: supply_chain_map에 매핑이 없는 부품(직접 BOM 항목)도 포함.
+        # 허용값은 schema chk_link_status 그대로 사용 ('supplychain_confirmed').
+        link_status_filter = (
+            "AND (scm.link_status = 'supplychain_confirmed' OR scm.map_id IS NULL)"
+            if only_confirmed
+            else ""
+        )
+        
 
-        # only_confirmed 파라미터 로깅 (schema migration 후 실제 필터로 교체)
-        # TODO: schema migration 완료 시 아래 link_status_filter 주석 해제
-        # link_status_filter = (
-        #     "AND (scm.link_status = 'confirmed' OR scm.map_id IS NULL)"
-        #     if only_confirmed
-        #     else ""
-        # )
-
-        recursive_query = text("""
+        recursive_query = text(f"""
             WITH RECURSIVE bom_tree AS (
 
                 -- 앵커: 루트 부품 (parent_part_id IS NULL, depth=0)
@@ -344,7 +341,11 @@ class ProductRepository:
                 JOIN bom_items bi
                     ON bi.part_id        = p.part_id
                    AND bi.bom_version_id = :bom_version_id
+                LEFT JOIN supply_chain_map scm
+                    ON scm.part_id        = p.part_id   
+                   AND scm.bom_version_id = :bom_version_id 
                 WHERE p.parent_part_id IS NULL
+                  {link_status_filter}  
 
                 UNION ALL
 
@@ -367,14 +368,20 @@ class ProductRepository:
                 JOIN bom_items bi
                     ON bi.part_id        = p.part_id
                    AND bi.bom_version_id = :bom_version_id
+                LEFT JOIN supply_chain_map scm
+                    ON scm.part_id        = p.part_id
++                  AND scm.bom_version_id = :bom_version_id   
                 JOIN bom_tree bt
                     ON p.parent_part_id  = bt.part_id
                 WHERE bt.depth < 5
+                  {link_status_filter}  
 
             )
             SELECT * FROM bom_tree
             ORDER BY depth, tier_level, part_code
-        """)
+        
+        """) # f-string: link_status_filter가 빌드 타임에 삽입됨. SQL Injection 위험 없음
+            # (link_status_filter는 코드 상수, 외부 입력값 미사용)
 
         tree_result = await self.session.execute(
             recursive_query,

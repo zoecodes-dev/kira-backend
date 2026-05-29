@@ -1,33 +1,26 @@
-# =============================================================================
-# backend/domains/product/service.py
-#
-# KIRA Compliance Intelligence Platform — Product Domain Business Logic Layer
-#
-# 역할: Product 도메인의 비즈니스 로직 담당.
-#   - import_products  : 외부 원천 ingest + ProductImported 이벤트 발행  ← 결정 #1
-#   - get_product      : 제품 단건 조회 (없으면 404)
-#   - list_products    : 제품 목록 조회
-#   - get_bom_tree     : BOM 트리 조회 (only_confirmed 스위치)           ← 결정 #2
-#   - activate_bom_version  : BOM 버전 활성화 (state_machine 경유)
-#   - deprecate_bom_version : BOM 버전 deprecated 전이 (state_machine 경유)
-#
-# [결정 #1 반영]
-#   create_product() 제거 → import_products() 로 교체.
-#   이 시스템은 제품을 직접 생성하지 않는다.
-#   이벤트: ProductCreated → ProductImported / LotImported / BOMImported
-#
-# [결정 #2 반영]
-#   get_bom_tree()에 only_confirmed 파라미터 추가.
-#   repository.get_bom_tree(only_confirmed=...) 로 전달.
-#
-# 계층 규칙 (PROJECT_CORE.md 5-1):
-#   - router.py → service.py → repository.py 단방향 호출.
-#   - 상태 전이는 반드시 state_machine.py 함수 경유.
-#   - 타 도메인 코드 직접 import 금지. 통신은 이벤트로만.
-#   - 이벤트 발행: publish(event_name, payload) 2-인자 시그니처 준수.
-#   - payload: dataclasses.asdict(이벤트객체) → _serialize_payload() 변환.
-#   - 커밋은 이 레이어에서 일원화. router.py 에서 db.commit() 금지.
-# =============================================================================
+"""
+domains/product/service.py  (담당: 팀원 C)
+
+★ 이 파일은 Product 도메인의 비즈니스 로직을 담당하며, 
+   외부 원천(ERP/PLM) 데이터의 Ingest(동기화) 및 연쇄 이벤트 발행 패턴을 구현한다.
+
+레이어 규칙 (PROJECT_CORE 5-1):
+  router → service → repository → models  (단방향)
+  - service는 비즈니스 로직 + 이벤트 발행만 담당한다. 직접 SQL 실행은 금지(repository 위임).
+  - 상태 전이는 반드시 state_machine.py 함수를 경유하여 실행한다.
+  - 타 도메인의 코드를 직접 import하지 않는다. 도메인 간 통신은 오직 이벤트(publish)로만 수행한다.
+
+이벤트 발행 규칙 (PROJECT_CORE 5-2):
+  - publish(event_name, payload)  ← 2-인자 시그니처 준수. db 세션을 넘기지 않는다.
+  - payload는 dataclasses.asdict(이벤트객체)로 만든 뒤 JSON 직렬화 가능하도록 변환(_serialize_payload)한다.
+  - ★ 이벤트 발행은 반드시 "DB 커밋(db.commit())이 성공하여 영속화가 확정된 뒤"에 수행한다.
+
+[Product 도메인 주요 결정 사항 반영]
+  - 결정 #1 (Ingest): 제품은 본 시스템이 직접 생성하지 않고 외부 원천에서 동기화(UPSERT)한다.
+    (BOMImported → LotImported → ProductImported 순서로 연쇄 발행하여 다운스트림의 안정성 보장)
+  - 결정 #2 (BOM 트리): N차 공급망의 점진적 발견을 지원하기 위해 get_bom_tree에 only_confirmed 필터 스위치 적용.
+  - 최신 규격 반영: events/types.py 업데이트에 따라 external_id, batch_id 파라미터 적용 완료.
+"""
 
 from __future__ import annotations
 
@@ -96,7 +89,11 @@ async def import_products(
     [이벤트 발행 순서 — 결정 #1]
         각 제품마다:
           1. BOMImported  — bom_version ingest 완료
-          2. LotImported  — batch(Lot) ingest 완료  ※ W2는 products 중심, Lot은 자리만
+          2. LotImported  — batch(Lot) ingest 완료
+             ※ W2: batch_id=None 플레이스홀더. W3 batch ingest 구현 시 반드시 처리:
+                   - batches 레코드 생성 후 실제 batch_id 주입
+                   - batches.source_system = 'MES' (schema DEFAULT와 일치)
+                   - batches.external_id, synced_at 세팅 필수
           3. ProductImported — 제품 전체 ingest 완료 (마지막)
 
         ProductImported를 마지막에 발행하는 이유:
@@ -120,34 +117,34 @@ async def import_products(
 
     # 이벤트 발행 — 제품별 순서: BOMImported → LotImported → ProductImported
     for product in products:
-        # BOMImported: 이 제품에 연결된 BOM 버전이 동기화됐음을 알림
-        # bom_version_id는 product에서 직접 접근 불가(별도 조회 필요)하므로
-        # W2 시연에서는 product_id만 포함한 최소 payload로 발행.
-        # W3 LangGraph 조립 시 bom_version_id 조회 추가 예정.
+        # 1. BOMImported
         bom_event = BOMImportedEvent(
             product_id=product.product_id,
             bom_version_id=None,  # TODO: W3에서 실제 bom_version_id 조회 후 채움
+            external_id=product.external_id,
         )
         await publish(
             "BOMImported",
             _serialize_payload(asdict(bom_event)),
         )
 
-        # LotImported: MES Lot(batch) 동기화 알림
-        # W2는 products 중심 ingest. Lot(batches) ingest는 W3 MES 연동 시 확장.
-        # 이벤트 자리만 확보.
+        # 2. LotImported
         lot_event = LotImportedEvent(
-            lot_id=None,       # TODO: W3에서 batch ingest 후 채움
-            product_id=product.product_id,
+            batch_id=None,  # TODO(W3): repo.create_batch() 호출 후 실제 batch_id로 교체.   
+                            # batches.source_system='MES', external_id, synced_at 세팅 필수.
+                            # schema.sql batches 테이블 DEFAULT 'MES' 참조.               
+            product_id=product.product_id, 
+            external_id=product.external_id,
         )
         await publish(
             "LotImported",
             _serialize_payload(asdict(lot_event)),
         )
-
-        # ProductImported: 제품 전체 ingest 완료 신호 (마지막 발행)
+        
+        # 3. ProductImported
         product_event = ProductImportedEvent(
             product_id=product.product_id,
+            external_id=product.external_id,
         )
         await publish(
             "ProductImported",
