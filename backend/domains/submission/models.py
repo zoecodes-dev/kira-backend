@@ -58,6 +58,7 @@ class DataRequestLog(Base):
         Enum(SubmissionStatus, native_enum=False, length=30), default=SubmissionStatus.REQUESTED, server_default="submission_requested", nullable=True
     )
     is_archived: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, server_default="false", nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 
     # SubmissionStatusHistory 모델과의 1:N 관계 설정 (상태 변경 추적용)
     histories: Mapped[list["SubmissionStatusHistory"]] = relationship(
@@ -116,6 +117,51 @@ class Notification(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    dedup_key: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class SubmissionDocument(Base):
+    __tablename__ = "submission_documents"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4)
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("data_request_log.request_id", ondelete="CASCADE"), nullable=True)
+    supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=True)
+    file_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    file_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    doc_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
+    uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class DocumentExtractionResult(Base):
+    __tablename__ = "document_extraction_results"
+
+    extraction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4)
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("data_request_log.request_id", ondelete="CASCADE"), nullable=True)
+    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("submission_documents.document_id", ondelete="CASCADE"), nullable=True)
+    parsed_fields: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    confidence_map: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    unparsed_fields: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    supplier_confirmed: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, server_default="false", nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class ProcessedJob(Base):
+    __tablename__ = "processed_jobs"
+
+    idempotency_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    queue_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), default="processing", server_default="processing", nullable=True)
+    retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default="0", nullable=True)
+    result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    error_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
 
 
 # ==============================================================================
