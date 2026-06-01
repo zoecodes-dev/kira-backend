@@ -10,7 +10,7 @@ from backend.domains.risk.service import calculate_risk_score
 router = APIRouter(prefix="/risk", tags=["Risk"])
 
 class ViolationItem(BaseModel):
-    type: str  # 'compliance', 'geo', 'warning'
+    type: str  # 'compliance_violation', 'compliance_reject', 'GeoRiskDetected', 'compliance_warning'
     reason: str
 
 class StageRiskRequest(BaseModel):
