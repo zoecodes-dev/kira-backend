@@ -28,3 +28,4 @@ desktop.ini
 # 개인적으로 적용할 깃이그노어
 .rules
 backend/tests/
+scripts/

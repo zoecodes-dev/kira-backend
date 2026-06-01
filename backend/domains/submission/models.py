@@ -17,23 +17,20 @@ from backend.infrastructure.database import Base
 # ==============================================================================
 
 class ResponseStatus(str, PyEnum):
-    PENDING = "pending"
-    RESPONDED = "responded"
-    OVERDUE = "overdue"
-    ESCALATED = "escalated"
+    PENDING = "response_pending"
+    RESPONDED = "response_responded"
+    OVERDUE = "response_overdue"
+    ESCALATED = "response_escalated"
 
 
 class SubmissionStatus(str, PyEnum):
-    PENDING = "pending"
-    REQUESTED = "requested"
-    IN_PROGRESS = "in_progress"
-    SUBMITTED = "submitted"
-    REVIEW = "review"
-    APPROVED = "approved"
-    REWORK = "rework"
-    ARCHIVED = "archived"
-    REJECTED = "rejected"
-    VIOLATION = "violation"
+    REQUESTED = "submission_requested"
+    IN_PROGRESS = "submission_in_progress"
+    SUBMITTED = "submission_submitted"
+    REVIEW = "submission_review"
+    APPROVED = "submission_approved"
+    REWORK = "submission_rework"
+    REJECTED = "submission_rejected"
 
 
 # ==============================================================================
@@ -52,14 +49,16 @@ class DataRequestLog(Base):
     )
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True) # 데이터 제출 마감일 (SLA 관리 기준점)
     response_status: Mapped[Optional[ResponseStatus]] = mapped_column(                      # 단순 제출 여부 상태 (PENDING / SUBMITTED / DELAYED)
-        Enum(ResponseStatus, native_enum=False, length=20), default=ResponseStatus.PENDING, server_default="pending", nullable=True
+        Enum(ResponseStatus, native_enum=False, length=30), default=ResponseStatus.PENDING, server_default="response_pending", nullable=True
     )
     reminder_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default="0", nullable=True)         # 마감 미준수 협력사 독촉장(리마인드) 발송 횟수
     last_reminder_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True) # 가장 최근에 독촉장을 보낸 시각 (미발송 시 Null)
     responded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)     # 협력사가 최종 제출 버튼을 누른 시각 (미제출 시 Null)
     submission_status: Mapped[Optional[SubmissionStatus]] = mapped_column(                  # 플랫폼 핵심 9개 상태 머신 프로세스 단계 관리
-        Enum(SubmissionStatus, native_enum=False, length=20), default=SubmissionStatus.PENDING, server_default="pending", nullable=True
+        Enum(SubmissionStatus, native_enum=False, length=30), default=SubmissionStatus.REQUESTED, server_default="submission_requested", nullable=True
     )
+    is_archived: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, server_default="false", nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 
     # SubmissionStatusHistory 모델과의 1:N 관계 설정 (상태 변경 추적용)
     histories: Mapped[list["SubmissionStatusHistory"]] = relationship(
@@ -76,8 +75,8 @@ class SubmissionStatusHistory(Base):
 
     history_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4)     # 감사 기록 고유 ID (UUID)
     request_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("data_request_log.request_id", ondelete="CASCADE"), nullable=True) # 연결된 데이터 요청서 번호 (외래키)
-    from_status: Mapped[Optional[SubmissionStatus]] = mapped_column(Enum(SubmissionStatus, native_enum=False, length=20), nullable=True) # 변경되기 전의 직전 프로세스 상태
-    to_status: Mapped[SubmissionStatus] = mapped_column(Enum(SubmissionStatus, native_enum=False, length=20), nullable=False)   # 변경된 후의 새로운 프로세스 상태
+    from_status: Mapped[Optional[SubmissionStatus]] = mapped_column(Enum(SubmissionStatus, native_enum=False, length=30), nullable=True) # 변경되기 전의 직전 프로세스 상태
+    to_status: Mapped[SubmissionStatus] = mapped_column(Enum(SubmissionStatus, native_enum=False, length=30), nullable=False)   # 변경된 후의 새로운 프로세스 상태
     actor_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True) # 상태 전이를 발생시킨 주체 ID (유저 혹은 시스템 ID)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)                      # 상태 변경 및 반려 사유 설명 (텍스트, 공란 허용)
     changed_at: Mapped[Optional[datetime]] = mapped_column(                                 # 상태 전이가 일어난 정확한 시각 (자동 입력 표준 UTC)
@@ -118,6 +117,51 @@ class Notification(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    dedup_key: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class SubmissionDocument(Base):
+    __tablename__ = "submission_documents"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4)
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("data_request_log.request_id", ondelete="CASCADE"), nullable=True)
+    supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=True)
+    file_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    file_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    doc_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
+    uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class DocumentExtractionResult(Base):
+    __tablename__ = "document_extraction_results"
+
+    extraction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4)
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("data_request_log.request_id", ondelete="CASCADE"), nullable=True)
+    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("submission_documents.document_id", ondelete="CASCADE"), nullable=True)
+    parsed_fields: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    confidence_map: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    unparsed_fields: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    supplier_confirmed: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, server_default="false", nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class ProcessedJob(Base):
+    __tablename__ = "processed_jobs"
+
+    idempotency_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    queue_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), default="processing", server_default="processing", nullable=True)
+    retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default="0", nullable=True)
+    result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    error_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
 
 
 # ==============================================================================
@@ -125,16 +169,13 @@ class Notification(Base):
 # ==============================================================================
 
 SUBMISSION_TRANSITIONS = {
-    SubmissionStatus.PENDING:     [SubmissionStatus.REQUESTED],
     SubmissionStatus.REQUESTED:   [SubmissionStatus.IN_PROGRESS],
     SubmissionStatus.IN_PROGRESS: [SubmissionStatus.SUBMITTED],
     SubmissionStatus.SUBMITTED:   [SubmissionStatus.REVIEW],
     SubmissionStatus.REVIEW:      [SubmissionStatus.APPROVED, SubmissionStatus.REWORK, SubmissionStatus.REJECTED],
     SubmissionStatus.REWORK:      [SubmissionStatus.IN_PROGRESS],
-    SubmissionStatus.APPROVED:    [SubmissionStatus.ARCHIVED, SubmissionStatus.VIOLATION],
+    SubmissionStatus.APPROVED:    [],
     SubmissionStatus.REJECTED:    [],
-    SubmissionStatus.ARCHIVED:    [],
-    SubmissionStatus.VIOLATION:   [],
 }
 
 # ==============================================================================
