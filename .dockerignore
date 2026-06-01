@@ -17,3 +17,5 @@ __pycache__
 docker-compose*.yml
 Dockerfile*
 .git/
+
+scripts/
