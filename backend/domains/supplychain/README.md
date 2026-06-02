@@ -37,3 +37,8 @@
 - 도메인 외부(`audit`, `supplier` 등) 모델 직접 import 금지.
 - 모든 상태 변경 및 주요 쿼리 실행 시 `@trace_node`, `@trace_tool` 적용 필수.
 - PostGIS 공간 함수 사용 시 반드시 `SRID 4326`(WGS84) 기준 준수.
+
+## 9. W3 구현 진행 현황 (Geo Audit 노드 그래프 결합)
+- [x] Day 1: 버그 2개 수정 (`geo_analysis` → `stage_geo` / `check_coordinate_authenticity` 깡통 호출 우회 해결)
+- [x] Day 2: 좌표-국가 불일치 검사 PostGIS 동작 확인 완료
+- [x] Day 3: `geo_audit` 노드 LangGraph 파이프라인 결합 및 `GeoRiskDetected` 원자적 발행(`publish`+`enqueue`) 통합 적용 완료
