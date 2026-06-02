@@ -583,7 +583,7 @@ CREATE TABLE regulations (
     effective_from   DATE,
     document_s3_url  VARCHAR(500),
     embedding_status VARCHAR(20) DEFAULT 'pending' CONSTRAINT chk_reg_embedding_status CHECK (embedding_status IN ('pending', 'indexed')),
-    embedding        vector(1536) -- openai text-embedding-3-small 대응
+    embedding        vector(1536) -- Cohere embed-v4 (1536) 대응
 );
 
 -- [테이블 역할] 검증 결과 대장. (verdict 4종 + 회색지대needs_human_review 플래그 적용 완료)
