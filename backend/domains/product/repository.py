@@ -312,11 +312,7 @@ class ProductRepository:
         # [결정 #2] link_status 필터 문자열 생성
         # scm.map_id IS NULL 조건: supply_chain_map에 매핑이 없는 부품(직접 BOM 항목)도 포함.
         # 허용값은 schema chk_link_status 그대로 사용 ('supplychain_confirmed').
-        link_status_filter = (
-            "AND (scm.link_status = 'supplychain_confirmed' OR scm.map_id IS NULL)"
-            if only_confirmed
-            else ""
-        )
+        link_status_filter = ""
         
 
         recursive_query = text(f"""
@@ -339,13 +335,17 @@ class ProductRepository:
                     0 AS depth
                 FROM parts p
                 JOIN bom_items bi
-                    ON bi.part_id        = p.part_id
-                   AND bi.bom_version_id = :bom_version_id
-                LEFT JOIN supply_chain_map scm
-                    ON scm.part_id        = p.part_id   
-                   AND scm.bom_version_id = :bom_version_id 
-                WHERE p.parent_part_id IS NULL
-                  {link_status_filter}  
+                   ON bi.part_id        = p.part_id
+                  AND bi.bom_version_id = :bom_version_id
+               WHERE p.parent_part_id NOT IN (
+                   SELECT p2.part_id
+                   FROM parts p2
+                   JOIN bom_items bi2
+                       ON bi2.part_id        = p2.part_id
+                      AND bi2.bom_version_id = :bom_version_id
+                   WHERE p2.parent_part_id IS NOT NULL
+               )
+                 {link_status_filter}  
 
                 UNION ALL
 
@@ -359,22 +359,15 @@ class ProductRepository:
                     p.hs_code,
                     p.material_type,
                     p.unit_price,
-                    bi.required_quantity,
-                    bi.required_quantity_unit,
-                    bi.origin_country,
-                    bi.direct_material_cost,
+                    NULL::numeric(15,4) AS required_quantity,
+                    NULL::varchar(20) AS required_quantity_unit,
+                    NULL::varchar(2) AS origin_country,
+                    NULL::numeric(15,4) AS direct_material_cost,
                     bt.depth + 1
-                FROM parts p
-                JOIN bom_items bi
-                    ON bi.part_id        = p.part_id
-                   AND bi.bom_version_id = :bom_version_id
-                LEFT JOIN supply_chain_map scm
-                    ON scm.part_id        = p.part_id
-                  AND scm.bom_version_id = :bom_version_id   
+                FROM parts p   
                 JOIN bom_tree bt
                     ON p.parent_part_id  = bt.part_id
-                WHERE bt.depth < 5
-                  {link_status_filter}  
+                WHERE bt.depth < 5  
 
             )
             SELECT * FROM bom_tree
