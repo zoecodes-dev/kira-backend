@@ -5,10 +5,12 @@ agents/compliance.py — Compliance Interpreter Agent (은지 / C)
   BatchState의 verification_result를 받아, 목적지(destination)별로 적용되는
   규제 각각의 준수 여부를 판정하고 compliance_results 테이블에 기록한다.
 
-Day1 상태:
-  - REGULATION_BY_DESTINATION: supervisor가 import하는 매핑 딕셔너리 
-  - compliance_node: stage_compliance 전이 + 더미 result 반환 뼈대
-  - 실제 judge 함수(Opus 호출) 및 RAG 검색은 Day2~3에 채운다.
+Day2 상태:
+  - REGULATION_BY_DESTINATION: supervisor가 import하는 매핑 딕셔너리 (Day1)
+  - generate_embedding(): 텍스트 → Bedrock Cohere Embed v4 벡터 변환 (Day2)
+  - search_regulations(): pgvector 코사인 유사도 RAG 검색 (Day2)
+  - compliance_node: stage_compliance 전이 + 더미 result 반환 뼈대 (Day1)
+  - 실제 judge 함수(Opus 호출)는 Day3에 채운다.
 """
 
 from __future__ import annotations
@@ -16,8 +18,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.agents.state import BatchState
-from backend.infrastructure.trace import trace_node
+from backend.infrastructure.trace import trace_node, trace_tool
+from backend.infrastructure.embedding_factory import embed_query
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +75,99 @@ REGULATION_BY_DESTINATION: dict[str, list[str]] = {
 
 
 # ---------------------------------------------------------------------------
-# 2. compliance_node — Day1 뼈대 (LLM 호출 없음)
+# 2. RAG 도구 함수 (Day2)
+# ---------------------------------------------------------------------------
+
+@trace_tool("generate_embedding")
+async def generate_embedding(input_text: str) -> list[float]:
+    """
+    텍스트 → Bedrock Cohere Embed v4 벡터 변환.
+    embedding_factory.embed_query()를 래핑한다.
+    - 차원: embedding_factory 테스트 후 schema.sql vector(N) 과 맞출 것
+    - seed_regulations.py 와 search_regulations() 양쪽에서 공유한다.
+    """
+    return embed_query(input_text)
+
+
+@trace_tool("regulation_rag_search")
+async def search_regulations(
+    query_text: str,
+    regulation_code: str,
+    db: AsyncSession,
+    top_k: int = 3,
+) -> list[dict]:
+    """
+    pgvector 코사인 유사도로 관련 규제 조항을 검색한다.
+
+    동작 흐름:
+      1. query_text 를 1536차원 벡터로 변환 (generate_embedding 호출)
+      2. regulations 테이블에서 regulation_code 필터 + embedding_status='indexed' 조건으로
+         코사인 거리(<=> 연산자)가 가장 작은(= 의미가 가장 가까운) row top_k 개 반환
+      3. 각 row를 dict로 변환해 judge 함수에 전달
+
+    반환 예시:
+      [
+        {
+          "regulation_id": "...",
+          "regulation_code": "UFLPA",
+          "name": "Uyghur Forced Labor Prevention Act",
+          "description": "...",
+          "similarity": 0.92,   # 1.0 - 코사인 거리 (높을수록 관련성 높음)
+        },
+        ...
+      ]
+
+    주의:
+      - embedding_status = 'indexed' 인 row만 검색 대상이다.
+        seed_regulations.py 를 먼저 실행해 임베딩을 생성해야 한다.
+      - idx_regulations_embedding (hnsw, vector_cosine_ops) 인덱스가
+        schema.sql에 이미 정의돼 있어 대용량에도 빠르게 동작한다.
+    """
+    query_vector = await generate_embedding(query_text)
+
+    # pgvector <=> 연산자: 코사인 거리 (0에 가까울수록 유사)
+    # ::vector 캐스팅으로 Python list → pgvector 타입 변환
+    sql = text("""
+        SELECT
+            regulation_id::text,
+            regulation_code,
+            name,
+            description,
+            1.0 - (embedding <=> :query_vector::vector) AS similarity
+        FROM regulations
+        WHERE
+            regulation_code  = :regulation_code
+            AND embedding_status = 'indexed'
+            AND embedding IS NOT NULL
+        ORDER BY embedding <=> :query_vector::vector
+        LIMIT :top_k
+    """)
+
+    rows = (
+        await db.execute(
+            sql,
+            {
+                "query_vector": str(query_vector),   # list → 문자열, psycopg가 vector로 변환
+                "regulation_code": regulation_code,
+                "top_k": top_k,
+            },
+        )
+    ).fetchall()
+
+    return [
+        {
+            "regulation_id": row.regulation_id,
+            "regulation_code": row.regulation_code,
+            "name": row.name,
+            "description": row.description,
+            "similarity": float(row.similarity),
+        }
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 3. compliance_node — Day1 뼈대 (LLM 호출 없음)
 #
 #    오늘은 stage 전이와 더미 result 반환만 한다.
 #    실제 규제 judge(Opus + RAG) 는 Day3에 이 함수 안을 채운다.
