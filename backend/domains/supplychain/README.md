@@ -24,6 +24,11 @@
 - **국가 정합성**: 신고된 국가(`country`)와 좌표(`location`)의 실제 일치 여부 검증.
 - **EUDR 산림 훼손**: 고위험 지역 좌표 대조 및 위성 데이터 분석 에이전트 연동.
 
+#### 🛡️ 모의 Sad Path 검출 로그 (W3 화요일)
+- **시나리오**: 베트남(VN)으로 신고된 위장 조립 공장이 실제로는 중국 광둥성 인근 좌표를 제출한 상황 모의.
+- **결과**: `check_coordinate_authenticity` 쿼리 실행 결과, `ST_Within` 판정에서 `country_match: False` 검출 완료.
+- **후속 작용**: 시스템이 즉시 `GeoRiskDetected(risk_type="country_mismatch")` 이벤트를 발행하여 감사 로그 기록 및 리스크 +30점 유발 검증 성공.
+
 ## 6. 발행 이벤트 (events/types.py 정의 준수)
 | 이벤트명 | 발생 시점 | 수신 도메인 |
 | :--- | :--- | :--- |
@@ -37,3 +42,8 @@
 - 도메인 외부(`audit`, `supplier` 등) 모델 직접 import 금지.
 - 모든 상태 변경 및 주요 쿼리 실행 시 `@trace_node`, `@trace_tool` 적용 필수.
 - PostGIS 공간 함수 사용 시 반드시 `SRID 4326`(WGS84) 기준 준수.
+
+## 9. W3 구현 진행 현황 (Geo Audit 노드 그래프 결합)
+- [x] Day 1: 버그 2개 수정 (`geo_analysis` → `stage_geo` / `check_coordinate_authenticity` 깡통 호출 우회 해결)
+- [x] Day 2: 좌표-국가 불일치 검사 PostGIS 동작 확인 완료
+- [x] Day 3: `geo_audit` 노드 LangGraph 파이프라인 결합 및 `GeoRiskDetected` 원자적 발행(`publish`+`enqueue`) 통합 적용 완료
