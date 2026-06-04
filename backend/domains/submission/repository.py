@@ -11,7 +11,12 @@ from typing import Optional
 from sqlalchemy import select, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.domains.submission.models import DataRequestLog, DataCompletenessStatus, SubmissionStatusHistory
+from backend.domains.submission.models import (
+    DataRequestLog,
+    DataCompletenessStatus,
+    SubmissionStatusHistory,
+    DocumentExtractionResult,
+)
 
 async def create_data_request(db: AsyncSession, log_record: DataRequestLog) -> DataRequestLog:
     """
@@ -72,3 +77,35 @@ async def get_timeline_by_supplier(db: AsyncSession, supplier_id: uuid.UUID) -> 
     
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+async def create_extraction_result(
+    db: AsyncSession,
+    *,
+    request_id: uuid.UUID | str,
+    document_id: uuid.UUID | str,
+    parsed_fields: dict,
+    confidence_map: dict,
+    unparsed_fields: list,
+) -> DocumentExtractionResult:
+    """
+    [INSERT] AI(data_gateway)가 문서에서 추출한 정형 데이터를
+    document_extraction_results에 적재합니다.
+ 
+    * request_id / document_id는 str·UUID 둘 다 받아 여기서 UUID로 정규화한다.
+      (호출부 출처마다 타입이 다름: document_id=str, request_id=UUID.
+       변환 책임을 이 경계 한 곳에 모아 호출부가 타입을 신경쓰지 않게 한다.)
+    * supplier_confirmed는 기본 FALSE(모델 server_default) — 협력사가 추후
+      "확인" 버튼을 누르기 전까지는 미확정 상태로 둡니다.
+    * extraction_id / created_at은 모델 server_default(uuid_generate_v4 / now())에
+      맡깁니다. commit은 호출부 책임(기존 repository 규약 동일).
+    """
+    record = DocumentExtractionResult(
+        request_id=uuid.UUID(str(request_id)),
+        document_id=uuid.UUID(str(document_id)),
+        parsed_fields=parsed_fields,
+        confidence_map=confidence_map,
+        unparsed_fields=unparsed_fields,
+    )
+    db.add(record)
+    await db.flush()
+    return record

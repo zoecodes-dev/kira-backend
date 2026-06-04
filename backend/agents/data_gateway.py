@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.agents.state import BatchState
 from backend.infrastructure.trace import trace_node, trace_tool
 from backend.llm.bedrock_factory import get_llm_for_agent
+from backend.domains.submission import repository as submission_repo
 
 CONFIDENCE_THRESHOLD = 0.85
 
@@ -132,29 +133,23 @@ async def parse_document(document_id: str, db: AsyncSession) -> dict:
     confidence_map = extracted.get("confidence_map", {})
     unparsed_fields = extracted.get("unparsed_fields", [])
 
-    # ── 6) document_extraction_results 적재 (parameterized) ──────────────────
-    await db.execute(
-        text(
-            """
-            INSERT INTO document_extraction_results
-                (extraction_id, request_id, document_id,
-                 parsed_fields, confidence_map, unparsed_fields)
-            VALUES
-                (:extraction_id, :request_id, :document_id,
-                 :parsed_fields, :confidence_map, :unparsed_fields)
-            """
-        ),
-        {
-            "extraction_id": str(uuid4()),
-            "request_id": str(request_id),
-            "document_id": str(document_id),
-            "parsed_fields": json.dumps(parsed_fields, ensure_ascii=False),
-            "confidence_map": json.dumps(confidence_map, ensure_ascii=False),
-            "unparsed_fields": json.dumps(unparsed_fields, ensure_ascii=False),
-        },
-    )
-    await db.commit()
+    
 
+    # ── 6) document_extraction_results 적재 (submission repository 위임) ──────
+    #   JSONB 컬럼이라 dict/list를 그대로 넘긴다 (json.dumps로 문자열화하면
+    #   이중 직렬화돼서 "{...}" 문자열이 박힌다 — 넘기지 않는다).
+    #   request_id는 submission_documents에서 읽은 UUID 그대로 (str 변환 불필요).
+    await submission_repo.create_extraction_result(
+        db,
+        request_id=request_id,
+        document_id=document_id,
+        parsed_fields=parsed_fields,
+        confidence_map=confidence_map,
+        unparsed_fields=unparsed_fields,
+    )
+    await db.commit()   # 노드(도구)가 트랜잭션 경계 소유 — repository는 flush까지만
+    
+    
     return {"parsed_fields": parsed_fields,
             "confidence_map": confidence_map,
             "unparsed_fields": unparsed_fields}
