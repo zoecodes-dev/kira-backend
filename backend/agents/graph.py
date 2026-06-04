@@ -7,6 +7,7 @@ from langgraph.types import interrupt
 
 from backend.agents.state import BatchState
 from backend.agents.supervisor import route
+from backend.agents.data_gateway import data_gateway_node
 from backend.domains.audit import repository
 from backend.domains.audit.state_machine import (
     pause_batch_for_review,
@@ -117,7 +118,7 @@ async def supplier_reverify_node(state: BatchState) -> BatchState:
 
 builder = StateGraph(BatchState)
 builder.add_node("supervisor", supervisor_node)
-builder.add_node("data_gateway", placeholder_node("stage_extraction"))
+builder.add_node("data_gateway", data_gateway_node)
 builder.add_node("verification", placeholder_node("stage_verification"))
 builder.add_node("geo_audit", placeholder_node("stage_geo"))
 builder.add_node("compliance", placeholder_node("stage_compliance"))
