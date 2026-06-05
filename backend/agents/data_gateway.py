@@ -110,7 +110,7 @@ async def parse_document(document_id: str, db: AsyncSession) -> dict:
                 "unparsed_fields": [f"unsupported_for_vision:{file_type}"]}
 
     # ── 4) Bedrock 호출 (은진 = Sonnet 4.6, IAM Role 인증, temperature 0) ──────
-    llm = get_llm_for_agent("eunjin")
+    llm = get_llm_for_agent("data_gateway")
     messages = [
         SystemMessage(content=_EXTRACTION_SYSTEM),
         HumanMessage(content=[
