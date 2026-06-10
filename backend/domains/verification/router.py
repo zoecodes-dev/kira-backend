@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from backend.infrastructure.database import get_db
 from backend.domains.verification.service import verify_feoc_rule
+from backend.infrastructure.trace import trace_tool
 
 router = APIRouter(prefix="/verification", tags=["Verification"])
 
@@ -59,6 +60,7 @@ async def trigger_dummy_feoc_rule(req: FEOCDummyRequest, db: AsyncSession = Depe
         return {"status": "compliance_violation", "message": "FEOC 규제 위반 (25% 이상) - 후속 작업이 비동기 처리됩니다."}
 
 @router.get("/{batch_id}")
+@trace_tool("get_verification_result")
 async def get_verification_result(batch_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """
     [API] GET /verification/{batch_id}

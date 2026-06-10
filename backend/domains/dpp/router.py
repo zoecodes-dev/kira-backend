@@ -9,6 +9,7 @@ from backend.domains.dpp.state_machine import issue_dpp, revoke_dpp
 from backend.domains.dpp.immutable_guard import ImmutableRecordError
 from backend.domains.dpp.models import DppRecordResponse, ReadinessResponse
 from backend.domains.dpp.repository import list_dpp_records_raw, get_dpp_record
+from backend.infrastructure.trace import trace_tool
 
 router = APIRouter(prefix="/dpp", tags=["DPP"])
 
@@ -61,6 +62,7 @@ async def revoke_dpp_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 @router.get("/records")
+@trace_tool("get_dpp_records")
 async def get_dpp_records_endpoint(customer_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)):
     """
     [API] GET /dpp/records
@@ -69,6 +71,7 @@ async def get_dpp_records_endpoint(customer_id: uuid.UUID | None = None, db: Asy
     return await list_dpp_records_raw(db, customer_id)
 
 @router.get("/records/{dpp_id}", response_model=DppRecordResponse)
+@trace_tool("get_dpp_record_detail")
 async def get_dpp_record_detail_endpoint(dpp_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """
     [API] GET /dpp/records/{dpp_id}

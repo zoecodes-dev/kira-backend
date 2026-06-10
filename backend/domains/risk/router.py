@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from backend.infrastructure.database import get_db
 from backend.domains.risk.service import calculate_risk_score
 from backend.domains.risk.repository import RiskRepository
+from backend.infrastructure.trace import trace_tool
 
 
 router = APIRouter(prefix="/risk", tags=["Risk"])
@@ -31,6 +32,7 @@ async def execute_stage_risk(req: StageRiskRequest, db: AsyncSession = Depends(g
     return result
 
 @router.get("/scores")
+@trace_tool("get_risk_scores")
 async def get_risk_scores(status: str | None = None, level: str | None = None, db: AsyncSession = Depends(get_db)):
     """
     [API] GET /risk/scores
@@ -39,6 +41,7 @@ async def get_risk_scores(status: str | None = None, level: str | None = None, d
     return await RiskRepository.list_profiles(db, status=status, level=level)
 
 @router.get("/{batch_id_or_supplier_id}")
+@trace_tool("get_risk_score_detail")
 async def get_risk_score_detail(batch_id_or_supplier_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     [API] GET /risk/{batch_id_or_supplier_id}

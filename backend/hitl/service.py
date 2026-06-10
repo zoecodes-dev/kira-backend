@@ -8,7 +8,7 @@ from backend.infrastructure.trace import trace_node, trace_tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from backend.llm.bedrock_factory import get_llm_for_agent
 
-@trace_tool("hitl_haiku_summary")
+@trace_tool("summarize_hitl_context")
 async def _summarize_hitl_context(context_data: dict) -> str:
     """
     [도구] HITL 심사관을 위한 Haiku 컨텍스트 요약 (참고용)
