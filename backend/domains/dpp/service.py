@@ -209,6 +209,11 @@ async def generate_dpp_payload(
     }
 
     return {
+        "product_info": {
+            "customer_name": raw_data.get("customer_name", "Unknown"),
+            "model_name": raw_data.get("model_name", "Unknown"),
+            "amperage_ah": raw_data.get("amperage_ah", 0.0),
+        },
         "readiness_breakdown": readiness_breakdown,
         "scores": {
             "esg_compliance": esg_score,
