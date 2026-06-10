@@ -377,12 +377,36 @@ CREATE TABLE training_records (
 -- 영역 7. 제품 / BOM / 부품 (C 담당 - Ingest 컬럼 전수 동기화)
 -- ============================================================
 
+-- [테이블 역할] 완성차 OEM 고객사 마스터. (BMW / Mercedes 등 — products.customer_id 부모)
+-- 결정: 제품 3축(고객사·생산기간·조성비) 중 '고객사' 축. ERP_PLM ingest 패턴 일치.
+CREATE TABLE customers (
+    customer_id     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_code   VARCHAR(50) UNIQUE NOT NULL,   -- 예: 'BMW', 'MERCEDES'
+    customer_name   VARCHAR(255) NOT NULL,
+    country         VARCHAR(2),                    -- ISO 3166-1 alpha-2 (예: DE)
+
+    -- [결정 #1] 외부 원천시스템 연동 마크
+    source_system   VARCHAR(100) DEFAULT 'ERP_PLM',
+    external_id     VARCHAR(255),
+    synced_at       TIMESTAMPTZ DEFAULT now(),
+
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
 -- [테이블 역할] 원청사의 복사본 제품 마스터. (결정 #1 ERP Ingest 일치)
+-- 제품 3축 확장: customer_id(고객사) + model_name(차종) + amperage_ah(셀 용량, 단위 Ah).
 CREATE TABLE products (
     product_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     product_code    VARCHAR(50) UNIQUE NOT NULL,
     product_name    VARCHAR(255),
     manufacturer_id UUID REFERENCES suppliers(supplier_id),
+
+    -- [3축 확장] 고객사(OEM)별 사양 분리 + 차종 + 용량(Ah, kWh 아님)
+    customer_id     UUID REFERENCES customers(customer_id),
+    model_name      VARCHAR(100),
+    amperage_ah     NUMERIC(10,2),
+
     type            VARCHAR(50),
     specs           JSONB,
     
@@ -395,13 +419,15 @@ CREATE TABLE products (
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- [테이블 역할] 동일 제품의 배치/Lot별 버전 이력. (결정 #1 ERP Ingest 일치)
+-- [테이블 역할] 동일 제품의 생산 Lot/배치 유통 기간별 BOM 버전 이력. (결정 #1 ERP Ingest 일치)
+-- [개명] effective_from/to(규제 발효일 성격) → production_from/to(제조·유통 기간 식별).
+--        설계 변경이 아닌 'Lot 추적' 목적임을 컬럼명으로 명확화.
 CREATE TABLE bom_versions (
     bom_version_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     product_id     UUID REFERENCES products(product_id) ON DELETE CASCADE,
     version_number VARCHAR(20) NOT NULL,
-    effective_from DATE,
-    effective_to   DATE,
+    production_from DATE,
+    production_to   DATE,
     status         VARCHAR(20) DEFAULT 'draft' CONSTRAINT chk_bom_status CHECK (status IN ('draft', 'active', 'deprecated')),
     approved_by    UUID REFERENCES users(user_id),
     approved_at    TIMESTAMPTZ,
@@ -414,7 +440,7 @@ CREATE TABLE bom_versions (
     created_at     TIMESTAMPTZ DEFAULT now()
 );
 
--- [테이블 역할] 5계층 부품 마스터 트리. (Pack-Module-Cell-전구체-광산, 결정 #1 ERP Ingest 일치)
+-- [테이블 역할] 7계층 부품 마스터 트리. (Pack-Module-Cell-활물질-전구체/제련-광산, 결정 #1 ERP Ingest 일치)
 CREATE TABLE parts (
     part_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     part_code        VARCHAR(50) UNIQUE NOT NULL,
@@ -974,6 +1000,12 @@ CREATE INDEX idx_training_records_supplier ON training_records(supplier_id);
 CREATE INDEX idx_training_records_due    ON training_records(due_date) WHERE status IN ('in_progress', 'not_started');
 CREATE INDEX idx_parts_parent            ON parts(parent_part_id);
 CREATE INDEX idx_parts_hs_code           ON parts(hs_code);
+
+-- [신설] 제품 3축(고객사·생산기간·BOM버전) 다차원 룩업 인덱스 4종
+CREATE INDEX idx_products_customer       ON products(customer_id);
+CREATE INDEX idx_products_model          ON products(customer_id, model_name);
+CREATE INDEX idx_bom_versions_product    ON bom_versions(product_id, status);
+CREATE INDEX idx_bom_versions_period     ON bom_versions(production_from, production_to);
 
 -- 3) 배치 및 벡터 RAG 코사인 인덱스
 CREATE INDEX idx_batches_status          ON batches(status);
