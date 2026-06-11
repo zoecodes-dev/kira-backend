@@ -7,6 +7,7 @@ from backend.infrastructure.auth import CurrentUser, get_current_user
 from backend.infrastructure.database import get_db
 from backend.hitl.repository import HitlRepository
 from backend.hitl.service import HitlService
+from backend.infrastructure.auth import get_current_user
 
 router = APIRouter(prefix="/hitl", tags=["HITL"])
 
@@ -29,9 +30,9 @@ async def get_hitl_queue(status: str = 'hitl_pending', service: HitlService = De
 
 # 4. 검토에 필요한 모든 컨텍스트 단일 JSON 조회 (순서를 위해 위로 올렸어요)
 @router.get("/{batch_id}/context")
-async def get_hitl_context(batch_id: uuid.UUID, service: HitlService = Depends(get_hitl_service)):
+async def get_hitl_context(batch_id: uuid.UUID, service: HitlService = Depends(get_hitl_service), db: AsyncSession = Depends(get_db)):
     try:
-        return await service.get_review_context(batch_id)
+        return await service.get_review_context(db, batch_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
