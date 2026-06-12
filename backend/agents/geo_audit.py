@@ -7,7 +7,6 @@ Geo Audit Agent. 공장·광산 좌표 진위성 검사 + 고위험 지역 판�
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.agents.state import BatchState
-from backend.infrastructure.trace import trace_node
 from backend.domains.supplychain.repository import SupplyChainRepository
 from backend.domains.supplychain.service import SupplyChainService
 
@@ -27,10 +26,13 @@ async def geo_audit_node(state: BatchState, db: AsyncSession) -> BatchState:
     # Geo Audit 고위험 감지 시 confidence_score 인터럽트 연동
     confidence_score = state.get("confidence_score", 1.0)
     error_reason = state.get("error_reason", None)
+    hitl_required = state.get("hitl_required", False)
     
     if detected_risks:
-        confidence_score = min(float(confidence_score) if confidence_score else 1.0, 0.80)  # 0.84 이하로 깎아서 hitl_interrupt 즉시 분기 유도
+        # 0.84 이하로 깎아서 Supervisor가 hitl_interrupt로 즉시 분기하도록 유도
+        confidence_score = min(float(confidence_score) if confidence_score else 1.0, 0.80)  
         error_reason = "geo_risk_detected"
+        hitl_required = True
 
     return {
         **state,
@@ -39,5 +41,6 @@ async def geo_audit_node(state: BatchState, db: AsyncSession) -> BatchState:
         },
         "confidence_score": confidence_score,
         "error_reason": error_reason,
+        "hitl_required": hitl_required,
         "current_stage": "stage_geo",
     }

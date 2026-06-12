@@ -66,6 +66,53 @@ class SupplyChainService:
     ) -> List[Dict[str, Any]]:
         return await self.repository.get_alternatives(product_id, part_id)
 
+    # ---------- 협력사 통지 및 자진신고 (회사 경계 의무) ----------
+    @trace_node("notify_supplier_correction", "agent")
+    async def request_supplier_correction(
+        self,
+        sender_id: str,
+        target_supplier_id: str,
+        reason: str,
+        due_date: str,
+        required_docs: list[str]
+    ) -> Dict[str, Any]:
+        """원청 → 협력사 반려/시정요청 통지. 회사 경계를 넘을 때만 유효함."""
+        is_cross = await self.repository.is_cross_company_boundary(sender_id, target_supplier_id)
+        if not is_cross:
+            raise ValueError("동일 법인 내부이거나 통지 대상이 아닙니다. (회사 경계 의무 없음)")
+
+        payload = {
+            "sender_supplier_id": sender_id,
+            "target_supplier_id": target_supplier_id,
+            "reason": reason,
+            "due_date": due_date,
+            "required_documents": required_docs,
+        }
+        # 알림/요청 저장은 Submission 도메인이 수신 후 처리
+        await publish("SupplierCorrectionRequested", payload)
+        return {"status": "success", "message": "협력사 시정 요청 통지 이벤트가 발행되었습니다."}
+
+    @trace_node("declare_source_change", "agent")
+    async def declare_source_change(
+        self,
+        bom_version_id: str,
+        parent_supplier_id: str,
+        new_child_supplier_id: str,
+        part_id: str,
+        reason: str
+    ) -> Dict[str, Any]:
+        """협력사 자진신고: 공급원 변경 (사후 적발 방지)"""
+        if await self.repository.would_create_cycle(parent_supplier_id, new_child_supplier_id):
+            raise SupplyChainCycleError("해당 관계는 공급망에 순환 참조를 발생시킵니다.")
+
+        new_map = await self.repository.declare_new_source(
+            bom_version_id, parent_supplier_id, new_child_supplier_id, part_id
+        )
+
+        # 자진신고 발생 시, 상위 BOM 검증을 위해 이벤트 발행 (Compliance/Verification 트리고)
+        payload = {**new_map, "reason": reason}
+        await publish("SourceChangeDeclared", payload)
+        return new_map
     async def get_geo_risks(self, db: AsyncSession) -> Dict[str, Any]:
         """
         조회 전용 인터페이스: 이벤트를 발행하지 않고 지정학 리스크 결과를 반환합니다.
@@ -162,6 +209,19 @@ class SupplyChainService:
         }
 
     # ---------- Geo Audit ----------
+    def _format_coords(self, geojson_str: str | None) -> list[float]:
+        """프론트엔드 및 HITL 화면에서 사용하기 쉽도록 [latitude, longitude] 형태로 반환"""
+        if not geojson_str:
+            return []
+        try:
+            geo = json.loads(geojson_str)
+            if geo.get("type") == "Point":
+                lon, lat = geo["coordinates"]
+                return [lat, lon]
+        except Exception:
+            pass
+        return []
+
     @trace_node("geo_audit_execute", "agent")
     async def execute_geo_audit(self, db: AsyncSession, batch_id: str | None = None) -> List[Dict[str, Any]]:
         """
@@ -176,26 +236,28 @@ class SupplyChainService:
         detected_risks: List[Dict[str, Any]] = []
         for result in audit_results:
             if result.get("is_in_risk_zone"):
+                formatted_coords = self._format_coords(result["coordinates"])
                 event = GeoRiskDetectedEvent(
                     batch_id=batch_id,
                     factory_id=result["factory_id"],
                     risk_type="xinjiang",
                     supplier_id=result["supplier_id"],
                     company_name=result["company_name"],
-                    coordinates=result["coordinates"],
+                    coordinates=formatted_coords,
                 )
                 await self._publish_geo_risk(event)
                 detected_risks.append(asdict(event))
 
         for result in mismatch_results:
             if not result.get("country_match"):
+                formatted_coords = self._format_coords(result["coordinates"])
                 event = GeoRiskDetectedEvent(
                     batch_id=batch_id,
                     factory_id=result["factory_id"],
                     risk_type="country_mismatch",
                     supplier_id=result["supplier_id"],
                     company_name=result["company_name"],
-                    coordinates=result["coordinates"],
+                    coordinates=formatted_coords,
                 )
                 await self._publish_geo_risk(event)
                 detected_risks.append(asdict(event))
