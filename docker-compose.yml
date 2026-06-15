@@ -51,6 +51,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # CORS .env의 ALLOWED_ORIGINS를 그대로 전달(없으면 config 기본값).
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
     # ports 제거: 외부 노출 안 함. nginx가 내부에서 app:8000으로 전달.
     # volumes 제거: 이미지 안의 코드를 그대로 사용 (CI/CD 대비, 운영 정석).
     expose:
