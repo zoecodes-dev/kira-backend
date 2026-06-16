@@ -143,6 +143,7 @@ class SupplyChainRepository:
                    status, risk_level, feoc_status, completeness_score,
                    (SELECT sf.country FROM supplier_factories sf
                     WHERE sf.supplier_id = suppliers.supplier_id AND sf.is_active = TRUE
+                    ORDER BY (sf.factory_role = 'headquarters') DESC, sf.factory_id
                     LIMIT 1) AS country,
                    NULL::INT AS tier
             FROM suppliers
