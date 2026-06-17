@@ -24,9 +24,11 @@ from backend.domains.submission.service import (
     get_supplier_submission_timeline
 )
 
+from backend.agents.graph import create_batch
 from backend.infrastructure.queue import (
-    enqueue, 
-    DOCUMENT_PARSE_QUEUE
+    enqueue,
+    DOCUMENT_PARSE_QUEUE,
+    BATCH_PIPELINE_QUEUE,
 )
 
 router = APIRouter(prefix="/data-requests", tags=["Submission"])
@@ -131,11 +133,27 @@ async def submit_data_request_endpoint(request_id: uuid.UUID, req: SubmitDataReq
     """
     [API] POST /data-requests/{request_id}/submit
     협력사가 작성을 마치고 최종 제출을 확정합니다.
+    batch를 자동 생성하고 파이프라인 큐에 적재합니다.
     """
-    return await _handle_status_update(
+    try:
+        batch_id_str = await create_batch(db, str(req.product_id), req.destination)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"배치 생성 실패: {e}")
+
+    req_log = await _handle_status_update(
         db, request_id, SubmissionStatus.SUBMITTED, req,
-        batch_id=req.batch_id, file_urls=req.file_urls, confirmed_fields=req.confirmed_fields
+        batch_id=uuid.UUID(batch_id_str), file_urls=req.file_urls, confirmed_fields=req.confirmed_fields
     )
+    await enqueue(
+        BATCH_PIPELINE_QUEUE,
+        "start_batch_pipeline",
+        job_id=f"pipeline:{batch_id_str}",
+        batch_id=batch_id_str,
+        product_id=str(req.product_id),
+        destination=req.destination,
+    )
+    return req_log
 
 @router.post("/{request_id}/approve", response_model=DataRequestResponse)
 async def approve_data_request_endpoint(request_id: uuid.UUID, req: ActionDataRequest, db: AsyncSession = Depends(get_db)):
