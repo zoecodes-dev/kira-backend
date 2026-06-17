@@ -10,6 +10,7 @@ from backend.domains.risk.service import calculate_risk_score
 from backend.domains.dpp.service import calculate_readiness
 from backend.domains.dpp.service import generate_dpp_payload, create_dpp_record
 from backend.domains.dpp.state_machine import issue_dpp
+from backend.domains.product.models import Product as _Product  # noqa: F401 — registers products table columns in SA mapper
 
 
 async def verification_node(state: BatchState) -> Dict[str, Any]:

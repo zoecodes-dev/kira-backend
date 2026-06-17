@@ -2,8 +2,9 @@ from dataclasses import asdict
 from inspect import isawaitable, signature
 from uuid import UUID
 
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 from langgraph.types import Command, interrupt
 from sqlalchemy import select
 
@@ -27,6 +28,7 @@ from backend.agents.automation import (
     readiness_node,
     issuance_node,
 )
+from backend.core.config import config
 from backend.domains.dpp.models import Batch
 
 
@@ -192,8 +194,35 @@ builder.add_edge("supplier_reverify", "supervisor")
 builder.add_edge("hitl_interrupt", "supervisor")
 builder.add_edge("completed", END)
 
-# Development checkpoint storage. Production should replace this with a durable saver.
-graph = builder.compile(checkpointer=InMemorySaver())
+_pool: AsyncConnectionPool | None = None
+graph = None  # initialized by setup_graph() at app startup
+
+
+async def _ensure_graph():
+    if graph is None:
+        await setup_graph()
+    return graph
+
+
+async def create_batch(db, product_id: str, destination: str) -> str:
+    batch = Batch(product_id=UUID(product_id), destination=destination)
+    db.add(batch)
+    await db.flush()
+    await db.commit()
+    return str(batch.batch_id)
+
+
+async def start_graph(batch_id: str, product_id: str, destination: str) -> None:
+    graph_app = await _ensure_graph()
+    initial_state = BatchState(
+        batch_id=batch_id,
+        product_id=product_id,
+        destination=destination,
+        current_stage="stage_queued",
+        batch_status="batch_processing",
+    )
+    config = {"configurable": {"thread_id": batch_id}}
+    await graph_app.ainvoke(initial_state, config=config)
 
 
 # ── HITL resume 접점 ──────────────────────────────────────────────────────────
@@ -220,6 +249,32 @@ async def _load_state_from_db(batch_id: str) -> BatchState:
         )
 
 
+async def setup_graph() -> None:
+    global graph, _pool
+    if graph is not None:
+        return
+    conn_string = config.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    # setup() uses CREATE INDEX CONCURRENTLY which requires autocommit.
+    # Advisory lock serializes concurrent workers so only one runs migrations.
+    async with AsyncPostgresSaver.from_conn_string(conn_string) as tmp:
+        await tmp.conn.execute("SELECT pg_advisory_lock(1990614)")
+        try:
+            await tmp.setup()
+        finally:
+            await tmp.conn.execute("SELECT pg_advisory_unlock(1990614)")
+    _pool = AsyncConnectionPool(conninfo=conn_string, open=False)
+    await _pool.open()
+    graph = builder.compile(checkpointer=AsyncPostgresSaver(_pool))
+
+
+async def teardown_graph() -> None:
+    global graph, _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+    graph = None
+
+
 async def resume_graph(batch_id: str, resolution: str) -> None:
     """approve 결정 후 interrupt() 로 멈춘 graph 를 재개한다.
 
@@ -227,8 +282,9 @@ async def resume_graph(batch_id: str, resolution: str) -> None:
     """
     if resolution != "approve":
         return
+    graph_app = await _ensure_graph()
     config = {"configurable": {"thread_id": batch_id}}
-    snapshot = await graph.aget_state(config)
+    snapshot = await graph_app.aget_state(config)
     if not snapshot.values:
         state = await _load_state_from_db(batch_id)
         await _resume_batch(UUID(batch_id))
@@ -239,9 +295,9 @@ async def resume_graph(batch_id: str, resolution: str) -> None:
             "hitl_required": False,
             "error_reason": None,
         }
-        await graph.ainvoke(state, config=config)
+        await graph_app.ainvoke(state, config=config)
     else:
-        await graph.ainvoke(
+        await graph_app.ainvoke(
             Command(resume={"event_name": "HITLApproved"}),
             config=config,
         )
