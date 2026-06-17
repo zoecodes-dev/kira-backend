@@ -151,17 +151,10 @@ class HitlService:
 
         if supplier_id:
             sc_repo = SupplyChainRepository(db)
-            
-            # 영수(D)님이 메서드를 구현하기 전까지 뻗지 않도록 방어 로직 추가
-            # [BYPASS:B1] 영수의 get_supplier_master_and_gps_dto 구현 대기 — 머지 시 자동 실데이터 전환
-            if hasattr(sc_repo, "get_supplier_master_and_gps_dto"):
-                sup_data = await sc_repo.get_supplier_master_and_gps_dto(supplier_id)
-                supplier_master = sup_data.get("supplier_master", {})
-                factory_gps = sup_data.get("factory_gps", [])
-            else:
-                supplier_master = {"company_name": "임시 테스트 협력사(타 도메인 연동 대기중)"}
-                factory_gps = [{"factory_name": "임시 공장", "location": "임시 좌표"}]
-            
+            sup_data = await sc_repo.get_supplier_master_and_gps_dto(supplier_id)
+            supplier_master = sup_data.get("supplier_master", {})
+            factory_gps = sup_data.get("factory_gps", [])
+
             # 제출 증빙 URL 조회 및 Presigned URL 동적 발급
             raw_evidences = await get_evidence_urls_dto(db, supplier_id)
             for ev in raw_evidences:

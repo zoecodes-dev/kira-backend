@@ -212,7 +212,8 @@ class DataRequestResponse(BaseModel):
 
 class SubmitDataRequest(BaseModel):
     actor_id: uuid.UUID
-    batch_id: uuid.UUID
+    product_id: uuid.UUID
+    destination: str
     file_urls: Optional[List[str]] = None
     confirmed_fields: Optional[dict] = None
 
