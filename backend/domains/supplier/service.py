@@ -91,6 +91,9 @@ async def get_supplier(db: AsyncSession, supplier_id: UUID) -> Optional[Supplier
     return await repository.get_supplier_by_id(db, supplier_id)
 
 
+# 원청(OEM, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
+_OEM_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
+
 # supplier_type → 채워야 할 CTI relationship 속성명 매핑
 _CTI_ATTR_BY_TYPE = {
     "manufacturer": "manufacturer_detail",
@@ -112,7 +115,7 @@ async def get_supplier_detail(db: AsyncSession, supplier_id: UUID) -> Optional[S
         return None
 
     expected_attr = _CTI_ATTR_BY_TYPE.get(supplier.supplier_type)
-    if expected_attr is not None and getattr(supplier, expected_attr, None) is None:
+    if supplier_id != _OEM_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
         print(
             f"[CTI 점검] supplier {supplier_id} type={supplier.supplier_type} "
             f"이지만 {expected_attr} 미적재 (자료 미수집 가능)"
