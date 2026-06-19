@@ -50,8 +50,13 @@ INSERT INTO customers (customer_id, customer_code, customer_name, country, sourc
 
 
 -- ============================================================
--- 4. 협력사 마스터 (영역 2) — 12개사
+-- 4. 협력사 마스터 (영역 2) — 원청 1 + 협력사 12개사
 -- ============================================================
+-- 원청 (OEM, tier0) — 공급망 트리 루트. supply_chain_map 최상위 parent로 사용.
+-- 본질은 배터리 팩 '제조사'(supplier_type=manufacturer). 원청/협력사 구분은 tier0(hop0)로.
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, supplier_type, completeness_score, status, risk_level, feoc_status) VALUES
+('a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'KIRA Energy Solutions', 'KIRA Energy Solutions', '키라에너지솔루션(주)', 'KIRA CEO', 'manufacturer', 100, 'supplier_verified', 'low', 'eligible');
+
 -- 제조사/셀
 INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, supplier_type, completeness_score, status, risk_level, feoc_status) VALUES
 ('a1111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양셀 제조(주)', 'Hanyang Cell Mfg',   '한양셀 제조(주)', 'Kim CEO',   'manufacturer', 92, 'supplier_verified',    'low',      'eligible'),
@@ -183,6 +188,8 @@ INSERT INTO trader_disclosure_obligation (trader_supplier_id, upstream_supplier_
 -- 7. 리스크 프로필 (영역 4)
 -- ============================================================
 INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, feoc_status, feoc_direct_ownership, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
+-- 원청 (tier0 루트) — 트리 루트 노드 색상/리스크 NULL 방지용 최소 프로필
+('a0000000-0000-4000-8000-000000000000', 0,  'low',      'low',     'eligible',     0.00,  FALSE, NULL, now() - interval '7 days'),
 ('a1111111-1111-4000-8000-000000000001', 10, 'low',      'low',     'eligible',     0.00,  FALSE, NULL, now() - interval '7 days'),
 ('a7777777-7777-4000-8000-000000000007', 10, 'low',      'low',     'eligible',     0.00,  FALSE, NULL, now() - interval '7 days'),
 ('a2222222-2222-4000-8000-000000000002', 15, 'low',      'low',     'eligible',     0.00,  FALSE, NULL, now() - interval '7 days'),
