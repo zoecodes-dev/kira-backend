@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from starlette.responses import PlainTextResponse
 
 from backend.infrastructure.database import verify_extensions
-from backend.agents.graph import resume_graph
+from backend.agents.graph import resume_graph, setup_graph, teardown_graph
 from backend.infrastructure.event_bus import start_event_listener, stop_event_listener, subscribe
 from backend.domains.supplychain.router import router as supplychain_router
 from backend.domains.submission.router import router as submission_router
@@ -24,6 +24,7 @@ from backend.domains.audit.router import actions_router, router as audit_router
 from backend.domains.risk.router import router as risk_router
 from backend.domains.dpp.router import router as dpp_router
 from backend.hitl.router import router as hitl_router
+from backend.domains.batches.router import batches_router, dashboard_router
 
 async def _on_hitl_resolved(payload: dict) -> None:
     batch_id = payload.get("batch_id", "")
@@ -34,13 +35,15 @@ async def _on_hitl_resolved(payload: dict) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup: 필수 확장 검증 + HITL resume 구독 + 이벤트 LISTEN 루프 기동
+    # startup: 필수 확장 검증 + checkpoint DB 초기화 + HITL resume 구독 + 이벤트 LISTEN 루프 기동
     await verify_extensions()
+    await setup_graph()
     await subscribe("hitl.resolved", _on_hitl_resolved)
     await start_event_listener()
     yield
-    # shutdown: LISTEN 루프 정리
+    # shutdown: LISTEN 루프 정리 + checkpoint 풀 해제
     await stop_event_listener()
+    await teardown_graph()
 
 
 app = FastAPI(
@@ -63,6 +66,8 @@ app.include_router(actions_router)
 app.include_router(risk_router)
 app.include_router(dpp_router)
 app.include_router(hitl_router)
+app.include_router(batches_router)
+app.include_router(dashboard_router)
 
 @app.get("/health")
 async def health_check():
