@@ -27,21 +27,28 @@ class SupplyChainRepository:
         product_id: str,
     ) -> List[Dict[str, Any]]:
         """
-        특정 product_id에 연결된 Tier 1~말단 광산까지 전체 트리를 재귀 탐색.
+        특정 product_id에 연결된 원청(Pack)~말단 광산까지 전체 트리를 재귀 탐색.
         스펙 5-1 SUPPLY_CHAIN_TREE_QUERY 기준: bom_versions JOIN으로 product_id 진입,
-        원청(parent_supplier_id IS NULL)부터 하향 탐색.
-        순환 참조(Cycle) 방지 path 추적 포함.
+        트리 루트 = 원청(tier0/hop0, parent_supplier_id IS NULL → child=원청 Pack)부터 하향 탐색.
+
+        [hop_level = 경로 순번(원청 0 기준 +1 연속)]
+          - 재귀 진행 시 hop_level = 부모 hop + 1 을 JOIN 조건으로 강제한다.
+            · 겸업(한양셀 = Module hop1 + Cell hop2 등) self-edge(parent=child)를 결정적으로 탐색
+              (같은 회사의 다음 hop 만 매칭 → 형제 엣지 중복 부착/무한루프 방지).
+          - 순환 판정 path 키를 (child_supplier_id, part_id) 복합키로 변경.
+            · 단일 child_supplier_id 키는 같은 회사의 연속 hop 등장(겸업)을 사이클로 오판함.
         공장 좌표는 GeoJSON으로 반환 (스펙 완료 기준).
         """
         query = text("""
             WITH RECURSIVE sc_tree AS (
+                -- 앵커: 트리 루트 = 원청 (parent_supplier_id IS NULL, child=원청 Pack, hop_level=0)
                 SELECT
                     scm.map_id, scm.bom_version_id, scm.parent_supplier_id, scm.child_supplier_id,
                     scm.part_id, s.company_name, s.supplier_type, scm.hop_level,
                     sf.country,
                     ST_AsGeoJSON(sf.location) AS location_geojson,
-                    1 AS depth,
-                    ARRAY[scm.child_supplier_id] AS path,
+                    0 AS depth,
+                    ARRAY[scm.child_supplier_id::text || ':' || scm.part_id::text] AS path,
                     FALSE AS is_cycle
                 FROM supply_chain_map scm
                 JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
@@ -59,11 +66,12 @@ class SupplyChainRepository:
                     sf.country,
                     ST_AsGeoJSON(sf.location) AS location_geojson,
                     sct.depth + 1,
-                    sct.path || scm.child_supplier_id,
-                    scm.child_supplier_id = ANY(sct.path)
+                    sct.path || (scm.child_supplier_id::text || ':' || scm.part_id::text),
+                    (scm.child_supplier_id::text || ':' || scm.part_id::text) = ANY(sct.path)
                 FROM supply_chain_map scm
                 JOIN sc_tree sct ON scm.parent_supplier_id = sct.child_supplier_id
                                 AND scm.bom_version_id = sct.bom_version_id
+                                AND scm.hop_level = sct.hop_level + 1
                 JOIN suppliers s ON s.supplier_id = scm.child_supplier_id
                 LEFT JOIN supplier_factories sf
                     ON sf.supplier_id = s.supplier_id AND sf.is_active = TRUE
@@ -77,6 +85,47 @@ class SupplyChainRepository:
             ORDER BY depth, hop_level;
         """)
         result = await self.session.execute(query, {"product_id": product_id})
+        return [dict(row._mapping) for row in result]
+
+    @trace_tool("supply_chain_by_bom_depth")
+    async def get_by_bom_depth(self, bom_depth: int) -> List[Dict[str, Any]]:
+        """
+        부품 tier 기준 필터 (bom_depth = parts.tier_level, 0-base).
+        '같은 부품 계층(Pack/Module/Cell/활물질/전구체/제련/광산)' 노드만 횡으로 조회.
+        hop_level(경로 순번)과는 독립축이므로 ADR에 따라 엔드포인트를 분리한다.
+        """
+        query = text("""
+            SELECT
+                scm.map_id, scm.bom_version_id, scm.parent_supplier_id, scm.child_supplier_id,
+                scm.part_id, s.company_name, s.supplier_type,
+                scm.hop_level, p.tier_level AS bom_depth, scm.link_status
+            FROM supply_chain_map scm
+            JOIN suppliers s ON s.supplier_id = scm.child_supplier_id
+            JOIN parts p ON p.part_id = scm.part_id
+            WHERE p.tier_level = :bom_depth
+            ORDER BY scm.hop_level, s.company_name;
+        """)
+        result = await self.session.execute(query, {"bom_depth": bom_depth})
+        return [dict(row._mapping) for row in result]
+
+    @trace_tool("supply_chain_by_hop")
+    async def get_by_hop(self, hop_level: int) -> List[Dict[str, Any]]:
+        """
+        공급망 차수 기준 필터 (hop_level = 원청 0 기준 경로 순번).
+        '같은 공급망 차수' 노드만 횡으로 조회. bom_depth(부품 tier)와는 독립축.
+        """
+        query = text("""
+            SELECT
+                scm.map_id, scm.bom_version_id, scm.parent_supplier_id, scm.child_supplier_id,
+                scm.part_id, s.company_name, s.supplier_type,
+                scm.hop_level, p.tier_level AS bom_depth, scm.link_status
+            FROM supply_chain_map scm
+            JOIN suppliers s ON s.supplier_id = scm.child_supplier_id
+            LEFT JOIN parts p ON p.part_id = scm.part_id
+            WHERE scm.hop_level = :hop_level
+            ORDER BY s.company_name;
+        """)
+        result = await self.session.execute(query, {"hop_level": hop_level})
         return [dict(row._mapping) for row in result]
 
     @trace_tool("supply_chain_create")
