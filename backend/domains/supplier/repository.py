@@ -381,6 +381,116 @@ async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict
     return data
 
 
+# ── general-review 완성도(provider_type별) 계산용 — completeness.py + service.recompute_completeness ──
+async def get_completeness_inputs(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
+    """완성도 계산 입력 스냅샷(한 협력사). 회사·소재·규제·문서·공장수를 한 번에 모은다.
+    같은 세션에서 폼 저장 flush 직후 호출되면 최신값을 본다. 없는 supplier면 None."""
+    stmt = text(
+        """
+        SELECT s.provider_type, s.company_name, s.country, s.business_reg_no,
+               s.core_minerals, s.business_reg_doc_url, s.environmental_report_url,
+               md.carbon_intensity, md.energy_source,
+               rp.self_reported_risk_level,
+               (SELECT count(*) FROM supplier_factories f
+                 WHERE f.supplier_id = s.supplier_id AND f.is_active) AS factory_count
+        FROM suppliers s
+        LEFT JOIN supplier_manufacturer_details md ON md.supplier_id = s.supplier_id
+        LEFT JOIN supplier_risk_profiles rp ON rp.supplier_id = s.supplier_id
+        WHERE s.supplier_id = :sid
+        """
+    )
+    row = (await db.execute(stmt, {"sid": str(supplier_id)})).mappings().first()
+    if row is None:
+        return None
+    data = dict(row)
+    cm = data.get("core_minerals")
+    if isinstance(cm, str):  # raw text() JSONB는 str로 옴 → dict 파싱
+        import json
+        try:
+            data["core_minerals"] = json.loads(cm)
+        except Exception:
+            data["core_minerals"] = {}
+    return data
+
+
+async def get_supply_chain_metals(db: AsyncSession, supplier_id: UUID) -> List[str]:
+    """공급망에서 이 협력사가 '공급하는'(child=이 협력사) 파트의 광물/정제금속 part_code 목록.
+    제련소가 '다루는 금속'을 도출하는 근거(자기신고 core_minerals가 아닌 공급망 실측)."""
+    stmt = text(
+        """
+        SELECT DISTINCT p.part_code
+        FROM supply_chain_map scm
+        JOIN parts p ON p.part_id = scm.part_id
+        WHERE scm.child_supplier_id = :sid
+          AND p.material_type IN ('mineral', 'refined_metal')
+        """
+    )
+    rows = (await db.execute(stmt, {"sid": str(supplier_id)})).all()
+    return [r[0] for r in rows]
+
+
+async def upsert_completeness(
+    db: AsyncSession, supplier_id: UUID,
+    required: int, filled: int, rate: float, missing: list,
+) -> None:
+    """data_completeness_status(entity_type='supplier') upsert. flush만 — 커밋은 service.
+    (entity_type,entity_id) 유니크 제약이 없어 UPDATE 후 미적중 시 INSERT 한다.
+
+    ※ 도메인 경계(규칙 #4): data_completeness_status ORM은 submission 소유지만, general-review
+      완성도는 '협력사 입력'이 본질이라 supplier가 판정 주체다. supplier/repository는 이미
+      get_completeness로 이 테이블을 read 중이고, 여기선 같은 트랜잭션 내 raw SQL write만 한다
+      (교차 도메인 import 아님)."""
+    import json
+    params = {
+        "sid": str(supplier_id), "req": required, "fil": filled,
+        "rate": rate, "missing": json.dumps(missing),
+    }
+    res = await db.execute(
+        text(
+            """
+            UPDATE data_completeness_status
+            SET required_field_count = :req, filled_field_count = :fil,
+                completion_rate = :rate, missing_fields = CAST(:missing AS JSONB),
+                last_updated_at = now()
+            WHERE entity_type = 'supplier' AND entity_id = :sid
+            """
+        ),
+        params,
+    )
+    if res.rowcount == 0:
+        await db.execute(
+            text(
+                """
+                INSERT INTO data_completeness_status
+                  (entity_type, entity_id, required_field_count, filled_field_count,
+                   completion_rate, missing_fields)
+                VALUES ('supplier', :sid, :req, :fil, :rate, CAST(:missing AS JSONB))
+                """
+            ),
+            params,
+        )
+    await db.flush()
+
+
+async def get_managing_smelter_id(db: AsyncSession, supplier_id: UUID) -> Optional[UUID]:
+    """광산(child)의 '정보관리 주체' 상위 제련소(parent, provider_type='smelter')를 공급망에서
+    해석해 반환. 제련소의 공장 = 곧 광산이라, 광산 general-review의 공장 정보 섹션은 이 제련소가
+    입력한 supplier_factories 를 그대로 읽어 보여준다(광산은 입력 주체 아님).
+    여러 제련소와 엮이면 최신 엣지 1개를 택한다. 링크 없으면 None."""
+    stmt = text(
+        """
+        SELECT scm.parent_supplier_id
+        FROM supply_chain_map scm
+        JOIN suppliers ps ON ps.supplier_id = scm.parent_supplier_id
+        WHERE scm.child_supplier_id = :sid AND ps.provider_type = 'smelter'
+        ORDER BY scm.created_at DESC NULLS LAST
+        LIMIT 1
+        """
+    )
+    row = (await db.execute(stmt, {"sid": str(supplier_id)})).first()
+    return row[0] if row else None
+
+
 async def get_carbon_declarations(db: AsyncSession, supplier_id: UUID) -> List[dict]:
     """환경성적서(EU 배터리법 Art7 탄소발자국) — 이 협력사 공장별 factory_carbon_declarations. 유효만료 임박 순."""
     stmt = text(
