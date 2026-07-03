@@ -185,6 +185,8 @@ class SupplyChainService:
             "carbon_intensity":          "has_carbon_intensity",
             "factory_carbon_declarations": "has_factory_carbon_decl",
             "mine_coordinates":          "has_mine_coordinates",
+            # UFLPA — miner/trader 원산지(소재 국가) 미기재 시 gap 처리.
+            "origin_country":           "has_origin_country",
             # FEOC(feoc_direct/indirect_ownership)는 스코프 축소로 제거됨.
             # geo_risk_flags: 지오 감사에서 실시간 계산 — 항상 보유로 간주
         }
@@ -223,6 +225,16 @@ class SupplyChainService:
                             "regulation_code":  reg["regulation_code"],
                             "regulation_name":  reg["name"],
                         })
+
+            # 제3자 정보제공 동의서 — 규제 필수 필드 목록엔 없지만 데이터 계약 성립의 전제조건.
+            # 원청(is_root_anchor) 자신은 동의 대상이 아니므로 제외. '요청됨'만으론 미완료로 집계.
+            if not row.get("is_root_anchor", False) and not row.get("has_consent_agreed"):
+                missing.append({
+                    "field_name":      "consent_agreement",
+                    "field_label":     "제3자 정보제공 동의서",
+                    "regulation_code": "GENERAL",
+                    "regulation_name": "데이터 제공 동의(Data Contract)",
+                })
 
             nodes.append({
                 "supplier_id":    str(row["supplier_id"]),

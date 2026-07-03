@@ -75,7 +75,7 @@ async def get_applicable_regulations(
         _text("""
             SELECT DISTINCT b.destination
             FROM batches b
-            WHERE b.product_id = :product_id::uuid
+            WHERE b.product_id = CAST(:product_id AS uuid)
               AND b.destination IS NOT NULL
             ORDER BY b.destination
             LIMIT 1
