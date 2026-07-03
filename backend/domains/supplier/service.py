@@ -48,6 +48,12 @@ from backend.domains.supplier import masterform_prefill
 #   생성 책임은 users 의 것이되, 온보딩의 단일 트랜잭션 안에서 한 번에 커밋).
 from backend.domains.users.repository import UserRepository
 from backend.infrastructure.security import get_password_hash
+# [회원가입 — 결정 #4 동일 패턴] 온보딩 진입/제출에서 대기중 제3자 정보제공 동의서(데이터 계약)를
+#   원문 표시·기록하려면 data_consent 테이블 접근이 필요하다. 조회/기록은 해당 도메인 repository를
+#   '재사용 + 온보딩 단일 커밋'으로 처리(새 트랜잭션·커밋을 열지 않는다).
+import hashlib
+from backend.domains.data_consent import repository as consent_repo
+from backend.domains.data_consent.models import ConsentUpdateBody
 
 # ── 정책 상수 ───────────────────────────────────────────────
 # 협력사 온보딩 SLA. PROJECT_CORE: 14일 미응답 → Reminder, 21일 → Escalation.
@@ -597,15 +603,36 @@ class OnboardingConflictError(Exception):
     """이미 가입 완료된 supplier 재제출 또는 이메일 중복 — router 가 409 로 매핑."""
 
 
+def _pending_consent(rows: List[dict]) -> Optional[dict]:
+    """동의서 이력(최신순) 중 협력사가 아직 동의해야 하는 대기 건(requested/returned)을 고른다."""
+    return next((r for r in rows if r["status"] in ("requested", "returned")), None)
+
+
 async def get_onboarding_prefill(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """공개 prefill — 비민감 필드(회사명/유형/국가)만. 없는 supplier_id면 None(→404)."""
+    """공개 prefill — 비민감 필드(회사명/유형/국가) + 대기중 동의서 요약. 없는 supplier_id면 None(→404)."""
     supplier = await repository.get_supplier_by_id(db, supplier_id)
     if supplier is None:
         return None
+    # 대기중 제3자 정보제공 동의서(있으면) — 프론트가 이 조건으로 원문을 재조립해 보여준다.
+    #   온보딩은 무토큰이라 tenant 필터 없이 supplier 기준으로 조회한다.
+    consent = None
+    pending = _pending_consent(await consent_repo.list_by_supplier(db, supplier_id, None))
+    if pending is not None:
+        consent = {
+            "consent_id": pending["consent_id"],
+            "data_scope": pending["data_scope"] or [],
+            "purpose": pending["purpose"],
+            "third_party_sharing": pending["third_party_sharing"],
+            "allowed_recipients": pending["allowed_recipients"],
+            "valid_from": pending["valid_from"],
+            "valid_to": pending["valid_to"],
+            "revocable": pending["revocable"],
+        }
     return {
         "company_name": supplier.company_name,
         "provider_type": supplier.provider_type,
         "country": supplier.country,
+        "consent": consent,
     }
 
 
@@ -625,6 +652,31 @@ def _build_onboarding_contacts(body: OnboardingSubmitRequest) -> List[MasterForm
             is_primary=is_primary,
         ))
     return contacts
+
+
+async def _record_consent_agreement(
+    db: AsyncSession, supplier_id: UUID, body: OnboardingSubmitRequest, signed_at: datetime
+) -> None:
+    """대기중 제3자 정보제공 동의서를 'agreed'로 기록. 대기 건이 없으면(구 데이터 등) 스킵 —
+    입력 게이트(consent_status)만으로 진행한다. 커밋은 온보딩 트랜잭션이 일괄 담당."""
+    pending = _pending_consent(await consent_repo.list_by_supplier(db, supplier_id, None))
+    if pending is None:
+        return
+    primary = next((c for c in body.contacts if c.is_primary), None) or (body.contacts[0] if body.contacts else None)
+    signer_name = (primary.name if primary else None) or body.company.company_name
+    signer_email = (primary.email if primary else None) or body.account.email
+    agreement_hash = hashlib.sha256(
+        f"{pending['consent_id']}|{signer_name}|{signed_at.isoformat()}".encode("utf-8")
+    ).hexdigest()[:16]
+    update = ConsentUpdateBody(
+        status="agreed",
+        signer_name=signer_name,
+        signer_email=signer_email,
+        signature_method="email_form",
+        form_data={"agreed_via": "onboarding", "signer_display": signer_name, "agreed_at": signed_at.isoformat()},
+        agreement_hash=agreement_hash,
+    )
+    await consent_repo.update_status(db, pending["consent_id"], update)
 
 
 async def submit_onboarding(
@@ -687,9 +739,15 @@ async def submit_onboarding(
             db, supplier_id, _build_onboarding_contacts(body)
         )
 
-        # 5) 동의 전이 — supplier_onboarding.consent_status='consent_agreed'.
+        # 5) 동의 전이 — supplier_onboarding.consent_status='consent_agreed'(입력 게이트).
         signed_at = datetime.now(timezone.utc)
         await repository.mark_consent_agreed(db, supplier_id, signed_at)
+
+        # 5-b) 제3자 정보제공 동의서(데이터 계약) 동의 기록 — 대기중 계약을 'agreed'로 전이.
+        #   온보딩에서 원문을 확인·체크한 근거를 리치 감사기록(서명자·agreement_hash·agreed_at)으로
+        #   남긴다. 같은 트랜잭션(커밋 없음)이라 접근 권한이 생기기 전에 동의 이력이 먼저 확정된다.
+        if body.consent_agreed:
+            await _record_consent_agreement(db, supplier_id, body, signed_at)
 
         # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기).
         await repository.set_supplier_status(db, supplier_id, "supplier_review")

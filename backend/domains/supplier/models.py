@@ -663,11 +663,25 @@ class MasterFormPrefillResponse(BaseModel):
 # 모두 무토큰 공개. prefill 은 비민감 필드만, submit 은 단일 트랜잭션으로 회사정보 +
 # 문서 + PIC + 동의 전이 + 활성 계정 생성을 한 번에 영속화한다(§4).
 # ============================================================
+class OnboardingConsentSummary(BaseModel):
+    """온보딩 진입 시 표시할 대기중(requested/returned) 제3자 정보제공 동의서(데이터 계약) 요약.
+    프론트가 이 조건으로 원문을 재조립해 보여주고, submit 시 이 계약이 'agreed'로 기록된다."""
+    consent_id: uuid.UUID
+    data_scope: list[str] = []
+    purpose: str
+    third_party_sharing: bool = False
+    allowed_recipients: Optional[list[str]] = None
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+    revocable: bool = True
+
+
 class OnboardingPrefillResponse(BaseModel):
-    """공개 prefill — 비민감 필드만(회사명/유형/국가). 1차 협력사 진입 시 확인용."""
+    """공개 prefill — 비민감 필드만(회사명/유형/국가) + 대기중 동의서 요약(있으면)."""
     company_name: str
     provider_type: str
     country: Optional[str] = None
+    consent: Optional[OnboardingConsentSummary] = None
     model_config = {"from_attributes": True}
 
 
