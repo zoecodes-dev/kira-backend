@@ -628,10 +628,48 @@ async def get_onboarding_prefill(db: AsyncSession, supplier_id: UUID) -> Optiona
             "valid_to": pending["valid_to"],
             "revocable": pending["revocable"],
         }
+    # 본인(대표) 담당자 — 이미 등록된 대표 contact가 있으면 폼에 미리 채운다(확인·최신화용).
+    contacts = await repository.get_contacts(db, supplier_id)
+    primary = next((c for c in contacts if c.get("is_primary")), None) or (contacts[0] if contacts else None)
+    contact = None
+    if primary is not None:
+        contact = {
+            "name": primary.get("name"),
+            "email": primary.get("email"),
+            "phone": primary.get("phone"),
+            "department": primary.get("department"),
+        }
+
+    # 주소 — suppliers.address 우선, 없으면 본사(headquarters) 공장 주소로 폴백.
+    #   (submit은 주소를 suppliers.address + supplier_factories(headquarters) 양쪽에 저장한다.)
+    address = supplier.address
+    if not address:
+        factories = await repository.get_factories(db, supplier_id)
+        hq = next((f for f in factories if f.get("factory_role") == "headquarters"), None) or (
+            factories[0] if factories else None
+        )
+        if hq:
+            address = hq.get("address")
+
+    # 사업자등록증 — 이미 업로드돼 있으면 원본 파일명과 함께 표시(재확인용, 재업로드 없이 확인만).
+    #   원본 파일명(business_reg_doc_name) 우선, 없으면(구 데이터) s3 key 끝부분으로 폴백.
+    business_reg_doc = None
+    if supplier.business_reg_doc_url:
+        business_reg_doc = {
+            "s3_key": supplier.business_reg_doc_url,
+            "file_name": supplier.business_reg_doc_name or supplier.business_reg_doc_url.rsplit("/", 1)[-1],
+        }
+
     return {
         "company_name": supplier.company_name,
         "provider_type": supplier.provider_type,
         "country": supplier.country,
+        "business_reg_no": supplier.business_reg_no,
+        "duns_number": supplier.duns_number,
+        "address": address,
+        "contact": contact,
+        "business_reg_doc": business_reg_doc,
+        "unverified": bool(supplier.is_unverified),
         "consent": consent,
     }
 
@@ -694,13 +732,16 @@ async def submit_onboarding(
     if supplier is None:
         return None
 
+    # account 없음(1차) = MES 계정을 이미 보유 → 신규 계정 생성 안 함. 아래 재제출/이메일
+    # 중복 가드는 '신규 계정 생성' 을 막는 것이므로 계정 제출(n차)일 때만 검사한다.
     users = UserRepository(db)
-    # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
-    if await users.get_active_by_supplier_id(supplier_id) is not None:
-        raise OnboardingConflictError("이미 가입이 완료된 협력사입니다.")
-    # 2) 이메일 중복 — users.email UNIQUE 선검사 → 409.
-    if await users.get_by_email(body.account.email) is not None:
-        raise OnboardingConflictError("이미 사용 중인 이메일입니다.")
+    if body.account is not None:
+        # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
+        if await users.get_active_by_supplier_id(supplier_id) is not None:
+            raise OnboardingConflictError("이미 가입이 완료된 협력사입니다.")
+        # 2) 이메일 중복 — users.email UNIQUE 선검사 → 409.
+        if await users.get_by_email(body.account.email) is not None:
+            raise OnboardingConflictError("이미 사용 중인 이메일입니다.")
 
     try:
         # 3) 회사정보 — suppliers 갱신(보낸 것만; country 는 ISO2 정규화).
@@ -713,8 +754,16 @@ async def submit_onboarding(
         iso = _normalize_country_to_iso2(body.company.country)
         if iso:
             company_fields["country"] = iso
+        # 회사 소재지는 공장(headquarters)에도 보존하지만(코어 원칙), prefill/표시 편의를 위해
+        # suppliers.address 컬럼(회사 소재지)에도 함께 저장한다.
+        if body.company.address:
+            company_fields["address"] = body.company.address
         if body.business_reg_doc is not None:
             company_fields["business_reg_doc_url"] = body.business_reg_doc.s3_key
+            # 사용자가 올린 원본 파일명 보존(표시용) — 없으면 s3 key 끝부분으로 폴백.
+            company_fields["business_reg_doc_name"] = (
+                body.business_reg_doc.file_name or body.business_reg_doc.s3_key.rsplit("/", 1)[-1]
+            )
         if body.environmental_report is not None:
             company_fields["environmental_report_url"] = body.environmental_report.s3_key
         # None 은 제거(빈값으로 덮어쓰지 않음). is_unverified=False 는 bool 이라 보존.
@@ -753,17 +802,19 @@ async def submit_onboarding(
         await repository.set_supplier_status(db, supplier_id, "supplier_review")
 
         # 7) 활성 계정 생성 — tenant_id=초대한 OEM, role=supplier_ceo(결정 #3).
-        primary = next((c for c in body.contacts if c.is_primary), None)
-        if primary is None and body.contacts:
-            primary = body.contacts[0]
-        await users.create_user(
-            email=body.account.email,
-            password_hash=get_password_hash(body.account.password),
-            role="supplier_ceo",
-            supplier_id=supplier_id,
-            tenant_id=supplier.tenant_id,
-            name=primary.name if primary else None,
-        )
+        #    1차(account=None)는 MES 계정을 이미 보유하므로 계정 생성을 건너뛴다.
+        if body.account is not None:
+            primary = next((c for c in body.contacts if c.is_primary), None)
+            if primary is None and body.contacts:
+                primary = body.contacts[0]
+            await users.create_user(
+                email=body.account.email,
+                password_hash=get_password_hash(body.account.password),
+                role="supplier_ceo",
+                supplier_id=supplier_id,
+                tenant_id=supplier.tenant_id,
+                name=primary.name if primary else None,
+            )
 
         # 8) 단일 커밋(atomic) — 여기 도달해야만 전체 영속화.
         await db.commit()
