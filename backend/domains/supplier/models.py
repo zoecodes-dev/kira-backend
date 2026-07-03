@@ -445,6 +445,9 @@ class SupplierCompletenessResponse(BaseModel):
     filled_field_count: Optional[int] = None
     completion_rate: Optional[float] = None
     missing_fields: list[str] = []
+    # provider_type별 '필수 필드 키' 전체 목록(프론트 섹션별 총계·'해당 없음' 판정용).
+    #   missing_fields ⊆ required_fields. 광산 등 비대상은 빈 목록.
+    required_fields: list[str] = []
     last_updated_at: Optional[datetime] = None
 
 

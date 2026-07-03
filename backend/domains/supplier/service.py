@@ -106,6 +106,10 @@ async def create_supplier_and_invite(
     if contacts:
         await repository.write_master_form_contacts(db, supplier.supplier_id, contacts)
 
+    # 1-e) 완성도 행 초기 시드 — 초대 직후부터 provider_type별 완성도 조회가 가능하도록.
+    #      (autoflush로 위 risk_profile/onboarding row가 먼저 반영된 뒤 계산된다.)
+    await recompute_completeness(db, supplier.supplier_id)
+
     # 2) 커밋 — 영속화 확정 (repository는 flush만, 커밋은 service 책임)
     await db.commit()
     await db.refresh(supplier)
@@ -194,6 +198,9 @@ async def submit_master_form(
                 db, supplier_id, form.self_reported_risk_level
             )
             sections_saved.append("self_assessment")
+
+        # ── 완성도 재계산(같은 트랜잭션) — 방금 flush된 회사·소재·공장·규제를 반영 ──
+        await recompute_completeness(db, supplier_id)
 
         # ── 단일 커밋 (atomic) — 여기 도달해야만 영속화 ───────────────────────
         await db.commit()
@@ -366,6 +373,8 @@ async def update_supplier_detail(
         await repository.upsert_manufacturer_fields(db, supplier_id, manuf)
     if self_risk is not None:          # 실사 자가진단 → risk_profiles
         await repository.set_self_reported_risk_level(db, supplier_id, self_risk)
+    # 완성도 재계산(같은 트랜잭션) — 방금 갱신한 필드 반영.
+    await recompute_completeness(db, supplier_id)
     await db.commit()
 
     # ── 커밋 성공 후 발행 (PROJECT_CORE 5-2) ──────────────────────────────
@@ -529,17 +538,184 @@ async def get_risk_profile(supplier_id: UUID, db: AsyncSession) -> SupplierRiskP
 
 
 # ============================================================
+# general-review 완성도 — provider_type별 '필수 데이터 완비' 판정 로직 + 재계산
+#   결과는 data_completeness_status(entity_type='supplier')에 upsert 된다.
+#   ★ 폼 저장(초대/master-form/자료제출/온보딩) 커밋 '직전'에 flush로 호출 → 단일 트랜잭션 반영.
+#     submission 제출 게이트(완성도 100% 미만 물리 차단)와 프론트 완성도 표시가 이 값을 읽는다.
+#
+# 핵심 규칙(사용자 확정):
+#   - 제련소(smelter)는 '자기가 다루는 금속'만 채우면 소재구성 완비. 다루는 금속은
+#     공급망(supply_chain_map)에서 그 제련소가 공급하는 파트(mineral/refined_metal)의
+#     광물로 도출한다(자기신고 core_minerals가 아님 — 순환 방지: 안 채우면 0/0=100% 회피).
+#   - 광산(miner)은 데이터 입력 주체가 아니다 → 완성도 판정 제외(required=0, rate=100).
+#   - 사업자등록증은 필수 아님(사용자 지시). 환경성적서만 제조사에서 필수.
+#
+# 필드 키는 프론트 섹션과 맞춘 네임스페이스 문자열: 'company.*' · 'materials.<Metal>'|'materials.any'
+#   · 'factories' · 'regulation.*' · 'documents.*'. missing_fields ⊆ required_fields.
+# ============================================================
+
+# general-review 소재구성 섹션이 추적하는 금속(모달과 일치). Mn 등은 이 화면 범위 밖.
+_TRACKED_METALS = ("Li", "Co", "Ni")
+
+# part_code → 금속 기호. 전용 컬럼이 없어 part_code 토큰으로 판정한다
+#   (MIN-NI/REF-NI→Ni, MIN-CO/REF-CO→Co, MIN-LI/LIOH-REFINED→Li, MIN-MN/REF-MN→Mn).
+# 호출은 material_type in ('mineral','refined_metal') 인 파트에만 하므로 조립품 오탐 없음.
+_METAL_TOKENS = (("LI", "Li"), ("CO", "Co"), ("NI", "Ni"), ("MN", "Mn"))
+
+
+def part_code_to_metal(part_code: Optional[str]) -> Optional[str]:
+    """광물/정제금속 part_code에서 금속 기호를 뽑는다. 해석 불가하면 None."""
+    u = (part_code or "").upper()
+    for token, symbol in _METAL_TOKENS:
+        if token in u:
+            return symbol
+    return None
+
+
+# provider_type별 '소재구성' 요구 방식.
+#   'full'    : Li/Co/Ni 전부 (제조/재활용 — 배터리 화학조성 전체 보유)
+#   'handled' : 공급망에서 도출한 '다루는 금속'만 (제련소)
+#   'none'    : 소재구성 요구 안 함 (유통/트레이더)
+_MATERIALS_MODE = {
+    "manufacturer": "full",
+    "recycler": "full",
+    "smelter": "handled",
+    "trader": "none",
+}
+
+# 탄소집약도/에너지원은 supplier_manufacturer_details 소유이고, 저장 가드(§8-J)가
+# provider_type='manufacturer'일 때만 upsert한다 → 제조사만 요구(다른 유형은 저장 불가라 요구 불가).
+_REQUIRE_CARBON = {"manufacturer"}
+# 환경성적서(탄소 근거 문서)도 탄소 요구가 있는 제조사에만 필수.
+_REQUIRE_ENV_REPORT = {"manufacturer"}
+
+# 모든 판정대상 유형 공통 필수(회사·공장·자가진단). ※ 사업자등록증은 필수 아님(사용자 지시).
+_COMMON_FIELDS = (
+    "company.company_name",
+    "company.country",
+    "company.business_reg_no",
+    "company.provider_type",
+    "factories",
+    "regulation.self_reported_risk_level",
+)
+
+
+def _required_fields(provider_type: Optional[str], handled_metals: set) -> list:
+    """provider_type(+제련소는 공급망 도출 금속)로 필수 필드 키 목록을 만든다.
+    miner면 빈 목록(입력 주체 아님)."""
+    pt = provider_type or ""
+    if pt == "miner":
+        return []
+
+    fields = list(_COMMON_FIELDS)
+
+    mode = _MATERIALS_MODE.get(pt, "full")
+    if mode == "full":
+        fields += [f"materials.{m}" for m in _TRACKED_METALS]
+    elif mode == "handled":
+        metals = [m for m in _TRACKED_METALS if m in handled_metals]
+        if metals:
+            fields += [f"materials.{m}" for m in metals]
+        else:
+            # 공급망에서 다루는 금속을 못 찾음(맵 미구축 등) → '최소 1개 금속' 게이트로
+            #   순환(0/0=100%)을 막는다. 프론트는 이 키를 '금속 1개 이상 입력'으로 표시.
+            fields.append("materials.any")
+    # mode == "none" → 소재구성 요구 없음(유통/트레이더)
+
+    if pt in _REQUIRE_CARBON:
+        fields += ["regulation.carbon_intensity", "regulation.energy_source"]
+    if pt in _REQUIRE_ENV_REPORT:
+        fields.append("documents.environmental_report_url")
+    return fields
+
+
+def _val_present(v) -> bool:
+    if v is None:
+        return False
+    if isinstance(v, str):
+        return v.strip() != ""
+    return True
+
+
+# 스칼라 필드 키(접두어 제거 후) → snapshot 컬럼명.
+_COMPLETENESS_COLUMN = {
+    "company_name": "company_name",
+    "country": "country",
+    "business_reg_no": "business_reg_no",
+    "provider_type": "provider_type",
+    "carbon_intensity": "carbon_intensity",
+    "energy_source": "energy_source",
+    "business_reg_doc_url": "business_reg_doc_url",
+    "environmental_report_url": "environmental_report_url",
+}
+
+
+def _field_filled(field: str, snap: dict) -> bool:
+    cm = snap.get("core_minerals") or {}
+    if field == "factories":
+        return (snap.get("factory_count") or 0) > 0
+    if field == "materials.any":
+        return any(_val_present(cm.get(m)) for m in _TRACKED_METALS)
+    if field.startswith("materials."):
+        return _val_present(cm.get(field.split(".", 1)[1]))
+    if field == "regulation.self_reported_risk_level":
+        v = snap.get("self_reported_risk_level")
+        return _val_present(v) and v != "unknown"
+    key = field.split(".", 1)[1] if "." in field else field
+    return _val_present(snap.get(_COMPLETENESS_COLUMN.get(key, key)))
+
+
+def _compute_completeness(snapshot: dict, handled_metals: set) -> dict:
+    """snapshot(필드값) + handled_metals(제련소 공급망 금속) → 완성도 집계.
+    반환: {required, filled, rate, missing[]}. miner 등 비대상은 required=0 · rate=100."""
+    req = _required_fields(snapshot.get("provider_type"), handled_metals)
+    if not req:
+        return {"required": 0, "filled": 0, "rate": 100.0, "missing": []}
+    missing = [f for f in req if not _field_filled(f, snapshot)]
+    filled = len(req) - len(missing)
+    rate = round(filled * 100.0 / len(req), 2)
+    return {"required": len(req), "filled": filled, "rate": rate, "missing": missing}
+
+
+async def _handled_metals(db: AsyncSession, supplier_id: UUID) -> set:
+    """제련소가 공급망에서 '다루는 금속' 집합(child=이 협력사 파트의 광물)."""
+    part_codes = await repository.get_supply_chain_metals(db, supplier_id)
+    return {m for m in (part_code_to_metal(c) for c in part_codes) if m}
+
+
+async def recompute_completeness(db: AsyncSession, supplier_id: UUID) -> None:
+    """general-review 완성도 재계산 → data_completeness_status upsert. flush만(커밋은 호출부).
+    없는 supplier면 무동작."""
+    snap = await repository.get_completeness_inputs(db, supplier_id)
+    if snap is None:
+        return
+    result = _compute_completeness(snap, await _handled_metals(db, supplier_id))
+    await repository.upsert_completeness(
+        db, supplier_id,
+        required=result["required"], filled=result["filled"],
+        rate=result["rate"], missing=result["missing"],
+    )
+
+
+# ============================================================
 # BE-3: 7탭 모달 조회 (기존 테이블 SELECT 전용)
 #   존재하지 않는 협력사면 None을 반환 → router가 404로 매핑.
 # ============================================================
 async def get_factories(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """사업장 탭 — 공장/광산 목록(좌표 lat/lng 포함)."""
-    if await repository.get_supplier_by_id(db, supplier_id) is None:
+    """사업장 탭 — 공장 목록(좌표 lat/lng 포함).
+    제련소가 입력한 공장 = 곧 광산이므로, 광산 페이지는 자기 공장 대신 '정보관리 주체'인 상위
+    제련소가 입력한 supplier_factories 를 그대로 읽어 보여준다(광산은 입력 주체 아님).
+    상위 제련소 링크가 없으면 광산 자기 공장(대개 없음)을 그대로 반환."""
+    supplier = await repository.get_supplier_by_id(db, supplier_id)
+    if supplier is None:
         return None
-    return {
-        "supplier_id": supplier_id,
-        "factories": await repository.get_factories(db, supplier_id),
-    }
+    source_id = supplier_id
+    if supplier.provider_type == "miner":
+        smelter_id = await repository.get_managing_smelter_id(db, supplier_id)
+        if smelter_id is not None:
+            source_id = smelter_id
+    factories = await repository.get_factories(db, source_id)
+    return {"supplier_id": supplier_id, "factories": factories}
 
 
 async def get_contacts(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
@@ -553,8 +729,12 @@ async def get_contacts(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
 
 
 async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """입력 완성도 — data_completeness_status 단건. 협력사 없으면 None,
-    집계 전이면 빈 기본값으로 안전 반환."""
+    """입력 완성도 — data_completeness_status 단건 + provider_type별 필수 필드 키.
+    협력사 없으면 None, 집계 전이면 빈 기본값으로 안전 반환.
+
+    저장된 counts/rate/missing(제출 게이트 SSOT)은 그대로 읽고, required_fields는 현재
+    데이터로 계산해 함께 반환한다(프론트가 섹션별 총계·'해당 없음'을 정확히 그리도록).
+    저장 경로가 매 변경 시 recompute하므로 저장값과 현재 계산은 일치한다."""
     if await repository.get_supplier_by_id(db, supplier_id) is None:
         return None
     comp = await repository.get_completeness(db, supplier_id)
@@ -566,7 +746,14 @@ async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict
             "missing_fields": [],
             "last_updated_at": None,
         }
-    return {"supplier_id": supplier_id, **comp}
+    # provider_type별 필수 필드 키(제련소는 공급망 도출 금속 반영).
+    required: List[str] = []
+    snap = await repository.get_completeness_inputs(db, supplier_id)
+    if snap is not None:
+        required = _required_fields(
+            snap.get("provider_type"), await _handled_metals(db, supplier_id)
+        )
+    return {"supplier_id": supplier_id, "required_fields": required, **comp}
 
 
 async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
@@ -706,6 +893,9 @@ async def submit_onboarding(
             tenant_id=supplier.tenant_id,
             name=primary.name if primary else None,
         )
+
+        # 7-b) 완성도 재계산(같은 트랜잭션) — 온보딩으로 채운 회사·공장·문서 반영.
+        await recompute_completeness(db, supplier_id)
 
         # 8) 단일 커밋(atomic) — 여기 도달해야만 전체 영속화.
         await db.commit()
