@@ -29,7 +29,7 @@ router → service → repository → models
 - **router**: HTTP 진입점(얇은 라우팅). `db.commit()` 금지.
 - **service**: 비즈니스 로직 + 이벤트 발행 + 커밋 일원화. 멀티 write는 단일 트랜잭션 atomic.
 - **repository**: 직접 SQL. `flush`까지만.
-- **도메인 격리**: 다른 도메인을 직접 import하지 않고 **이벤트(`events/types.py`) + `publish()`** 로만 통신.
+- **도메인 격리**: 도메인 간 통신은 **이벤트(`events/types.py`) + `publish()`가 기본**. 단 이벤트로 대체 불가능한 두 경우만 상대 도메인 함수 재사용을 허용한다 — ① **동기 조회**(응답을 즉시 만들어야 하는 read; 상대 도메인의 service/repository read 호출), ② **단일 트랜잭션 원자성이 필요한 write**(예: 온보딩 제출→즉시 로그인/중복 즉시 409; 상대 도메인의 **repository까지만**, 커밋 소유는 호출 도메인 service). 예외 적용 시 결정 근거를 코드 주석에 남긴다. (`handlers`·`workers`·`agents`·`hitl`·`main`은 도메인이 아니라 **조립·구독 계층**이라 이 제약 밖 — 도메인 조립은 여기서 한다.)
 
 ### 이벤트 기반 (PostgreSQL LISTEN/NOTIFY)
 도메인 간 통신은 ~30종 이벤트 계약(`backend/events/types.py`, 팀 전체 SSOT)으로 이뤄집니다.
@@ -188,7 +188,7 @@ BASE_URL=http://localhost pytest ci/ -v
 1. **레이어 단방향**: router → service → repository → models
 2. **커밋 경계**: router는 commit 금지. service가 일원화. repository는 flush만.
 3. **이벤트 발행 순서**: DB 변경 → commit → **커밋 성공 후** publish
-4. **도메인 격리**: 다른 도메인 import 금지. 이벤트 + publish()로만 통신.
+4. **도메인 격리**: 도메인 간 통신은 이벤트 + `publish()`가 **기본**. 예외 — ① 동기 조회 read, ② 단일 트랜잭션 write는 상대 도메인 함수 재사용 허용(근거 주석 필수). 조립·구독 계층(`handlers`·`workers`·`agents`·`hitl`·`main`)은 제약 밖. 상세는 §레이어.
 5. **스키마 변경 = `docker/01_schema.sql` 직접 편집**: DDL의 SSOT는 이 파일(alembic 미사용). ORM은 최종 스키마와 1:1.
 
 ---
