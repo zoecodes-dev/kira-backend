@@ -213,6 +213,32 @@ class SubmissionStatusChangedEvent:
 # SupplyChain / Geo (D · 영수) — 본 도메인에서 실제 발행
 # ============================================================
 @dataclass
+class SupplyChainGapDetectedEvent:
+    """
+    공급망 맵 gap→자료요청 트리거. 어떤 협력사 노드가 규제 필수 필드를 미보유해서
+    '자료 제출 요청'이 필요하다는 사실을 발행한다. (노드 1개당 이벤트 1건)
+
+    발행: D(supplychain) — POST /trigger-data-requests 는 gap을 계산해 이 이벤트만
+      노드별로 발행하고 즉시 202를 반환한다(요청 생성은 동기 아님).
+    수신: E(submission)가 create_and_request_submission 으로 data_request 를 생성.
+      → submission 이 자기 트랜잭션·커밋 소유. supplychain 은 submission repository/service
+        를 직접 import 하지 않는다(규칙 #4 정면 준수).
+
+    requester_user_id / actor_id / due_date 는 트리거 요청 맥락(누가·언제까지)이라
+      payload 에 실어 submission 이 그대로 사용한다. requested_data_type 은 미보유 필드명
+      CSV(예: "carbon_intensity,mine_coordinates").
+    """
+    product_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
+    requested_data_type: Optional[str] = None
+    requester_user_id: Optional[UUID] = None
+    actor_id: Optional[UUID] = None
+    due_date: Optional[datetime] = None
+    event_name: str = "SupplyChainGapDetected"
+    occurred_at: datetime = field(default_factory=_now_utc)
+
+
+@dataclass
 class GeoRiskDetectedEvent:
     """
     고위험 지역 판정 또는 좌표 불일치 발견 시 발행.
