@@ -500,7 +500,8 @@ class SupplyChainRepository:
                     scm.child_supplier_id, s.provider_type,
                     0 AS depth,
                     -- 사이클 가드용 방문 경로. child_supplier_id는 suppliers INNER JOIN이라 NULL 없음.
-                    ARRAY[scm.child_supplier_id] AS path
+                    ARRAY[scm.child_supplier_id] AS path,
+                    scm.bom_version_id
                 FROM supply_chain_map scm
                 JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
                 JOIN suppliers s ON s.supplier_id = scm.child_supplier_id
@@ -512,9 +513,13 @@ class SupplyChainRepository:
                 SELECT
                     scm.child_supplier_id, s.provider_type,
                     sct.depth + 1,
-                    sct.path || scm.child_supplier_id
+                    sct.path || scm.child_supplier_id,
+                    scm.bom_version_id
                 FROM supply_chain_map scm
                 JOIN sc_tree sct ON scm.parent_supplier_id = sct.child_supplier_id
+                    -- [버그 수정] bom_version_id 제한이 없으면 하위 재귀가 원청(KIRA) 공유 노드를 거쳐
+                    -- 다른 제품(bom_version)의 협력사까지 전부 끌고 온다 — 반드시 같은 맵 안에서만 내려간다.
+                    AND scm.bom_version_id = sct.bom_version_id
                 JOIN suppliers s ON s.supplier_id = scm.child_supplier_id
                 -- 사이클/재방문 차단: 이미 경로에 있는 협력사는 재귀하지 않는다(무한/지수 폭주 방지).
                 WHERE scm.child_supplier_id <> ALL(sct.path)
@@ -547,7 +552,14 @@ class SupplyChainRepository:
                     WHERE sf.supplier_id = us.supplier_id AND fcd.is_active = TRUE
                 )                                                            AS has_factory_carbon_decl,
                 -- Miner: mine_coordinates (PostGIS POINT)
-                (smind.mine_coordinates IS NOT NULL)                         AS has_mine_coordinates
+                (smind.mine_coordinates IS NOT NULL)                         AS has_mine_coordinates,
+                -- Miner/Trader(UFLPA): origin_country — 소재 국가 미기재 = 원산지 미확인
+                (s.country IS NOT NULL)                                      AS has_origin_country,
+                -- 전 유형 공통: 제3자 정보제공 동의서 실제 '동의(agreed)' 여부(요청만 한 상태는 미완료로 집계)
+                EXISTS (
+                    SELECT 1 FROM data_provision_consents dpc
+                    WHERE dpc.supplier_id = us.supplier_id AND dpc.status = 'agreed'
+                )                                                            AS has_consent_agreed
             FROM unique_suppliers us
             LEFT JOIN suppliers s                        ON s.supplier_id = us.supplier_id
             LEFT JOIN root_suppliers rs                  ON rs.child_supplier_id = us.supplier_id
@@ -717,6 +729,7 @@ class SupplyChainRepository:
                 scm.edge_id AS map_id,
                 scm.part_id,
                 scm.child_supplier_id  AS supplier_id,
+                scm.parent_supplier_id,  -- [FIX] 프론트 트리가 part_id만으로 자식을 묶어 다중공장 교차조인되던 버그 수정용 — 진짜 부모 협력사 ID
                 (
                     SELECT sr.factory_id FROM supply_ratio sr
                     WHERE sr.edge_id = scm.edge_id
@@ -902,7 +915,11 @@ class SupplyChainRepository:
         재귀 CTE로 원청(parent NULL, hop0)부터 말단 공장까지 전개하며
         경로상 ratio_percentage(상대값)를 곱해 `cumulative_contribution`(말단 기여도 %)을 산출.
 
-        - 엣지에 supply_ratio 행이 여러 개면(공장 분할) 공장 단위로 행이 갈라진다.
+        - [버그 수정] 엣지의 공장 분할(supply_ratio N행)을 재귀 항 안에서 직접 LEFT JOIN 하면,
+          조상 엣지가 공장 K개로 갈라진 순간 그 아래 모든 자손이 K배씩 곱으로 부풀려진다
+          (예: 부모 2공장×자식 2공장 = 4행, 손자는 더 곱해짐). 공장 분할은 각 엣지의 '자기 내부'
+          비율일 뿐 조상과 무관하므로, 재귀 전파는 엣지 단위 합계(edge_ratio, 보통 100)로만 하고,
+          공장별 세부 breakdown은 최종 SELECT에서 한 번만 곱한다.
         - supply_ratio 가 없는 엣지는 100% 패스스루(×1.0)로 취급해 누적곱 경로가 0/NULL로 끊기지 않게 한다.
         - 순환 판정: path 키 = (child_supplier_id, part_id) 복합키(겸업 self-edge 오판 방지, 기존 트리 CTE와 동일).
         """
@@ -912,20 +929,25 @@ class SupplyChainRepository:
             params["bom_version_id"] = bom_version_id
 
         query = text(f"""
-            WITH RECURSIVE sc_cum AS (
+            WITH RECURSIVE edge_ratio AS (
+                -- 엣지별 자기 공장 분할 합(비재귀, 보통 100) — 재귀 전파는 이 값 하나만 사용해
+                -- 조상의 공장 분할이 자손 쪽으로 곱셈 중복(fan-out)되지 않게 한다.
+                SELECT edge_id, SUM(ratio_percentage) AS total_ratio
+                FROM supply_ratio
+                GROUP BY edge_id
+            ),
+            sc_cum AS (
                 -- 앵커: 원청 루트 엣지 (parent_supplier_id IS NULL, hop0)
                 SELECT
                     scm.edge_id AS map_id, scm.bom_version_id, scm.parent_supplier_id,
                     scm.child_supplier_id, scm.part_id, scm.hop_level, scm.link_status,
-                    sr.factory_id,
-                    sr.ratio_percentage,
-                    COALESCE(sr.ratio_percentage / 100.0, 1.0) AS cum_ratio,
+                    COALESCE(er.total_ratio / 100.0, 1.0) AS cum_ratio,
                     ARRAY[scm.child_supplier_id::text || ':' || scm.part_id::text] AS path,
                     FALSE AS is_cycle
                 FROM supply_chain_map scm
                 JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
                 JOIN products pr     ON pr.product_id = bv.product_id
-                LEFT JOIN supply_ratio sr ON sr.edge_id = scm.edge_id
+                LEFT JOIN edge_ratio er ON er.edge_id = scm.edge_id
                 WHERE bv.product_id = :product_id
                   AND pr.tenant_id = :tenant_id
                   AND scm.parent_supplier_id IS NULL
@@ -933,35 +955,42 @@ class SupplyChainRepository:
 
                 UNION ALL
 
-                -- 재귀: 부모 child = 자식 parent, 같은 bom_version, hop_level +1 연속
+                -- 재귀: 부모 child = 자식 parent, 같은 bom_version, hop_level +1 연속.
+                -- 공장 단위가 아니라 엣지 단위(edge_ratio)로만 곱해 fan-out을 막는다.
                 SELECT
                     scm.edge_id AS map_id, scm.bom_version_id, scm.parent_supplier_id,
                     scm.child_supplier_id, scm.part_id, scm.hop_level, scm.link_status,
-                    sr.factory_id,
-                    sr.ratio_percentage,
-                    c.cum_ratio * COALESCE(sr.ratio_percentage / 100.0, 1.0) AS cum_ratio,
+                    c.cum_ratio * COALESCE(er.total_ratio / 100.0, 1.0) AS cum_ratio,
                     c.path || (scm.child_supplier_id::text || ':' || scm.part_id::text),
                     (scm.child_supplier_id::text || ':' || scm.part_id::text) = ANY(c.path)
                 FROM supply_chain_map scm
                 JOIN sc_cum c ON scm.parent_supplier_id = c.child_supplier_id
                              AND scm.bom_version_id = c.bom_version_id
                              AND scm.hop_level = c.hop_level + 1
-                LEFT JOIN supply_ratio sr ON sr.edge_id = scm.edge_id
+                LEFT JOIN edge_ratio er ON er.edge_id = scm.edge_id
                 WHERE NOT c.is_cycle
             )
             SELECT
-                map_id,
-                part_id,
-                child_supplier_id      AS supplier_id,
-                parent_supplier_id,
-                factory_id,
-                hop_level,
-                link_status,
-                ratio_percentage       AS ratio_percent,
-                ROUND((cum_ratio * 100.0)::numeric, 4) AS cumulative_contribution
-            FROM sc_cum
-            WHERE NOT is_cycle
-            ORDER BY hop_level, map_id;
+                sc.map_id,
+                sc.part_id,
+                sc.child_supplier_id   AS supplier_id,
+                sc.parent_supplier_id,
+                sr.factory_id,
+                sc.hop_level,
+                sc.link_status,
+                sr.ratio_percentage    AS ratio_percent,
+                -- 공장별 세부치: 이 엣지에 도달한 누적비(sc.cum_ratio, 이미 이 엣지 자체 총합까지 반영)를
+                -- 엣지 내 공장 비중(factory 비율 ÷ 엣지 총합)으로 나눠 공장 단위로만 한 번 배분.
+                ROUND(
+                    (sc.cum_ratio * COALESCE(sr.ratio_percentage, 100.0)
+                        / COALESCE(er.total_ratio, 100.0) * 100.0)::numeric,
+                    4
+                ) AS cumulative_contribution
+            FROM sc_cum sc
+            LEFT JOIN edge_ratio er   ON er.edge_id = sc.map_id
+            LEFT JOIN supply_ratio sr ON sr.edge_id = sc.map_id
+            WHERE NOT sc.is_cycle
+            ORDER BY sc.hop_level, sc.map_id;
         """)
         result = await self.session.execute(query, params)
         return [dict(row._mapping) for row in result]

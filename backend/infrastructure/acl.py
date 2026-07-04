@@ -61,7 +61,7 @@ async def get_accessible_supplier_ids(
     rows = await db.execute(
         text("""
             SELECT DISTINCT id FROM (
-                SELECT :sid::uuid AS id
+                SELECT CAST(:sid AS uuid) AS id
                 UNION
                 SELECT parent_supplier_id AS id
                   FROM supply_chain_map

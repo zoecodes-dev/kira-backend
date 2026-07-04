@@ -1160,3 +1160,813 @@ UPDATE suppliers SET core_minerals = '{"Ni":1.6}'::jsonb WHERE supplier_id = '65
 UPDATE suppliers SET core_minerals = '{"Ni":2.1}'::jsonb WHERE supplier_id = '65333333-0000-4000-8000-000000000003';
 UPDATE suppliers SET core_minerals = '{"Co":2.5}'::jsonb WHERE supplier_id = '65444444-0000-4000-8000-000000000004';
 UPDATE suppliers SET core_minerals = '{"Ni":1.4}'::jsonb WHERE supplier_id = '65555555-0000-4000-8000-000000000005';
+
+
+-- ============================================================
+-- 22. PM 테스트용 — 빈 협력사 10개 + 다공장(2~3개) 협력사 3곳
+-- ============================================================
+
+-- 22-1. PM님이 마스터폼에서 직접 소재·공장·규제 정보를 입력해볼 빈 협력사 10개.
+--   일부러 core_minerals/공장/담당자/서류 전부 비워둠 — 신규 온보딩 입력 흐름 테스트용.
+--   provider_type을 4종류로 섞어 마스터폼의 유형별 입력 필드 차이도 확인 가능하게 함.
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, completeness_score, status, risk_level) VALUES
+('71000001-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사01(제조사)', 'PM Test Supplier 01', 'manufacturer', 0, 'supplier_pending', 'low'),
+('71000002-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사02(제조사)', 'PM Test Supplier 02', 'manufacturer', 0, 'supplier_pending', 'low'),
+('71000003-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사03(제조사)', 'PM Test Supplier 03', 'manufacturer', 0, 'supplier_pending', 'low'),
+('71000004-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사04(제조사)', 'PM Test Supplier 04', 'manufacturer', 0, 'supplier_pending', 'low'),
+('71000005-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사05(광산)', 'PM Test Supplier 05', 'miner', 0, 'supplier_pending', 'low'),
+('71000006-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사06(광산)', 'PM Test Supplier 06', 'miner', 0, 'supplier_pending', 'low'),
+('71000007-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사07(제련소)', 'PM Test Supplier 07', 'smelter', 0, 'supplier_pending', 'low'),
+('71000008-0000-4000-8000-000000000008', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사08(제련소)', 'PM Test Supplier 08', 'smelter', 0, 'supplier_pending', 'low'),
+('71000009-0000-4000-8000-000000000009', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사09(유통)', 'PM Test Supplier 09', 'trader', 0, 'supplier_pending', 'low'),
+('7100000a-0000-4000-8000-00000000000a', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PM테스트협력사10(유통)', 'PM Test Supplier 10', 'trader', 0, 'supplier_pending', 'low');
+
+-- 22-2. 다공장(2~3개) 협력사 3곳 — 기존 단일공장 100% 비율을 여러 공장으로 분할.
+--   하나에너지셀(2개) / 성진셀(3개) / 한독배터리(2개). 전부 Happy(완료) 시나리오 소속이라
+--   VW ID.7(Gray 테스트베드)엔 영향 없음.
+
+-- 하나에너지셀(주) 2번째 공장 — 세종
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+VALUES ('71222223-0000-4000-8000-000000000002', '61222222-0000-4000-8000-000000000002', '세종 제2공장', 'Sejong Plant 2', 'KR', 'Sejong', ST_SetSRID(ST_MakePoint(127.290, 36.480), 4326), 'production', 'EU', '["EU_BATTERY","EU_BATTERY_ART7"]'::jsonb, 40.00, '오민준', 'Plant Manager', '+82-43-222-0002', 'mj.oh@hanaenergy.demo')
+ON CONFLICT (factory_id) DO NOTHING;
+
+-- 성진셀(주) 2·3번째 공장 — 김해·밀양
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+VALUES
+('71333334-0000-4000-8000-000000000003', '61333333-0000-4000-8000-000000000003', '김해 제2공장', 'Gimhae Plant 2', 'KR', 'Gimhae',  ST_SetSRID(ST_MakePoint(128.889, 35.228), 4326), 'production', 'EU', '["EU_BATTERY","EU_BATTERY_ART7"]'::jsonb, 30.00, '정유진', 'Purchasing Manager', '+82-55-333-0002', 'yj.jung@sungjincell.demo'),
+('71333335-0000-4000-8000-000000000004', '61333333-0000-4000-8000-000000000003', '밀양 제3공장', 'Miryang Plant 3', 'KR', 'Miryang', ST_SetSRID(ST_MakePoint(128.746, 35.503), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 20.00, '백승호', 'R&D Manager', '+82-55-333-0003', 'sh.baek@sungjincell.demo')
+ON CONFLICT (factory_id) DO NOTHING;
+
+-- 한독배터리(주) 2번째 공장 — 대구
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+VALUES ('71555556-0000-4000-8000-000000000005', '61555555-0000-4000-8000-000000000005', '대구 제2공장', 'Daegu Plant 2', 'KR', 'Daegu', ST_SetSRID(ST_MakePoint(128.601, 35.871), 4326), 'production', 'BOTH', '["EU_BATTERY","EU_BATTERY_ART7"]'::jsonb, 30.00, '박혜진', 'Supply Chain Mgr', '+82-54-555-0003', 'hj.park@handokbattery.demo')
+ON CONFLICT (factory_id) DO NOTHING;
+
+-- 기존 공장의 supply_ratio_percent·공급비율을 분할 비율로 조정(기존 100% → 신규 공장분 반영).
+UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '71222222-0000-4000-8000-000000000002';
+UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '71333333-0000-4000-8000-000000000003';
+UPDATE supplier_factories SET supply_ratio_percent = 70.00 WHERE factory_id = '71555555-0000-4000-8000-000000000005';
+
+-- supply_ratio(엣지별 공급비율) — 기존 100% 단일행을 공장별로 분할.
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 5520 WHERE edge_id = '86666666-0000-4000-8000-000000000002' AND factory_id = '71222222-0000-4000-8000-000000000002';
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '86666666-0000-4000-8000-000000000002', '71222223-0000-4000-8000-000000000002', 40.00, 3680, 'ea'
+WHERE NOT EXISTS (SELECT 1 FROM supply_ratio WHERE edge_id = '86666666-0000-4000-8000-000000000002' AND factory_id = '71222223-0000-4000-8000-000000000002');
+
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 4750 WHERE edge_id = '87777777-0000-4000-8000-000000000002' AND factory_id = '71333333-0000-4000-8000-000000000003';
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT * FROM (VALUES
+  ('87777777-0000-4000-8000-000000000002'::uuid, '71333334-0000-4000-8000-000000000003'::uuid, 30.00::numeric, 2850::numeric, 'ea'),
+  ('87777777-0000-4000-8000-000000000002'::uuid, '71333335-0000-4000-8000-000000000004'::uuid, 20.00::numeric, 1900::numeric, 'ea')
+) AS v(edge_id, factory_id, ratio_percentage, volume, unit)
+WHERE NOT EXISTS (SELECT 1 FROM supply_ratio sr WHERE sr.edge_id = v.edge_id AND sr.factory_id = v.factory_id);
+
+UPDATE supply_ratio SET ratio_percentage = 70.00, volume = 6160 WHERE edge_id = '89999999-0000-4000-8000-000000000002' AND factory_id = '71555555-0000-4000-8000-000000000005';
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000002', '71555556-0000-4000-8000-000000000005', 30.00, 2640, 'ea'
+WHERE NOT EXISTS (SELECT 1 FROM supply_ratio WHERE edge_id = '89999999-0000-4000-8000-000000000002' AND factory_id = '71555556-0000-4000-8000-000000000005');
+
+-- 신규 공장들도 탄소발자국 선언(규제 정보) 반영 — PM 요청("규제 들어와있어야") 충족.
+INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+SELECT * FROM (VALUES
+  ('71222223-0000-4000-8000-000000000002'::uuid, 2.4500::numeric, 'PEF', '2024-04-01'::date, '2024-04-01'::date, 'supplier_declared'),
+  ('71333334-0000-4000-8000-000000000003'::uuid, 2.9500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),
+  ('71333335-0000-4000-8000-000000000004'::uuid, 3.1000::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),
+  ('71555556-0000-4000-8000-000000000005'::uuid, 2.3000::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'third_party_verified')
+) AS v(factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+WHERE NOT EXISTS (SELECT 1 FROM factory_carbon_declarations WHERE factory_id = v.factory_id);
+
+
+-- ============================================================
+-- 23. 나머지 협력사(예외 4곳 제외) 규제 정보(탄소발자국 선언) 전량 백필
+-- ============================================================
+-- PM 요청 — "협력사 관리에서 소재·공장정보·규제 다 들어와있어야". GlobalMining Corp·
+-- Unverified Precursor Trading·신성배터리(주)·대성정밀(주) 4곳은 위반/Gray/온보딩초기/
+-- HITL 시나리오상 의도적 결측이라 제외(그 외 전부 채움 — 한양셀 포함, 원래 있어야 했는데 누락돼 있었음).
+INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+SELECT * FROM (VALUES
+  -- 1차: 한양셀(누락분 재기입) · 동아셀(기존 의도적 갭 → PM 요청으로 채움)
+  ('f1111111-0000-4000-8000-000000000001'::uuid, 2.3400::numeric, 'PEF', '2025-01-01'::date, '2025-01-01'::date, 'third_party_verified'),
+  ('71444444-0000-4000-8000-000000000004'::uuid, 3.0500::numeric, 'PEF', '2024-03-01'::date, '2024-03-01'::date, 'supplier_declared'),
+  -- 2차: CAM 제조사
+  ('72333333-0000-4000-8000-000000000003'::uuid, 3.1500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 신진CAM
+  ('72666666-0000-4000-8000-000000000006'::uuid, 3.0800::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 청우CAM
+  -- 3차: 전구체 제조사
+  ('73111111-0000-4000-8000-000000000001'::uuid, 2.9200::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 동신전구체
+  ('73222222-0000-4000-8000-000000000002'::uuid, 3.2200::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 대성전구체
+  ('73333333-0000-4000-8000-000000000003'::uuid, 2.9800::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 한중정밀화학
+  ('73444444-0000-4000-8000-000000000004'::uuid, 3.0500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 세종프리커서
+  ('73555555-0000-4000-8000-000000000005'::uuid, 3.1200::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 남해케미칼
+  ('73666666-0000-4000-8000-000000000006'::uuid, 2.9500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),  -- 은성정밀소재
+  -- 4차: 제련소
+  ('74111111-0000-4000-8000-000000000001'::uuid, 2.8000::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'third_party_verified'), -- 고려제련
+  ('74222222-0000-4000-8000-000000000002'::uuid, 5.5000::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),    -- PT Indosel(고탄소·인니 화력)
+  ('74333333-0000-4000-8000-000000000003'::uuid, 2.6000::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'third_party_verified'), -- AusRef
+  ('74444444-0000-4000-8000-000000000004'::uuid, 4.8000::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),    -- Zambia Copper&Cobalt
+  ('74555555-0000-4000-8000-000000000005'::uuid, 2.7500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'third_party_verified'), -- Brazil Nickel Refining
+  -- 5차: 광산(채굴 단계 배출량 — 정련소 대비 낮은 값)
+  ('f9999999-0000-4000-8000-000000000009'::uuid, 0.4500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),    -- 칠레리튬광업
+  ('f3333333-0000-4000-8000-000000000003'::uuid, 0.4200::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'third_party_verified'), -- 호주리튬광업
+  ('75111111-0000-4000-8000-000000000001'::uuid, 0.6800::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),    -- Sulawesi Nickel Mining
+  ('75222222-0000-4000-8000-000000000002'::uuid, 0.7200::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),    -- Weda Bay Nickel Mine
+  ('75333333-0000-4000-8000-000000000003'::uuid, 0.5000::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'third_party_verified'), -- Western Australia Nickel Mine
+  ('75444444-0000-4000-8000-000000000004'::uuid, 0.8500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'supplier_declared'),    -- Zambia Copperbelt Cobalt Mine
+  ('75555555-0000-4000-8000-000000000005'::uuid, 0.5500::numeric, 'PEF', '2024-01-01'::date, '2024-01-01'::date, 'third_party_verified')  -- Brazil Nickel Laterite Mine
+) AS v(factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+WHERE NOT EXISTS (SELECT 1 FROM factory_carbon_declarations WHERE factory_id = v.factory_id);
+
+
+-- ============================================================
+-- 24. 제조사 타입 "규제" 탭 표시 버그 수정 — supplier_manufacturer_details 백필
+-- ============================================================
+-- [원인] "규제" 탭(탄소집약도·에너지원)은 factory_carbon_declarations가 아니라
+--   supplier_manufacturer_details 1건만 읽는다. tier2·tier3 신규 제조사 12곳에
+--   이 테이블 행이 없어서 23번에서 채운 공장 탄소선언이 화면엔 안 보이던 것.
+-- carbon_intensity는 23번에서 넣은 해당 공장 탄소선언 값과 맞춤.
+INSERT INTO supplier_manufacturer_details (supplier_id, manufacturing_process, energy_source, capacity, carbon_intensity)
+SELECT * FROM (VALUES
+  ('62111111-0000-4000-8000-000000000001'::uuid, 'NCM Cathode Active Material Synthesis', 'mixed',     '6GWh/yr', 3.0500::numeric), -- 에코양극재
+  ('62222222-0000-4000-8000-000000000002'::uuid, 'NCM Cathode Active Material Synthesis', 'mixed',     '5GWh/yr', 3.2100::numeric), -- 포스피케미칼
+  ('62333333-0000-4000-8000-000000000003'::uuid, 'NCM Cathode Active Material Synthesis', 'mixed',     '4GWh/yr', 3.1500::numeric), -- 신진CAM
+  ('62444444-0000-4000-8000-000000000004'::uuid, 'NCM Cathode Active Material Synthesis', 'renewable', '5GWh/yr', 3.1200::numeric), -- 한라소재
+  ('62555555-0000-4000-8000-000000000005'::uuid, 'NCM Cathode Active Material Synthesis', 'mixed',     '6GWh/yr', 2.9500::numeric), -- 대한CAM
+  ('62666666-0000-4000-8000-000000000006'::uuid, 'NCM Cathode Active Material Synthesis', 'mixed',     '4GWh/yr', 3.0800::numeric), -- 청우CAM
+  ('63111111-0000-4000-8000-000000000001'::uuid, 'NCM Precursor Co-precipitation',        'mixed',     '10kt/yr', 2.9200::numeric), -- 동신전구체
+  ('63222222-0000-4000-8000-000000000002'::uuid, 'NCM Precursor Co-precipitation',        'mixed',     '8kt/yr',  3.2200::numeric), -- 대성전구체
+  ('63333333-0000-4000-8000-000000000003'::uuid, 'NCM Precursor Co-precipitation',        'mixed',     '9kt/yr',  2.9800::numeric), -- 한중정밀화학
+  ('63444444-0000-4000-8000-000000000004'::uuid, 'NCM Precursor Co-precipitation',        'renewable', '7kt/yr',  3.0500::numeric), -- 세종프리커서
+  ('63555555-0000-4000-8000-000000000005'::uuid, 'NCM Precursor Co-precipitation',        'mixed',     '8kt/yr',  3.1200::numeric), -- 남해케미칼
+  ('63666666-0000-4000-8000-000000000006'::uuid, 'NCM Precursor Co-precipitation',        'mixed',     '9kt/yr',  2.9500::numeric)  -- 은성정밀소재
+) AS v(supplier_id, manufacturing_process, energy_source, capacity, carbon_intensity)
+WHERE NOT EXISTS (SELECT 1 FROM supplier_manufacturer_details WHERE supplier_id = v.supplier_id);
+
+
+-- ============================================================
+-- 25. CAM/전구체 제조사 14곳 + 제련소 7곳 다중공장 확장 (PM 요청)
+-- ============================================================
+-- 기존 하나에너지셀/한독배터리/성진셀 3곳에만 있던 다중공장을 21곳 더 확대.
+-- 기존 공장(100%)을 60/40으로 분할하고 2번째 공장을 신규 추가(uuid_generate_v4 자동생성),
+-- 엣지(edge_id)별로 공급비율/물량을 같은 비율로 재분배, 신규 공장 탄소선언도 함께 삽입.
+
+-- 동성머티리얼(주) (천안 양극재공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('a2222222-2222-4000-8000-000000000002', '천안 제2공장', 'Cheonan CAM Plant 2', 'KR', 'Cheonan', ST_SetSRID(ST_MakePoint(127.364, 37.065), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA", "CONFLICT_MINERALS"]'::jsonb, 40.00, '이도현', 'Plant Manager', '+82-41-000-0032', 'plant2.dy.choi@dongsungmat.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = 'f2222222-0000-4000-8000-000000000002' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.883::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '51111111-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 16000.0::numeric AS volume, 'kg' AS unit FROM new_factory
+UNION ALL
+SELECT '52222222-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 15200.0::numeric AS volume, 'kg' AS unit FROM new_factory
+UNION ALL
+SELECT '54444444-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 18000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 24000.0 WHERE edge_id = '51111111-0000-4000-8000-000000000004' AND factory_id = 'f2222222-0000-4000-8000-000000000002';
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 22800.0 WHERE edge_id = '52222222-0000-4000-8000-000000000004' AND factory_id = 'f2222222-0000-4000-8000-000000000002';
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 27000.0 WHERE edge_id = '54444444-0000-4000-8000-000000000003' AND factory_id = 'f2222222-0000-4000-8000-000000000002';
+
+-- 세종프리커서(주) (세종 전구체공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63444444-0000-4000-8000-000000000004', '세종 제2공장', 'Sejong Precursor Plant 2', 'KR', 'Sejong', ST_SetSRID(ST_MakePoint(127.54, 36.73), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 40.00, '박서연', 'Production Manager', '+82-44-444-3005', 'plant2.hy.cho@sejongpre.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '73444444-0000-4000-8000-000000000004' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.8365::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '88888888-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 8400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 12600.0 WHERE edge_id = '88888888-0000-4000-8000-000000000004' AND factory_id = '73444444-0000-4000-8000-000000000004';
+
+-- 은성정밀소재(주) (아산 정밀소재공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63666666-0000-4000-8000-000000000006', '아산 제2공장', 'Asan Precision Materials Plant 2', 'KR', 'Asan', ST_SetSRID(ST_MakePoint(127.21, 37.03), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA"]'::jsonb, 40.00, '김하늘', 'QA Manager', '+82-41-666-3007', 'plant2.dw.ko@eunsungmat.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '73666666-0000-4000-8000-000000000006' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.7435::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '8aaaaaaa-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 10000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 15000.0 WHERE edge_id = '8aaaaaaa-0000-4000-8000-000000000004' AND factory_id = '73666666-0000-4000-8000-000000000006';
+
+-- 포스피케미칼(주) (포항 CAM공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62222222-0000-4000-8000-000000000002', '포항 제2공장', 'Pohang CAM Plant 2', 'KR', 'Pohang', ST_SetSRID(ST_MakePoint(129.63, 36.26), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA"]'::jsonb, 40.00, '최윤서', 'Plant Manager', '+82-54-222-2003', 'plant2.th.shin@pospichem.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '72222222-0000-4000-8000-000000000002' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.9853::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '86666666-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 15200.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 22800.0 WHERE edge_id = '86666666-0000-4000-8000-000000000003' AND factory_id = '72222222-0000-4000-8000-000000000002';
+
+-- 한중정밀화학(주) (포항 정밀화학공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63333333-0000-4000-8000-000000000003', '포항 제2공장', 'Pohang Precision Chem Plant 2', 'KR', 'Pohang', ST_SetSRID(ST_MakePoint(129.625, 36.255), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA"]'::jsonb, 40.00, '정재훈', 'Production Manager', '+82-54-333-3004', 'plant2.yl.ma@hanjungchem.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '73333333-0000-4000-8000-000000000003' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.7714::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '87777777-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 9600.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 14400.0 WHERE edge_id = '87777777-0000-4000-8000-000000000004' AND factory_id = '73333333-0000-4000-8000-000000000003';
+
+-- 남해케미칼(주) (남해 케미칼공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63555555-0000-4000-8000-000000000005', '남해 제2공장', 'Namhae Chemical Plant 2', 'KR', 'Namhae', ST_SetSRID(ST_MakePoint(128.115, 35.12), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 40.00, '한소율', 'ESG Manager', '+82-55-555-3006', 'plant2.js.yang@namhaechem.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '73555555-0000-4000-8000-000000000005' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.9016::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 8800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 13200.0 WHERE edge_id = '89999999-0000-4000-8000-000000000004' AND factory_id = '73555555-0000-4000-8000-000000000005';
+
+-- 대성전구체(주) (화성 전구체공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63222222-0000-4000-8000-000000000002', '화성 제2공장', 'Hwaseong Precursor Plant 2', 'KR', 'Hwaseong', ST_SetSRID(ST_MakePoint(127.1, 37.42), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 40.00, '오지안', 'Plant Manager', '+82-31-222-3003', 'plant2.sk.han@daesungpre.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '73222222-0000-4000-8000-000000000002' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.9946::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '86666666-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 9200.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 13800.0 WHERE edge_id = '86666666-0000-4000-8000-000000000004' AND factory_id = '73222222-0000-4000-8000-000000000002';
+
+-- 동신전구체(주) (군산 전구체공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63111111-0000-4000-8000-000000000001', '군산 제2공장', 'Gunsan Precursor Plant 2', 'KR', 'Gunsan', ST_SetSRID(ST_MakePoint(126.965, 36.215), 4326), 'production', 'EU', '["EU_BATTERY", "CRMA"]'::jsonb, 40.00, '배수민', 'Production Manager', '+82-63-111-3002', 'plant2.cw.bae@dongsinpre.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '73111111-0000-4000-8000-000000000001' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.7156::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '85555555-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 10000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 15000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000005' AND factory_id = '73111111-0000-4000-8000-000000000001';
+
+-- 에코양극재(주) (천안 양극재공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62111111-0000-4000-8000-000000000001', '천안 제2공장', 'Cheonan CAM Plant 2', 'KR', 'Cheonan', ST_SetSRID(ST_MakePoint(127.35, 37.06), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA", "EU_BATTERY_ART7"]'::jsonb, 40.00, '장서준', 'Plant Manager', '+82-41-111-2002', 'plant2.bk.yoon@ecocathode.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '72111111-0000-4000-8000-000000000001' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.8365::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '85555555-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 16800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 25200.0 WHERE edge_id = '85555555-0000-4000-8000-000000000004' AND factory_id = '72111111-0000-4000-8000-000000000001';
+
+-- 청정전구체(주) (광양 전구체공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('a6666666-6666-4000-8000-000000000006', '광양 제2공장', 'Gwangyang Precursor 2', 'KR', 'Gwangyang', ST_SetSRID(ST_MakePoint(127.95, 35.19), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA"]'::jsonb, 40.00, '임채원', 'Production Manager', '+82-61-000-0042', 'plant2.hy.jung@cheongjeongpre.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = 'f6666666-0000-4000-8000-000000000006' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 3.2085::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '53111111-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 8800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 13200.0 WHERE edge_id = '53111111-0000-4000-8000-000000000003' AND factory_id = 'f6666666-0000-4000-8000-000000000006';
+
+-- 한라소재(주) (거제 소재공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62444444-0000-4000-8000-000000000004', '거제 제2공장', 'Geoje Materials Plant 2', 'KR', 'Geoje', ST_SetSRID(ST_MakePoint(128.871, 35.129), 4326), 'production', 'EU', '["EU_BATTERY", "CRMA"]'::jsonb, 40.00, '황도윤', 'QA Manager', '+82-55-444-2005', 'plant2.ys.kwon@hallamat.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '72444444-0000-4000-8000-000000000004' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.9016::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '88888888-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 14400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 21600.0 WHERE edge_id = '88888888-0000-4000-8000-000000000003' AND factory_id = '72444444-0000-4000-8000-000000000004';
+
+-- 대한CAM(주) (울산 CAM공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62555555-0000-4000-8000-000000000005', '울산 제2공장', 'Ulsan CAM Plant 2', 'KR', 'Ulsan', ST_SetSRID(ST_MakePoint(129.615, 35.77), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA", "EU_BATTERY_ART7"]'::jsonb, 40.00, '송하린', 'Plant Manager', '+82-52-555-2006', 'plant2.jw.baek@daehancam.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '72555555-0000-4000-8000-000000000005' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.7435::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 14800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 22200.0 WHERE edge_id = '89999999-0000-4000-8000-000000000003' AND factory_id = '72555555-0000-4000-8000-000000000005';
+
+-- 신진CAM(주) (군산 CAM공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62333333-0000-4000-8000-000000000003', '군산 제2공장', 'Gunsan CAM Plant 2', 'KR', 'Gunsan', ST_SetSRID(ST_MakePoint(126.961, 36.217), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 40.00, '문지호', 'Production Manager', '+82-63-333-2004', 'plant2.ms.kwak@sinjincam.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '72333333-0000-4000-8000-000000000003' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.9295::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '87777777-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 16000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 24000.0 WHERE edge_id = '87777777-0000-4000-8000-000000000003' AND factory_id = '72333333-0000-4000-8000-000000000003';
+
+-- 청우CAM(주) (이천 CAM공장 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62666666-0000-4000-8000-000000000006', '이천 제2공장', 'Icheon CAM Plant 2', 'KR', 'Icheon', ST_SetSRID(ST_MakePoint(127.755, 37.496), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 40.00, '신유나', 'Plant Manager', '+82-31-666-2007', 'plant2.hj.nam@cheongwoocam.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '72666666-0000-4000-8000-000000000006' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.8644::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '8aaaaaaa-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 16800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 25200.0 WHERE edge_id = '8aaaaaaa-0000-4000-8000-000000000003' AND factory_id = '72666666-0000-4000-8000-000000000006';
+
+-- 고려제련(주) (온산 제련소 2호 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64111111-0000-4000-8000-000000000001', '온산 제2제련소', 'Onsan Smelter No.3', 'KR', 'Onsan', ST_SetSRID(ST_MakePoint(129.6, 35.68), 4326), 'processing', 'BOTH', '["CRMA", "EU_BATTERY"]'::jsonb, 40.00, '이도현', 'Plant Manager', '+82-52-111-4002', 'plant2.jang@koryosmelt.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '74111111-0000-4000-8000-000000000001' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.604::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '85555555-0000-4000-8000-000000000006'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 8000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 12000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000006' AND factory_id = '74111111-0000-4000-8000-000000000001';
+
+-- 한중제련(주) (온산 제련소 -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('aaaaaaaa-aaaa-4000-8000-00000000000a', '온산 제2제련소', 'Onsan Refinery 2', 'KR', 'Onsan', ST_SetSRID(ST_MakePoint(129.597, 35.678), 4326), 'processing', 'BOTH', '["IRA", "CRMA"]'::jsonb, 40.00, '박서연', 'Production Manager', '+82-52-000-0062', 'plant2.sm.yoon@hanjungref.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = 'faaaaaaa-0000-4000-8000-00000000000a' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.697::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '51111111-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 9600.0::numeric AS volume, 'kg' AS unit FROM new_factory
+UNION ALL
+SELECT '54444444-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 10000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 14400.0 WHERE edge_id = '51111111-0000-4000-8000-000000000005' AND factory_id = 'faaaaaaa-0000-4000-8000-00000000000a';
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 15000.0 WHERE edge_id = '54444444-0000-4000-8000-000000000004' AND factory_id = 'faaaaaaa-0000-4000-8000-00000000000a';
+
+-- AusRef Processing Pty Ltd (Kwinana Ni Refinery -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64333333-0000-4000-8000-000000000003', 'Kwinana Ni Refinery 2', 'Kwinana Ni Refinery 2', 'AU', 'Western Australia', ST_SetSRID(ST_MakePoint(116.02, -31.98), 4326), 'processing', 'BOTH', '["CRMA"]'::jsonb, 40.00, 'David Chen', 'Plant Manager', '+61-8-333-4004', 'plant2.j.wilson@ausref.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '74333333-0000-4000-8000-000000000003' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.418::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '87777777-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 7600.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 11400.0 WHERE edge_id = '87777777-0000-4000-8000-000000000005' AND factory_id = '74333333-0000-4000-8000-000000000003';
+
+-- Brazil Nickel Refining SA (Niquelândia Refinery -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64555555-0000-4000-8000-000000000005', 'Niquelândia Refinery 2', 'Niquelandia Refinery 2', 'BR', 'Goias', ST_SetSRID(ST_MakePoint(-48.21, -14.22), 4326), 'processing', 'BOTH', '["CRMA"]'::jsonb, 40.00, 'Maria Santos', 'Production Manager', '+55-62-555-4006', 'plant2.c.silva@brnickel.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '74555555-0000-4000-8000-000000000005' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.5575::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 7000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 10500.0 WHERE edge_id = '89999999-0000-4000-8000-000000000005' AND factory_id = '74555555-0000-4000-8000-000000000005';
+
+-- PT Indosel Nickel Refinery (Morowali Refinery -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64222222-0000-4000-8000-000000000002', 'Morowali Refinery 2', 'Morowali Refinery 2', 'ID', 'Sulawesi', ST_SetSRID(ST_MakePoint(121.89, -1.76), 4326), 'processing', 'BOTH', '["CRMA", "CONFLICT_MINERALS", "EUDR"]'::jsonb, 40.00, 'Ahmad Rahman', 'Plant Manager', '+62-21-222-4003', 'plant2.budi@indosel.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '74222222-0000-4000-8000-000000000002' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 5.115::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '86666666-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 7400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 11100.0 WHERE edge_id = '86666666-0000-4000-8000-000000000005' AND factory_id = '74222222-0000-4000-8000-000000000002';
+
+-- Xinjiang Nickel Refinery (Xinjiang Refinery -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('acacacac-acac-4000-8000-0000000000ac', 'Xinjiang Refinery 2', 'Xinjiang Refinery 2', 'CN', 'Xinjiang', ST_SetSRID(ST_MakePoint(86.4, 41.37), 4326), 'processing', 'US', '["UFLPA", "IRA"]'::jsonb, 40.00, 'Li Ming', 'Production Manager', '+86-991-000-0052', 'plant2.w.chen@xjrefinery.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = 'facacaca-0000-4000-8000-0000000000ac' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 4.836::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '53222222-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 8800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 13200.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = 'facacaca-0000-4000-8000-0000000000ac';
+
+-- Zambia Copper & Cobalt Refinery (Kitwe Refinery -> +2번째 공장)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64444444-0000-4000-8000-000000000004', 'Kitwe Refinery 2', 'Kitwe Refinery 2', 'ZM', 'Copperbelt', ST_SetSRID(ST_MakePoint(28.463, -12.568), 4326), 'processing', 'BOTH', '["CONFLICT_MINERALS", "CRMA"]'::jsonb, 40.00, 'Grace Mwansa', 'Compliance Manager', '+260-212-444-4005', 'plant2.e.banda@zamcopper.demo')
+  RETURNING factory_id
+),
+upd_old_factory AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 60.00 WHERE factory_id = '74444444-0000-4000-8000-000000000004' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 4.464::numeric, 'PEF', '2024-06-01'::date, '2024-06-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '88888888-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 6800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 10200.0 WHERE edge_id = '88888888-0000-4000-8000-000000000005' AND factory_id = '74444444-0000-4000-8000-000000000004';
+
+
+-- ============================================================
+-- 26. 다중공장 12곳 2->3개 확장 (PM 요청: 2~3개 다양화)
+-- ============================================================
+-- 기존 2공장(60/40 또는 70/30) 체제였던 12곳을 3공장(50/30/20)으로 재분배.
+-- 기존 두 공장의 supply_ratio_percent/supply_ratio(엣지별 volume)를 50/30으로 낮추고,
+-- 3번째 공장을 신규 추가(20%), 탄소선언도 함께 삽입.
+
+-- 세종프리커서(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63444444-0000-4000-8000-000000000004', '세종 제3공장', 'Sejong Precursor Plant 3', 'KR', 'Sejong', ST_SetSRID(ST_MakePoint(127.74, 36.13), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 20.00, '서지우', 'Plant Manager', '+82-44-444-3006', 'plant3.hy.cho@sejongpre.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '73444444-0000-4000-8000-000000000004' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'ed48f9c1-8cac-4634-b0a3-35509aac9fd3' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.745::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '88888888-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4200.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 10500.0 WHERE edge_id = '88888888-0000-4000-8000-000000000004' AND factory_id = '73444444-0000-4000-8000-000000000004';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6300.0 WHERE edge_id = '88888888-0000-4000-8000-000000000004' AND factory_id = 'ed48f9c1-8cac-4634-b0a3-35509aac9fd3';
+
+-- 포스피케미칼(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62222222-0000-4000-8000-000000000002', '포항 제3공장', 'Pohang CAM Plant 3', 'KR', 'Pohang', ST_SetSRID(ST_MakePoint(129.83, 35.66), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA"]'::jsonb, 20.00, '강태민', 'Production Manager', '+82-54-222-2004', 'plant3.th.shin@pospichem.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '72222222-0000-4000-8000-000000000002' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'db0de79f-e282-4b25-8a22-4d009e1fa746' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.889::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '86666666-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 7600.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 19000.0 WHERE edge_id = '86666666-0000-4000-8000-000000000003' AND factory_id = '72222222-0000-4000-8000-000000000002';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 11400.0 WHERE edge_id = '86666666-0000-4000-8000-000000000003' AND factory_id = 'db0de79f-e282-4b25-8a22-4d009e1fa746';
+
+-- 하나에너지셀(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('61222222-0000-4000-8000-000000000002', '오송 제3공장', 'Osong Cell Plant 3', 'KR', 'Cheongju', ST_SetSRID(ST_MakePoint(127.794, 36.284), 4326), 'production', 'EU', '["EU_BATTERY", "EU_BATTERY_ART7", "CSDDD"]'::jsonb, 20.00, '윤아린', 'QA Manager', '+82-43-222-0003', 'plant3.sy.choi@hanaenergy.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '71222222-0000-4000-8000-000000000002' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '71222223-0000-4000-8000-000000000002' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.079::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '86666666-0000-4000-8000-000000000002'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 1840.0::numeric AS volume, 'ea' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 4600.0 WHERE edge_id = '86666666-0000-4000-8000-000000000002' AND factory_id = '71222222-0000-4000-8000-000000000002';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 2760.0 WHERE edge_id = '86666666-0000-4000-8000-000000000002' AND factory_id = '71222223-0000-4000-8000-000000000002';
+
+-- 남해케미칼(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63555555-0000-4000-8000-000000000005', '남해 제3공장', 'Namhae Chemical Plant 3', 'KR', 'Namhae', ST_SetSRID(ST_MakePoint(128.315, 34.52), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 20.00, '조은채', 'Plant Manager', '+82-55-555-3007', 'plant3.js.yang@namhaechem.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '73555555-0000-4000-8000-000000000005' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'c292f097-bf0c-4212-9942-e5ffbbbb43ca' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.808::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '89999999-0000-4000-8000-000000000004' AND factory_id = '73555555-0000-4000-8000-000000000005';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '89999999-0000-4000-8000-000000000004' AND factory_id = 'c292f097-bf0c-4212-9942-e5ffbbbb43ca';
+
+-- 동신전구체(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('63111111-0000-4000-8000-000000000001', '군산 제3공장', 'Gunsan Precursor Plant 3', 'KR', 'Gunsan', ST_SetSRID(ST_MakePoint(127.165, 35.615), 4326), 'production', 'EU', '["EU_BATTERY", "CRMA"]'::jsonb, 20.00, '남궁윤', 'Production Manager', '+82-63-111-3003', 'plant3.cw.bae@dongsinpre.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '73111111-0000-4000-8000-000000000001' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '686c97e5-7c44-42a2-8a7c-2c932f24d182' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.628::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '85555555-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 5000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12500.0 WHERE edge_id = '85555555-0000-4000-8000-000000000005' AND factory_id = '73111111-0000-4000-8000-000000000001';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0 WHERE edge_id = '85555555-0000-4000-8000-000000000005' AND factory_id = '686c97e5-7c44-42a2-8a7c-2c932f24d182';
+
+-- 청정전구체(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('a6666666-6666-4000-8000-000000000006', '광양 제3공장', 'Gwangyang Precursor 3', 'KR', 'Gwangyang', ST_SetSRID(ST_MakePoint(128.15, 34.59), 4326), 'production', 'BOTH', '["EU_BATTERY", "CRMA"]'::jsonb, 20.00, '전민재', 'ESG Manager', '+82-61-000-0043', 'plant3.hy.jung@cheongjeongpre.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = 'f6666666-0000-4000-8000-000000000006' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'a71be771-2add-42bd-9a8e-b610c653e927' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 3.105::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '53111111-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '53111111-0000-4000-8000-000000000003' AND factory_id = 'f6666666-0000-4000-8000-000000000006';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '53111111-0000-4000-8000-000000000003' AND factory_id = 'a71be771-2add-42bd-9a8e-b610c653e927';
+
+-- 한독배터리(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('61555555-0000-4000-8000-000000000005', '구미 제3공장', 'Gumi Battery Plant 3', 'KR', 'Gumi', ST_SetSRID(ST_MakePoint(128.769, 35.769), 4326), 'production', 'BOTH', '["EU_BATTERY", "EU_BATTERY_ART7", "EU_BATTERY_ART47", "CSDDD"]'::jsonb, 20.00, '구해나', 'Plant Manager', '+82-54-555-0003', 'plant3.kw.jung@handokbattery.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '71555555-0000-4000-8000-000000000005' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '71555556-0000-4000-8000-000000000005' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 1.998::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000002'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 1760.0::numeric AS volume, 'ea' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 4400.0 WHERE edge_id = '89999999-0000-4000-8000-000000000002' AND factory_id = '71555555-0000-4000-8000-000000000005';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 2640.0 WHERE edge_id = '89999999-0000-4000-8000-000000000002' AND factory_id = '71555556-0000-4000-8000-000000000005';
+
+-- 고려제련(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64111111-0000-4000-8000-000000000001', '온산 제3제련소', 'Onsan Smelter No.2 3', 'KR', 'Onsan', ST_SetSRID(ST_MakePoint(129.8, 35.08), 4326), 'processing', 'BOTH', '["CRMA", "EU_BATTERY"]'::jsonb, 20.00, '표승주', 'Production Manager', '+82-52-111-4003', 'plant3.jang@koryosmelt.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '74111111-0000-4000-8000-000000000001' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '47213770-8ea8-4dbd-9af8-749402efa9a3' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.52::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '85555555-0000-4000-8000-000000000006'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 10000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000006' AND factory_id = '74111111-0000-4000-8000-000000000001';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000006' AND factory_id = '47213770-8ea8-4dbd-9af8-749402efa9a3';
+
+-- 한중제련(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('aaaaaaaa-aaaa-4000-8000-00000000000a', '온산 제3제련소', 'Onsan Refinery 3', 'KR', 'Onsan', ST_SetSRID(ST_MakePoint(129.797, 35.078), 4326), 'processing', 'BOTH', '["IRA", "CRMA"]'::jsonb, 20.00, '주다인', 'Plant Manager', '+82-52-000-0063', 'plant3.sm.yoon@hanjungref.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = 'faaaaaaa-0000-4000-8000-00000000000a' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.61::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '51111111-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4800.0::numeric AS volume, 'kg' AS unit FROM new_factory
+UNION ALL
+SELECT '54444444-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 5000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12000.0 WHERE edge_id = '51111111-0000-4000-8000-000000000005' AND factory_id = 'faaaaaaa-0000-4000-8000-00000000000a';
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12500.0 WHERE edge_id = '54444444-0000-4000-8000-000000000004' AND factory_id = 'faaaaaaa-0000-4000-8000-00000000000a';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7200.0 WHERE edge_id = '51111111-0000-4000-8000-000000000005' AND factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0 WHERE edge_id = '54444444-0000-4000-8000-000000000004' AND factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13';
+
+-- Brazil Nickel Refining SA (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('64555555-0000-4000-8000-000000000005', 'Niquelândia Refinery 3', 'Niquelandia Refinery 3', 'BR', 'Goias', ST_SetSRID(ST_MakePoint(-48.01, -14.82), 4326), 'processing', 'BOTH', '["CRMA"]'::jsonb, 20.00, 'Fernando Reyes', 'Plant Manager', '+55-62-555-4007', 'plant3.c.silva@brnickel.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '74555555-0000-4000-8000-000000000005' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'c0a6e2cd-4181-4a30-8716-363cad1401a1' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.475::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '89999999-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 3500.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 8750.0 WHERE edge_id = '89999999-0000-4000-8000-000000000005' AND factory_id = '74555555-0000-4000-8000-000000000005';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 5250.0 WHERE edge_id = '89999999-0000-4000-8000-000000000005' AND factory_id = 'c0a6e2cd-4181-4a30-8716-363cad1401a1';
+
+-- 신진CAM(주) (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('62333333-0000-4000-8000-000000000003', '군산 제3공장', 'Gunsan CAM Plant 3', 'KR', 'Gunsan', ST_SetSRID(ST_MakePoint(127.161, 35.617), 4326), 'production', 'EU', '["EU_BATTERY"]'::jsonb, 20.00, '허지완', 'Production Manager', '+82-63-333-2005', 'plant3.ms.kwak@sinjincam.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '72333333-0000-4000-8000-000000000003' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '1303efc1-70d8-410a-a091-0c5341ad611e' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 2.835::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '87777777-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 8000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 20000.0 WHERE edge_id = '87777777-0000-4000-8000-000000000003' AND factory_id = '72333333-0000-4000-8000-000000000003';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 12000.0 WHERE edge_id = '87777777-0000-4000-8000-000000000003' AND factory_id = '1303efc1-70d8-410a-a091-0c5341ad611e';
+
+-- Xinjiang Nickel Refinery (3번째 공장 추가, 50/30/20 재분배)
+WITH new_factory AS (
+  INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
+  VALUES ('acacacac-acac-4000-8000-0000000000ac', 'Xinjiang Refinery 3', 'Xinjiang Refinery 3', 'CN', 'Xinjiang', ST_SetSRID(ST_MakePoint(86.6, 40.77), 4326), 'processing', 'US', '["UFLPA", "IRA"]'::jsonb, 20.00, 'Wang Lei', 'Production Manager', '+86-991-000-0053', 'plant3.w.chen@xjrefinery.demo')
+  RETURNING factory_id
+),
+upd_primary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = 'facacaca-0000-4000-8000-0000000000ac' RETURNING factory_id
+),
+upd_secondary AS (
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '8203ba63-ad8f-4b48-a278-064e91cfbf9e' RETURNING factory_id
+),
+new_carbon AS (
+  INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
+  SELECT factory_id, 4.68::numeric, 'PEF', '2024-09-01'::date, '2024-09-01'::date, 'supplier_declared' FROM new_factory
+  RETURNING declaration_id
+)
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
+SELECT '53222222-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
+UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = 'facacaca-0000-4000-8000-0000000000ac';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = '8203ba63-ad8f-4b48-a278-064e91cfbf9e';
