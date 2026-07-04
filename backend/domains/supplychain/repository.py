@@ -1090,31 +1090,49 @@ class SupplyChainRepository:
         return [dict(row._mapping) for row in result]
 
     async def list_map_headers(self, tenant_id: str) -> List[Dict[str, Any]]:
-        """내 테넌트의 공급망 맵 헤더 목록 + 엣지 수. (맵 그 자체를 map_id로 관리)"""
+        """내 테넌트의 공급망 맵 헤더 목록 + 엣지 수. (맵 그 자체를 map_id로 관리)
+
+        목록 화면이 제품 × 생산기간(BOM 버전) × 고객사 단위로 한 번에 렌더링할 수 있도록
+        고객사명(customers)과 BOM 버전의 생산기간(bom_versions)을 함께 조인해 반환한다.
+        (프론트가 제품×버전을 순회하며 맵을 재조회하지 않도록 목록 쿼리에서 일괄 제공.)
+        """
         query = text("""
             SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name,
+                   p.customer_id, c.customer_name,
+                   bv.version_number, bv.production_from, bv.production_to,
                    h.status, h.completed_at, COUNT(e.edge_id) AS edge_count
             FROM supply_chain_maps h
             JOIN products p ON p.product_id = h.product_id
+            LEFT JOIN customers c ON c.customer_id = p.customer_id
+            LEFT JOIN bom_versions bv ON bv.bom_version_id = h.bom_version_id
             LEFT JOIN supply_chain_map e ON e.map_id = h.map_id
             WHERE p.tenant_id = :tenant_id
-            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name, h.status, h.completed_at
+            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name,
+                     p.customer_id, c.customer_name,
+                     bv.version_number, bv.production_from, bv.production_to,
+                     h.status, h.completed_at
             ORDER BY p.product_name;
         """)
         result = await self.session.execute(query, {"tenant_id": tenant_id})
         return [dict(r._mapping) for r in result]
 
     async def get_map_header(self, map_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-        """맵 헤더 단건(map_id). 내 테넌트 소유만(아니면 None)."""
+        """맵 헤더 단건(map_id). 내 테넌트 소유만(아니면 None). 목록과 동일 필드셋(+completed_by)."""
         query = text("""
             SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name,
+                   p.customer_id, c.customer_name,
+                   bv.version_number, bv.production_from, bv.production_to,
                    h.status, h.completed_by, h.completed_at,
                    COUNT(e.edge_id) AS edge_count
             FROM supply_chain_maps h
             JOIN products p ON p.product_id = h.product_id
+            LEFT JOIN customers c ON c.customer_id = p.customer_id
+            LEFT JOIN bom_versions bv ON bv.bom_version_id = h.bom_version_id
             LEFT JOIN supply_chain_map e ON e.map_id = h.map_id
             WHERE h.map_id = :map_id AND p.tenant_id = :tenant_id
             GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name,
+                     p.customer_id, c.customer_name,
+                     bv.version_number, bv.production_from, bv.production_to,
                      h.status, h.completed_by, h.completed_at;
         """)
         row = (await self.session.execute(query, {"map_id": map_id, "tenant_id": tenant_id})).first()
