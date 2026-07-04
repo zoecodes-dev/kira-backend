@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domains.supplier import repository
@@ -509,6 +510,11 @@ async def upsert_risk_score(
     score = max(0, min(100, score))   # 0~100 클램프
     new_level = _score_to_risk_level(score)
 
+    # 변경 전 값 캡처 (append-only 감사 이력의 from_*)
+    prior = await repository.get_risk_profile_by_supplier(db, supplier_id)
+    from_score = prior.overall_risk_score if prior else None
+    from_level = prior.risk_level if prior else None
+
     profile = await repository.upsert_risk_profile(
         db,
         supplier_id=supplier_id,
@@ -517,6 +523,19 @@ async def upsert_risk_score(
         last_risk_review_at=datetime.now(timezone.utc),
     )
     await repository.update_supplier_risk_level(db, supplier_id, new_level)
+
+    # 리스크 변경 감사 이력 — supplier_risk_profiles 는 단일행 덮어쓰기라 별도 append-only 기록.
+    #   같은 트랜잭션에서 커밋되어 프로필 변경과 원자적으로 남는다. (자동 산정 → changed_by NULL)
+    if from_score != score or from_level != new_level:
+        await db.execute(
+            text("""
+                INSERT INTO risk_score_history
+                    (supplier_id, from_score, to_score, from_level, to_level, reason, changed_by)
+                VALUES (:sid, :fs, :ts, :fl, :tl, :reason, NULL)
+            """),
+            {"sid": str(supplier_id), "fs": from_score, "ts": score,
+             "fl": from_level, "tl": new_level, "reason": "검증 완료 리스크 점수 반영"},
+        )
 
     await db.commit()
     await db.refresh(profile)
@@ -720,8 +739,10 @@ async def submit_onboarding(
         signed_at = datetime.now(timezone.utc)
         await repository.mark_consent_agreed(db, supplier_id, signed_at)
 
-        # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기).
-        await repository.set_supplier_status(db, supplier_id, "supplier_review")
+        # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기). (감사 이력 자동 기록)
+        await repository.set_supplier_status(
+            db, supplier_id, "supplier_review", reason="온보딩 제출 — 원청 승인 대기"
+        )
 
         # 7) 활성 계정 생성 — tenant_id=초대한 OEM, role=supplier_ceo(결정 #3).
         primary = next((c for c in body.contacts if c.is_primary), None)
