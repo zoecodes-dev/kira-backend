@@ -45,7 +45,7 @@ class CurrentUser(BaseModel):
     tenant_id: 테넌트 격리(§0.2)용. 로그인 시 토큰에 심는다. 일부 계정(테넌트
         미배정)은 None 일 수 있으므로 Optional. 도메인 라우터는 목록/단건을
         current_user.tenant_id 로 필터링한다.
-    supplier_id: 협력사 계정 본인 식별용(§0.5). OEM 계정은 None.
+    supplier_id: 협력사 계정 본인 식별용(§0.5). 원청 계정은 None.
     """
     user_id: UUID
     role: str
@@ -137,7 +137,7 @@ async def require_supplier_consent(
     """
     제3자 정보제공 동의 게이트(흐름: "동의하지 않으면 시스템 진입 금지").
 
-    - OEM/감사자 등 협력사 아닌 계정(supplier_id None)은 그대로 통과한다.
+    - 원청/감사자 등 협력사 아닌 계정(supplier_id None)은 그대로 통과한다.
     - 협력사 계정은 supplier_onboarding.consent_status='consent_agreed' 여야 통과.
       미동의(pending/rejected)면 403 CONSENT_REQUIRED → 프론트가 동의 화면으로 유도.
 

@@ -25,7 +25,7 @@ from backend.domains.supplychain.service import SupplyChainService
 logger = logging.getLogger(__name__)
 
 # 원청(발주사) 역할 — 최종 검증 알림 수신 대상. (협력사 역할 supplier_* 제외)
-_OEM_ROLES = ("owner_esg", "owner_purchasing", "admin")
+_PRIME_ROLES = ("owner_esg", "owner_purchasing", "admin")
 
 
 async def notify_final_validation_ready(payload: dict) -> None:
@@ -60,7 +60,7 @@ async def notify_final_validation_ready(payload: dict) -> None:
             return
 
         # 원청 담당자 조회 (역할은 하드코딩 상수 → 안전하게 인라인)
-        roles_sql = ", ".join(f"'{r}'" for r in _OEM_ROLES)
+        roles_sql = ", ".join(f"'{r}'" for r in _PRIME_ROLES)
         oem_users = (await db.execute(
             text(f"""
                 SELECT user_id FROM users
