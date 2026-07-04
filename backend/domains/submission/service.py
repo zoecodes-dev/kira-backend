@@ -8,7 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.config import config
 from backend.infrastructure.event_bus import publish
+from backend.infrastructure.mail import send_email
 from backend.infrastructure.queue import enqueue, NOTIFICATION_QUEUE
 from backend.infrastructure import storage  # presigned URL(원본 문서 PDF 뷰어)
 from backend.infrastructure.trace import trace_node, trace_tool
@@ -168,7 +170,33 @@ async def create_and_request_submission(
     )).fetchall()
 
     if not supplier_users:
-        logger.warning("[notification] 협력사 담당자 없음 (supplier_id=%s)", target_supplier_id)
+        # 미가입 협력사(계정 없음) — user 기반 알림이 불가능하므로 supplier_contacts의
+        # PIC 이메일로 온보딩 초대 링크를 직접 발송한다(supplier_invited 핸들러와 동일 패턴).
+        # 링크의 supplierId 로 가입 화면이 회사·담당자 정보를 prefill 한다(무토큰 키잉, decision #8).
+        contact_rows = (await db.execute(
+            text("""
+                SELECT email FROM supplier_contacts
+                WHERE supplier_id = :supplier_id AND email IS NOT NULL AND email <> ''
+                ORDER BY is_primary DESC, created_at
+            """),
+            {"supplier_id": str(target_supplier_id)},
+        )).fetchall()
+        if not contact_rows:
+            logger.warning("[notification] 협력사 담당자 없음 (supplier_id=%s)", target_supplier_id)
+        else:
+            signup_url = f"{config.FRONTEND_BASE_URL}/partner/onboarding?supplierId={target_supplier_id}"
+            body_text = (
+                "안녕하세요, KIRA 공급망 데이터 플랫폼입니다.\n\n"
+                "원청으로부터 공급망 정보 입력을 요청받았습니다.\n"
+                "아래 링크로 접속하시면 담당자 정보 확인 후 회원가입과 자료 입력을 진행하실 수 있습니다.\n\n"
+                f"접속 링크: {signup_url}\n\n"
+                "※ 본 메일은 표준 템플릿으로 발송되었습니다.\n"
+            )
+            for row in contact_rows:
+                try:
+                    await send_email(str(row[0]), "[KIRA] 공급망 정보 입력 요청 (회원가입 안내)", body_text=body_text)
+                except Exception:
+                    logger.exception("[notification] 미가입 협력사 초대 메일 실패 to=%s", row[0])
     else:
         for row in supplier_users:
             uid = str(row[0])
