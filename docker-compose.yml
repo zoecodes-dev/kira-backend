@@ -22,6 +22,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      # 최초 initdb(빈 볼륨)나 비정상 종료 후 WAL 복구는 몇십 초 걸릴 수 있는데,
+      # 이 구간의 실패는 retries에 안 세고 봐준다. 이후엔 5s*5=25s 안에 진짜 장애를 감지.
+      start_period: 60s
     restart: always
 
   # Async Workflow Queue용 Redis (ARQ)
@@ -63,7 +66,7 @@ services:
     #   스키마 DDL은 docker/01_schema.sql(빈 볼륨 최초 init)로 일원화 — alembic 마이그레이션 미사용.
     #   regulation.embeddings는 pending 규제만 임베딩(멱등, 이미 indexed면 즉시 스킵·재계산 X).
     #   app 컨테이너 1개에서만 실행되므로 경합 없음(워커는 arq라 미실행).
-    command: ["sh", "-c", "python -m backend.domains.regulation.embeddings && uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2"]
+    command: ["sh", "-c", "python -m backend.infrastructure.wait_for_db && python -m backend.domains.regulation.embeddings && uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2"]
     expose:
       - "8000"
     depends_on:
@@ -102,7 +105,7 @@ services:
         condition: service_healthy
     restart: always
     container_name: kira-worker-parse
-    command: ["arq", "backend.workers.document_parse_worker.WorkerSettings"]
+    command: ["sh", "-c", "python -m backend.infrastructure.wait_for_db && arq backend.workers.document_parse_worker.WorkerSettings"]
 
   # hitl_queue 워커
   worker-hitl:
@@ -115,7 +118,7 @@ services:
     depends_on: *worker-deps
     restart: always
     container_name: kira-worker-hitl
-    command: ["arq", "backend.workers.hitl_worker.WorkerSettings"]
+    command: ["sh", "-c", "python -m backend.infrastructure.wait_for_db && arq backend.workers.hitl_worker.WorkerSettings"]
 
   # batch_pipeline_queue worker
   worker-pipeline:
@@ -128,7 +131,7 @@ services:
     depends_on: *worker-deps
     restart: always
     container_name: kira-worker-pipeline
-    command: ["arq", "backend.workers.pipeline_worker.WorkerSettings"]
+    command: ["sh", "-c", "python -m backend.infrastructure.wait_for_db && arq backend.workers.pipeline_worker.WorkerSettings"]
 
   # notification_queue 워커
   worker-notification:
@@ -141,7 +144,7 @@ services:
     depends_on: *worker-deps
     restart: always
     container_name: kira-worker-notification
-    command: ["arq", "backend.workers.notification_worker.WorkerSettings"]
+    command: ["sh", "-c", "python -m backend.infrastructure.wait_for_db && arq backend.workers.notification_worker.WorkerSettings"]
 
   worker-submission:
     build: *worker-build
@@ -153,7 +156,7 @@ services:
     depends_on: *worker-deps
     restart: always
     container_name: kira-worker-submission
-    command: ["arq", "backend.workers.submission_worker.WorkerSettings"]
+    command: ["sh", "-c", "python -m backend.infrastructure.wait_for_db && arq backend.workers.submission_worker.WorkerSettings"]
 
 
   # Layer 0: Nginx 리버스 프록시 (정문 — gzip 압축 + app 전달)
