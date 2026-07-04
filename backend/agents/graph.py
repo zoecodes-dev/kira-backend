@@ -91,14 +91,23 @@ async def _resume_batch(batch_id: UUID) -> None:
         await db.commit()
 
 
+# error_reason(supervisor 라우팅 사유) → hitl_reviews.reason 매핑.
+# supervisor.route 가 hitl_interrupt 로 보내는 사유: geographical_risk(geo_audit) /
+# risk_escalated(risk_scoring 총점) / low_confidence. low_confidence 는 협력사 reverify
+# 경로라 여기 도달 시엔 회색지대로 취급.
+_HITL_REASON_BY_ERROR = {
+    "geographical_risk": "geographical_risk",  # 원산지·좌표 불일치/신장/EUDR 등 지리 위험
+    "risk_escalated": "risk_escalated",        # 공급사 리스크 총점 escalation
+}
+
+
 async def hitl_interrupt_node(state: BatchState) -> BatchState:
     batch_id = _batch_id(state)
     trigger_stage = state["current_stage"]
-    reason = (
-        "risk_escalated"
-        if state.get("error_reason") == "risk_escalated"
-        else "gray_zone"
-    )
+    # error_reason → hitl_reviews.reason 라벨. 심사관/프론트(hitl_reason)가 '왜 사람에게
+    # 왔는지'를 구분한다: 원산지·좌표 불일치(geo_audit) vs 리스크 총점 escalation vs 기타 회색지대.
+    # 기존엔 geo 트리거도 gray_zone 으로 뭉개져 프론트 계약(geographical_risk)과 불일치했음.
+    reason = _HITL_REASON_BY_ERROR.get(state.get("error_reason"), "gray_zone")
     paused_state: BatchState = {**state, "batch_status": "batch_hitl_wait"}
 
     async with AsyncSessionLocal() as db:

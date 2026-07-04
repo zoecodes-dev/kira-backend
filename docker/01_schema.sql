@@ -808,7 +808,7 @@ CREATE TABLE processed_jobs (
 CREATE TABLE hitl_reviews (
     review_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     batch_id          UUID REFERENCES batches(batch_id) ON DELETE CASCADE,
-    reason            VARCHAR(100) NOT NULL, -- 'gray_zone' | 'risk_escalated' (low_confidence는 협력사 reverify 경로, 미기입)
+    reason            VARCHAR(100) NOT NULL, -- 'gray_zone' | 'risk_escalated' | 'geographical_risk' (low_confidence는 협력사 reverify 경로, 미기입)
     trigger_stage     VARCHAR(50) NOT NULL,
     assigned_to       UUID REFERENCES users(user_id),
     
