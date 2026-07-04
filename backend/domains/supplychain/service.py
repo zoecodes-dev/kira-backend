@@ -147,7 +147,6 @@ class SupplyChainService:
             "data": payload
         }
 
-    # [REVERT-NON-SUPPLIER:BEGIN] 협력사 확인(verify) 상태 갱신 — supply_chain_map.verification_status.
     #   supplier 외(supplychain) 도메인. 최종 작업 시 이 메서드 전체 주석/삭제.
     async def set_supplier_verification(
         self,
@@ -164,7 +163,6 @@ class SupplyChainService:
             "verification_status": "verified" if verified else "unverified",
             "updated_edges": updated,
         }
-    # [REVERT-NON-SUPPLIER:END]
 
     async def get_gaps(self, product_id: str) -> Dict[str, Any]:
         """
@@ -470,7 +468,6 @@ class SupplyChainService:
         wb.save(buf)
         return buf.getvalue()
 
-    # [REVERT-NON-SUPPLIER:BEGIN] supplier 외(supplychain) — 공급망 맵 헤더(맵 그 자체) 관리.
     async def list_maps(self, tenant_id: str) -> List[Dict[str, Any]]:
         """내 테넌트의 공급망 맵 목록(map_id 단위)."""
         return await self.repository.list_map_headers(tenant_id)
@@ -486,7 +483,6 @@ class SupplyChainService:
             return None
         await self.repository.session.commit()
         return result
-    # [REVERT-NON-SUPPLIER:END]
 
     async def get_hitl_geo_context(self, db: AsyncSession) -> Dict[str, Any]:
         """
