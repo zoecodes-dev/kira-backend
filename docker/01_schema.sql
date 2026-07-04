@@ -421,19 +421,6 @@ CREATE TABLE bom_items (
     synced_at       TIMESTAMPTZ DEFAULT now()
 );
 
--- [테이블 역할] 공정 신뢰도 및 CSDDD 감사 추적용 공정 매뉴얼 매핑 테이블.
-CREATE TABLE manufacturing_process (
-    process_id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    part_id                   UUID REFERENCES parts(part_id) ON DELETE CASCADE,
-    sequence_no               INT,
-    process_name              VARCHAR(255),
-    process_description       TEXT,
-    is_outsourced             BOOLEAN DEFAULT FALSE,
-    outsourced_to_supplier_id UUID REFERENCES suppliers(supplier_id),
-    process_image_url         VARCHAR(500)
-);
-
-
 -- ============================================================
 -- 영역 8. 공급망 맵 (D 담당)
 -- ============================================================
