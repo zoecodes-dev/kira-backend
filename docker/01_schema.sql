@@ -785,7 +785,7 @@ CREATE TABLE processed_jobs (
     idempotency_key  VARCHAR(255) PRIMARY KEY, -- 예: '{event_name}:{batch_id}:{rule}' 등 작업 고유 키
     queue_name       VARCHAR(50)
         CONSTRAINT chk_processed_queue CHECK (queue_name IN (
-            'document_parse_queue', 'verification_queue', 'risk_queue',
+            'document_parse_queue',
             'hitl_queue', 'notification_queue',
             'batch_pipeline_queue', 'dead_letter_queue'
         )),
