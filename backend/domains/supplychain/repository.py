@@ -1097,7 +1097,7 @@ class SupplyChainRepository:
         (프론트가 제품×버전을 순회하며 맵을 재조회하지 않도록 목록 쿼리에서 일괄 제공.)
         """
         query = text("""
-            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
                    p.customer_id, c.customer_name,
                    bv.version_number, bv.production_from, bv.production_to,
                    h.status, h.completed_at, COUNT(e.edge_id) AS edge_count
@@ -1107,7 +1107,7 @@ class SupplyChainRepository:
             LEFT JOIN bom_versions bv ON bv.bom_version_id = h.bom_version_id
             LEFT JOIN supply_chain_map e ON e.map_id = h.map_id
             WHERE p.tenant_id = :tenant_id
-            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
                      p.customer_id, c.customer_name,
                      bv.version_number, bv.production_from, bv.production_to,
                      h.status, h.completed_at
@@ -1119,7 +1119,7 @@ class SupplyChainRepository:
     async def get_map_header(self, map_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
         """맵 헤더 단건(map_id). 내 테넌트 소유만(아니면 None). 목록과 동일 필드셋(+completed_by)."""
         query = text("""
-            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
                    p.customer_id, c.customer_name,
                    bv.version_number, bv.production_from, bv.production_to,
                    h.status, h.completed_by, h.completed_at,
@@ -1130,7 +1130,7 @@ class SupplyChainRepository:
             LEFT JOIN bom_versions bv ON bv.bom_version_id = h.bom_version_id
             LEFT JOIN supply_chain_map e ON e.map_id = h.map_id
             WHERE h.map_id = :map_id AND p.tenant_id = :tenant_id
-            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
                      p.customer_id, c.customer_name,
                      bv.version_number, bv.production_from, bv.production_to,
                      h.status, h.completed_by, h.completed_at;
