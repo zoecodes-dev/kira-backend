@@ -17,7 +17,7 @@ domains/product/service.py  (담당: 팀원 C)
 
 [Product 도메인 주요 결정 사항 반영]
   - 결정 #1 (Ingest): 제품은 본 시스템이 직접 생성하지 않고 외부 원천에서 동기화(UPSERT)한다.
-    (BOMImported → LotImported → ProductImported 순서로 연쇄 발행하여 다운스트림의 안정성 보장)
+    (BOMImported → ProductImported 순서로 연쇄 발행하여 다운스트림의 안정성 보장)
   - 결정 #2 (BOM 트리): N차 공급망의 점진적 발견을 지원하기 위해 get_bom_tree에 only_confirmed 필터 스위치 적용.
   - 최신 규격 반영: events/types.py 업데이트에 따라 external_id, batch_id 파라미터 적용 완료.
 """
@@ -41,7 +41,6 @@ from backend.domains.product.state_machine import (
 from backend.events.types import (
     BOMImportedEvent,
     CustomerImportedEvent,
-    LotImportedEvent,
     ProductImportedEvent,
 )
 from backend.infrastructure.event_bus import publish
@@ -88,13 +87,12 @@ async def import_products(
         1. CustomerImported  — 고객사 UPSERT 완료 (신규 시만)
            ※ 기존 고객사 갱신(is_new=False)은 downstream 변화 없으므로 발행 생략.
         2. BOMImported       — bom_version ingest 완료
-        3. LotImported       — batch(Lot) ingest 완료
-        4. ProductImported   — 제품 전체 ingest 완료 (마지막)
+        3. ProductImported   — 제품 전체 ingest 완료 (마지막)
 
         CustomerImported를 먼저 발행하는 이유:
           products.customer_id 가 customers.customer_id FK를 참조하기 때문에
           "고객사 준비됨" 신호가 먼저 가야 downstream이 안전하게 처리할 수 있어요.
-          ProductImported를 마지막에 발행하는 이유는 기존과 동일 — BOM·Lot 준비 후
+          ProductImported를 마지막에 발행하는 이유는 기존과 동일 — BOM 준비 후
           "제품 전체가 준비됐다"는 신호를 보내야 해요.
 
     [호출 흐름]
@@ -103,7 +101,6 @@ async def import_products(
                → db.commit()
                → publish("CustomerImported", ...)        # 신규 고객사만
                → 제품별: publish("BOMImported", ...)
-                         publish("LotImported", ...)
                          publish("ProductImported", ...)
 
     [반환]
@@ -137,7 +134,7 @@ async def import_products(
         )
 
     # ------------------------------------------------------------------
-    # 2. 제품별 BOMImported → LotImported → ProductImported
+    # 2. 제품별 BOMImported → ProductImported
     # ------------------------------------------------------------------
     for product in products:
         # 2-1. BOMImported
@@ -151,48 +148,7 @@ async def import_products(
             _serialize_payload(asdict(bom_event)),
         )
 
-        # 2-2. LotImported
-        # ──────────────────────────────────────────────────────
-        # [A2 수정 — 은지] batch_id TODO 정리
-        #
-        # [현재 상태]
-        #   A(지혜)의 A1 배치 생성 단일 진입점이 아직 머지되지 않았다.
-        #   batch_id=None으로 방어적 동작. LotImported 이벤트에
-        #   batch_id가 None이어도 downstream(subscriber)이
-        #   None 체크 후 안전하게 처리한다.
-        #
-        # [A1 머지 후 교체할 코드]
-        # ┌────────────────────────────────────────────────────┐
-        # │ # A(지혜)의 배치 생성 단일 진입점으로 위임           │
-        # │ from backend.handlers.batch_trigger import (       │
-        # │     create_batch_for_product,                      │
-        # │ )                                                  │
-        # │ batch = await create_batch_for_product(            │
-        # │     db=db,                                         │
-        # │     product_id=product.product_id,                 │
-        # │     source_system="MES",                           │
-        # │     external_id=product.external_id,               │
-        # │ )                                                  │
-        # │ actual_batch_id = batch.batch_id                   │
-        # └────────────────────────────────────────────────────┘
-        #
-        # [교체 방법]
-        #   1. A1 머지 확인 (handlers/batch_trigger.py 존재 확인)
-        #   2. 위 주석의 import + 함수 호출 코드를 해제
-        #   3. 아래 batch_id=None 을 batch_id=actual_batch_id 로 교체
-        #   4. 이 TODO 주석 블록 삭제
-        # ──────────────────────────────────────────────────────
-        lot_event = LotImportedEvent(
-            batch_id=None,  # → A1 머지 후 actual_batch_id 로 교체
-            product_id=product.product_id,
-            external_id=product.external_id,
-        )
-        await publish(
-            "LotImported",
-            _serialize_payload(asdict(lot_event)),
-        )
-
-        # 2-3. ProductImported
+        # 2-2. ProductImported
         product_event = ProductImportedEvent(
             product_id=product.product_id,
             external_id=product.external_id,
