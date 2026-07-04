@@ -94,7 +94,6 @@ async def get_file_meta(
     }
 
 
-# [REVERT-NON-SUPPLIER:BEGIN] context별 파일 목록(환경성적서 첨부 조회). files=공통(비-supplier) 도메인.
 async def list_files(
     db: AsyncSession, context: str, tenant_id: Optional[uuid.UUID]
 ) -> list[dict]:
@@ -111,7 +110,6 @@ async def list_files(
         }
         for o in objs
     ]
-# [REVERT-NON-SUPPLIER:END]
 
 
 async def delete_file(

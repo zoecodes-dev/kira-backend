@@ -235,7 +235,6 @@ async def declare_source_change_endpoint(
     )
 
 
-# [REVERT-NON-SUPPLIER:BEGIN] STEP3 협력사 '확인'(verify) — supply_chain_map.verification_status 갱신.
 #   supplier 외(supplychain) 도메인. 최종 작업 시 이 모델 + 아래 /verify 엔드포인트 주석/삭제.
 class VerifySupplierBody(BaseModel):
     bom_version_id: UUID
@@ -255,7 +254,6 @@ async def verify_supplier_endpoint(
         supplier_id=str(body.supplier_id),
         verified=body.verified,
     )
-# [REVERT-NON-SUPPLIER:END]
 
 
 class TriggerDataRequestsBody(BaseModel):
@@ -440,7 +438,6 @@ async def confirm_pool_endpoint(
     )
 
 
-# [REVERT-NON-SUPPLIER:BEGIN] supplier 외(supplychain) — 공급망 맵 헤더(맵 그 자체) 관리 API.
 class MapStatusUpdate(BaseModel):
     status: str  # building / completed
 
@@ -489,7 +486,6 @@ async def update_map_status_endpoint(
     if result is None:
         raise HTTPException(status_code=404, detail="Supply chain map not found")
     return result
-# [REVERT-NON-SUPPLIER:END]
 
 
 @router.get("/current-supply-source")
