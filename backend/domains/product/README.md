@@ -23,8 +23,6 @@ Product Domain은 배터리 제품의 **외부 원천 동기화·BOM 버전 관�
 | `bom_versions` | 제품별 BOM 버전 관리. 생산 기간(`production_from/to`) 기준 이력 보존. |
 | `parts` | 부품 마스터. Pack→광물 5계층 자기참조 트리. |
 | `bom_items` | BOM 버전 내 부품 구성 항목. 소요량·원산지·재료비. |
-| `part_code_mapping` | 원청 코드 ↔ 협력사 코드 매핑. |
-| `manufacturing_process` | 부품별 제조 공정도. 아웃소싱 공정 추적. |
 
 ### 담당하지 않는 것 (경계 명시)
 
@@ -171,29 +169,6 @@ required_quantity_unit VARCHAR(20)
 percentage             NUMERIC(5,2)
 direct_material_cost   NUMERIC(15,4)
 origin_country         VARCHAR(2)           -- ISO 3166-1 alpha-2
-```
-
-### 3-6. `part_code_mapping`
-
-```sql
-mapping_id          UUID PK
-part_id             UUID FK → parts ON DELETE CASCADE
-supplier_id         UUID FK → suppliers
-supplier_part_code  VARCHAR(50)
-original_part_code  VARCHAR(50)
-```
-
-### 3-7. `manufacturing_process`
-
-```sql
-process_id                UUID PK
-part_id                   UUID FK → parts ON DELETE CASCADE
-sequence_no               INT
-process_name              VARCHAR(255)
-process_description       TEXT
-is_outsourced             BOOLEAN DEFAULT FALSE
-outsourced_to_supplier_id UUID FK → suppliers   -- is_outsourced=TRUE 시 필수
-process_image_url         VARCHAR(500)
 ```
 
 ---
