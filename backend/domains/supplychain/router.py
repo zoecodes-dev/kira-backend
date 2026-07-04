@@ -25,10 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domains.supplychain.repository import SupplyChainRepository
 from backend.domains.supplychain.service import SupplyChainService
-from backend.domains.submission.service import create_and_request_submission
 from backend.infrastructure.osm_geocode import geocode_candidates, reverse_geocode_osm
 from backend.infrastructure.auth import CurrentUser, get_current_user
-from backend.infrastructure.database import get_db, AsyncSessionLocal
+from backend.infrastructure.database import get_db
 from backend.infrastructure.trace import trace_tool
 
 router = APIRouter(prefix="/supply-chain", tags=["Supply Chain Domain"])
@@ -267,54 +266,34 @@ class TriggerDataRequestsBody(BaseModel):
     due_date: Optional[datetime] = None
 
 
-@router.post("/trigger-data-requests", response_model=Dict[str, Any])
+@router.post("/trigger-data-requests", response_model=Dict[str, Any], status_code=202)
 @trace_tool("trigger_data_requests_for_gaps")
 async def trigger_data_requests_for_gaps_endpoint(
     body: TriggerDataRequestsBody,
     service: SupplyChainService = Depends(get_supply_chain_service),
 ):
     """
-    C3 맵 gap→데이터요청 트리거.
+    C3 맵 gap→데이터요청 트리거 (이벤트 방식 · 202 Accepted).
 
-    공급망 맵에서 규제 필수 필드 gap이 있는 노드(협력사)를 대상으로
-    submission 도메인의 POST /data-requests를 일괄 호출한다.
-    supplier_ids 미지정 시 gap_count > 0인 모든 노드에 요청 생성.
+    공급망 맵에서 규제 필수 필드 gap이 있는 노드(협력사)별로 SupplyChainGapDetected
+    이벤트를 발행한다. 실제 자료요청(data_request) 생성은 submission 도메인이 이벤트를
+    수신해 비동기로 수행하므로(규칙 #4: supplychain 은 submission 을 직접 호출하지 않음),
+    응답 시점엔 아직 request_id 가 없다. 따라서 '접수(accepted)' 목록만 202로 반환한다.
+    생성 결과는 자료요청 목록 조회로 확인한다.
+    supplier_ids 미지정 시 gap_count > 0인 모든 노드가 대상.
     """
-    gaps = await service.get_gaps(product_id=str(body.product_id))
-    nodes = gaps.get("nodes", [])
-
-    target_ids = {str(sid) for sid in body.supplier_ids} if body.supplier_ids else None
-
-    created = []
-    for node in nodes:
-        if node["gap_count"] == 0:
-            continue
-        if target_ids and node["supplier_id"] not in target_ids:
-            continue
-
-        missing_types = ",".join(f["field_name"] for f in node["missing_fields"])
-        # gap 조회 세션(service)과 분리된 독립 세션으로 write — 세션 충돌 방지
-        async with AsyncSessionLocal() as db:
-            data_request = await create_and_request_submission(
-                db=db,
-                requester_user_id=body.requester_user_id,
-                target_supplier_id=UUID(node["supplier_id"]),
-                requested_data_type=missing_types,
-                due_date=body.due_date,
-                actor_id=body.actor_id,
-            )
-        created.append({
-            "request_id":           str(data_request.request_id),
-            "supplier_id":          node["supplier_id"],
-            "requested_data_type":  missing_types,
-            "gap_count":            node["gap_count"],
-            "is_root_anchor":       node.get("is_root_anchor", False),
-        })
+    accepted = await service.trigger_gap_data_requests(
+        product_id=body.product_id,
+        requester_user_id=body.requester_user_id,
+        actor_id=body.actor_id,
+        due_date=body.due_date,
+        supplier_ids=body.supplier_ids,
+    )
 
     return {
-        "product_id":    str(body.product_id),
-        "created_count": len(created),
-        "requests":      created,
+        "product_id":     str(body.product_id),
+        "accepted_count": len(accepted),
+        "accepted":       accepted,
     }
 
 
