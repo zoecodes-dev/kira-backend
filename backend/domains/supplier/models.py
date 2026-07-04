@@ -58,6 +58,7 @@ class Supplier(Base):
     country: Mapped[Optional[str]] = mapped_column(String(2))  # 소재 국가(ISO 3166-1 alpha-2)
     address: Mapped[Optional[str]] = mapped_column(Text)  # 회사 주소(전체 문자열). 공장 주소와 별개 — 회사 소재지
     business_reg_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 사업자등록증 업로드 URL
+    business_reg_doc_name: Mapped[Optional[str]] = mapped_column(String(255))  # 사업자등록증 원본 파일명(표시용)
     environmental_report_url: Mapped[Optional[str]] = mapped_column(String(500))  # 환경성적서(회원가입 수집) 업로드 URL
     self_assessment_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 실사 자가진단 보고서 업로드 URL
     is_unverified: Mapped[bool] = mapped_column(Boolean, default=False)  # 회원가입: 사업자등록증 미보유 '미확인 등록'
@@ -679,11 +680,36 @@ class OnboardingConsentSummary(BaseModel):
     revocable: bool = True
 
 
+class OnboardingContactPrefill(BaseModel):
+    """온보딩 회원가입 폼에 미리 채울 본인(대표) 담당자. 이미 등록된 대표 contact가 있으면 채움."""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    department: Optional[str] = None
+
+
+class OnboardingDocPrefill(BaseModel):
+    """이미 업로드돼 있는 문서 — s3 key + 표시용 파일명(재확인용)."""
+    s3_key: str
+    file_name: Optional[str] = None
+
+
 class OnboardingPrefillResponse(BaseModel):
-    """공개 prefill — 비민감 필드만(회사명/유형/국가) + 대기중 동의서 요약(있으면)."""
+    """
+    공개 prefill — 회원가입 폼 확인/최신화용 비민감 필드. 이미 DB에 있는 값(1차: OEM ingest,
+    n차: 상위가 입력한 stub)을 그대로 꺼내와 폼을 채운다. 협력사는 확인 후 필요한 부분만 수정한다.
+    ★ 온보딩 submit이 저장하는 경로(suppliers·supplier_contacts·supplier_factories)를 역으로 읽어
+      값이 있으면 전부 채운다 — 확인 후 필요한 부분만 수정하도록.
+    """
     company_name: str
     provider_type: str
     country: Optional[str] = None
+    business_reg_no: Optional[str] = None
+    duns_number: Optional[str] = None
+    address: Optional[str] = None
+    contact: Optional[OnboardingContactPrefill] = None   # 본인 대표 담당자(있으면)
+    business_reg_doc: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 사업자등록증(있으면)
+    unverified: bool = False  # 미확인(서류 미보유) 상태로 등록돼 있는지
     consent: Optional[OnboardingConsentSummary] = None
     model_config = {"from_attributes": True}
 
@@ -721,8 +747,10 @@ class OnboardingContact(BaseModel):
 
 
 class OnboardingSubmitRequest(BaseModel):
-    """공개 submit 요청 — §6 계약. consent_agreed 는 entry 동의 게이트 통과 표식."""
-    account: OnboardingAccount
+    """공개 submit 요청 — §6 계약. consent_agreed 는 entry 동의 게이트 통과 표식.
+    account 는 선택 — 1차 협력사는 MES 기반 계정을 이미 보유하므로 null(신규 계정 생성 안 함).
+    account 가 있으면(n차) 제출 즉시 활성 계정을 생성한다."""
+    account: Optional[OnboardingAccount] = None
     company: OnboardingCompany
     business_reg_doc: Optional[OnboardingDoc] = None
     environmental_report: Optional[OnboardingDoc] = None   # 환경성적서(회원가입 수집) — AI 확인은 로그인 후 자료입력에서
