@@ -1941,3 +1941,164 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '53222222-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = 'facacaca-0000-4000-8000-0000000000ac';
 UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = '8203ba63-ad8f-4b48-a278-064e91cfbf9e';
+
+
+-- ============================================================
+-- 18-B. IONIQ 6 음극(흑연) 공급망 분기 — Annex X 실사 4종 완성
+-- ============================================================
+-- 배경: 기존 11개 체인이 전부 양극 라인이라 EU 배터리법 Annex X 실사 대상
+--   4종(Co·Li·Ni·천연흑연) 중 천연흑연 데이터가 없었다. parts의 ANO-GRAPHITE
+--   (b1111111-…007)는 정의만 있고 미배선 상태였음.
+-- 구성: 완주 체인 IONIQ 6(e7777777)에 음극 분기 3개사 추가(전부 verified —
+--   완주 상태 유지, 발송 이력은 아래 섹션 19가 자동 생성).
+--   성진셀(1차) → 한빛음극재(hop2) → Qingdao 구형화 가공(hop3)
+--   → Balama 천연흑연 광산(hop4, 모잠비크 카보델가도 — 분쟁 인접 지역 시나리오)
+-- core_minerals: 천연/인조 흑연을 키로 구분(graphite_natural만 Annex X 실사 대상).
+
+-- 신규 품목 2개 — ANO(활물질, tier3) 하위 가공·원광
+INSERT INTO parts (part_id, part_code, part_name, tier_level, parent_part_id, hs_code, material_type, unit_price, source_system, external_id) VALUES
+('b1111111-0000-4000-8000-000000000014', 'PROC-GRAPHITE', 'Spherical Graphite (Purified)', 5, 'b1111111-0000-4000-8000-000000000007', '250410', 'refined_metal', 14.0000, 'ERP_PLM', 'ERP-PART-PROCGR'),
+('b1111111-0000-4000-8000-000000000015', 'MIN-GRAPHITE',  'Natural Graphite Ore (Flake)',  6, 'b1111111-0000-4000-8000-000000000014', '250410', 'mineral',        6.0000, 'ERP_PLM', 'ERP-PART-MINGR');
+
+-- 협력사 3개사 (2차 음극재 제조 / 3차 구형화 가공 / 4차 천연흑연 광산)
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('66111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한빛음극재(주)', 'Hanbit Anode Materials', 'Seo YJ CEO', '661-86-30001', 'manufacturer', '{"graphite_natural":88.0,"graphite_synthetic":12.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단로 77', 's3://kira-docs/suppliers/66111111/biz_reg.pdf', 's3://kira-docs/suppliers/66111111/env_report.pdf', 84, 'supplier_verified', 'low'),
+('66222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Qingdao Spherical Graphite Co.', 'Qingdao Spherical Graphite Co.', 'Chen CEO', NULL, 'smelter', '{"graphite_natural":95.0}'::jsonb, 'CN', 'Laixi Graphite Industrial Park, Qingdao, Shandong', 's3://kira-docs/suppliers/66222222/biz_reg.pdf', NULL, 71, 'supplier_verified', 'low'),
+('66333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Balama Graphite Mining SA', 'Balama Graphite Mining SA', 'Machel CEO', NULL, 'miner', NULL, 'MZ', 'Balama District, Cabo Delgado Province', 's3://kira-docs/suppliers/66333333/biz_reg.pdf', NULL, 58, 'supplier_verified', 'medium');
+
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
+('76111111-0000-4000-8000-000000000001', '66111111-0000-4000-8000-000000000001', '포항 음극재공장', 'Pohang Anode Plant', 'KR', 'Pohang', ST_SetSRID(ST_MakePoint(129.385, 36.077), 4326), 'production', 'BOTH', '["EU_BATTERY","EU_BATTERY_ART7","EU_BATTERY_ART47","CSDDD"]'::jsonb, 100.00),
+('76222222-0000-4000-8000-000000000002', '66222222-0000-4000-8000-000000000002', 'Laixi Spheroidization Plant', 'Laixi Spheroidization Plant', 'CN', 'Qingdao', ST_SetSRID(ST_MakePoint(120.518, 36.889), 4326), 'processing', 'BOTH', '["EU_BATTERY_ART47","CSDDD","CBAM"]'::jsonb, 100.00),
+('76333333-0000-4000-8000-000000000003', '66333333-0000-4000-8000-000000000003', 'Balama Graphite Mine', 'Balama Graphite Mine', 'MZ', 'Cabo Delgado', ST_SetSRID(ST_MakePoint(38.575, -13.348), 4326), 'mining', 'BOTH', '["EU_BATTERY_ART47","CRMA","EUDR"]'::jsonb, 100.00);
+
+INSERT INTO supplier_contacts (supplier_id, factory_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('66111111-0000-4000-8000-000000000001', '76111111-0000-4000-8000-000000000001', '서유진', 'Seo YJ', 'ESG Manager', 'ESG팀', 'yj.seo@hanbitanode.demo', '+82-54-661-0001', TRUE, 'ko'),
+('66111111-0000-4000-8000-000000000001', '76111111-0000-4000-8000-000000000001', '문태호', 'Moon TH', 'Quality Manager', '품질팀', 'th.moon@hanbitanode.demo', '+82-54-661-0002', FALSE, 'ko'),
+('66222222-0000-4000-8000-000000000002', '76222222-0000-4000-8000-000000000002', 'Chen Xiaolin', 'Chen Xiaolin', 'Compliance Manager', 'Compliance', 'xl.chen@qdgraphite.demo', '+86-532-662-0001', TRUE, 'en'),
+('66333333-0000-4000-8000-000000000003', '76333333-0000-4000-8000-000000000003', 'Amina Machel', 'Amina Machel', 'Mine Manager', 'Operations', 'a.machel@balamagraphite.demo', '+258-27-663-0001', TRUE, 'en');
+
+INSERT INTO supplier_manufacturer_details (supplier_id, manufacturing_process, energy_source, capacity, carbon_intensity) VALUES
+('66111111-0000-4000-8000-000000000001', 'Natural Graphite Anode Coating', 'renewable', '4GWh/yr', 2.6500);
+
+INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from) VALUES
+('66333333-0000-4000-8000-000000000003', 'Balama Graphite Mine', 'open_pit', 35000.00, ST_SetSRID(ST_MakePoint(38.575, -13.348), 4326), '2018-01-01');
+
+INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source) VALUES
+('76111111-0000-4000-8000-000000000001', 2.6500, 'PEF', '2024-05-01', '2024-05-01', 'third_party_verified'),
+('76222222-0000-4000-8000-000000000002', 3.4200, 'PEF', '2024-05-01', '2024-05-01', 'supplier_declared');
+
+INSERT INTO supplier_onboarding (supplier_id, consent_status, consent_signed_at, agreement_status, last_invited_at, sla_due_date, reminder_count) VALUES
+('66111111-0000-4000-8000-000000000001', 'consent_agreed', now() - interval '18 days', 'agreed', now() - interval '19 days', now() - interval '5 days', 0),
+('66222222-0000-4000-8000-000000000002', 'consent_agreed', now() - interval '14 days', 'agreed', now() - interval '15 days', now() - interval '1 days', 0),
+('66333333-0000-4000-8000-000000000003', 'consent_agreed', now() - interval '12 days', 'agreed', now() - interval '13 days', now() + interval '1 days', 0);
+
+INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
+('66111111-0000-4000-8000-000000000001', 11, 'low',    'low', FALSE, NULL, now() - interval '6 days'),
+('66222222-0000-4000-8000-000000000002', 24, 'low',    'low', FALSE, NULL, now() - interval '6 days'),
+('66333333-0000-4000-8000-000000000003', 45, 'medium', 'low', TRUE,  '["모잠비크 카보델가도 — 분쟁 인접(CAHRA) 지역"]'::jsonb, now() - interval '6 days');
+
+-- IONIQ 6 BOM에 음극 품목 편성 (원가비중 합 100% 유지 — 모듈 45→33으로 조정)
+UPDATE bom_items SET percentage = 33.00
+WHERE bom_version_id = 'e7777777-0000-4000-8000-000000000007'
+  AND part_id = 'b1111111-0000-4000-8000-000000000002';
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, direct_material_cost, origin_country, source_system, external_id) VALUES
+('e7777777-0000-4000-8000-000000000007', 'b1111111-0000-4000-8000-000000000007', 26, 'kg', 7.00, 30.0000, 'KR', 'ERP_PLM', 'ERP-BI-I6-ANO'),
+('e7777777-0000-4000-8000-000000000007', 'b1111111-0000-4000-8000-000000000014', 24, 'kg', 3.00, 14.0000, 'CN', 'ERP_PLM', 'ERP-BI-I6-PROCGR'),
+('e7777777-0000-4000-8000-000000000007', 'b1111111-0000-4000-8000-000000000015', 30, 'kg', 2.00,  6.0000, 'MZ', 'ERP_PLM', 'ERP-BI-I6-MINGR');
+
+-- 공급망 엣지 — 성진셀(hop1) 아래 음극 분기. 전부 verified(완주 유지).
+INSERT INTO supply_chain_map (edge_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+('87777777-0000-4000-8000-000000000007', 'e7777777-0000-4000-8000-000000000007', '61333333-0000-4000-8000-000000000003', '66111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000007', 2, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2024-01-01', '2024-12-31'),
+('87777777-0000-4000-8000-000000000008', 'e7777777-0000-4000-8000-000000000007', '66111111-0000-4000-8000-000000000001', '66222222-0000-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000014', 3, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2024-01-01', '2024-12-31'),
+('87777777-0000-4000-8000-000000000009', 'e7777777-0000-4000-8000-000000000007', '66222222-0000-4000-8000-000000000002', '66333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000015', 4, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2024-01-01', '2024-12-31');
+
+-- map_id 백필 (IONIQ 6 헤더는 16-9에서 이미 생성됨)
+UPDATE supply_chain_map scm SET map_id = h.map_id
+FROM supply_chain_maps h
+WHERE h.bom_version_id = scm.bom_version_id AND scm.map_id IS NULL;
+
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
+('87777777-0000-4000-8000-000000000007', '76111111-0000-4000-8000-000000000001', 100.00, 9800, 'kg'),
+('87777777-0000-4000-8000-000000000008', '76222222-0000-4000-8000-000000000002', 100.00, 9000, 'kg'),
+('87777777-0000-4000-8000-000000000009', '76333333-0000-4000-8000-000000000003', 100.00, 11500, 'kg');
+
+-- IONIQ 6 [미실행] EU向 배치 — 한국 OEM의 EU 수출 물량(규제 세트는 destination이 정함).
+--   천연흑연 실사 스토리의 평가 대상. 데모에서 파이프라인 실행용으로 미실행(stage_queued) 유지.
+--   ※ 제품(d7777777, 섹션 16-2) 생성 이후여야 FK 충족 — 섹션 12 배치 블록에 넣지 말 것.
+INSERT INTO batches (batch_id, product_id, bom_version_id, tenant_id, destination, current_stage, status, confidence_score, source_system, external_id) VALUES
+('ba777777-0000-4000-8000-000000000007', 'd7777777-0000-4000-8000-000000000007', 'e7777777-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'EU', 'stage_queued', 'batch_processing', NULL, 'MES', 'MES-LOT-I6');
+
+
+-- ============================================================
+-- 19. STEP3 발송 이력 백필 — 맵 진행도와 데이터 계약 이력 정합
+-- ============================================================
+-- 문제: supply_chain_map 엣지는 verified(=STEP4 수신 확인 완료)인데 그 협력사의
+--   data_provision_consents/data_request_log(=STEP3 동의·자료요청 발송 이력)가 없어,
+--   허브가 "발송한 적 없는데 수신 확인만 된" 모순 상태(step3 미완료·step4 완료)로 뜬다.
+-- 규칙(허브 판정 로직과 동일 — SupplyChainHub의 consentTargets/mailed 기준):
+--   · 대상 = 맵 편입(hop>0) 협력사, miner 제외(발송 대상 아님), 원청 제외
+--   · verified 엣지 보유          → 'agreed'    (발송→회신→체결까지 완료)
+--   · 완료 맵 편입 + verified 없음 → 'requested' (발송했고 회신 대기:
+--     신성배터리(iX 보조 1차)·EQE/IONIQ5 4차 제련소·Unverified Trader)
+--   · building 맵(VW ID.7)은 STEP1부터 밟는 시나리오 — 이력 없음 유지
+-- 중복 방어: 협력사당 기존 이력 있으면 스킵(한양셀 agreed 샘플 등 보존) → 재실행 안전
+
+-- A. verified(수신 확인 완료) 협력사 → 체결 완료(agreed) 동의서
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, returned_at, agreed_at,
+   signer_name, signer_title, signer_email, signature_method, form_version, form_data, agreement_hash)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'agreed',
+  now() - interval '21 days', now() - interval '14 days', now() - interval '13 days',
+  c.name, c.role, c.email, 'email_form', 'v1.0',
+  jsonb_build_object('data_subject', s.company_name, 'sub_supplier_consent', true, 'retention_years', 7),
+  substr(md5(s.supplier_id::text), 1, 12)
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id
+  AND scm.hop_level > 0 AND scm.verification_status = 'verified'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+LEFT JOIN supplier_contacts c ON c.supplier_id = s.supplier_id AND c.is_primary
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+-- B. 발송됐지만 미회신(requested) — 완료 맵 편입 + verified 엣지 전무
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, form_version)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'requested',
+  now() - interval '3 days', 'v1.0'
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id AND scm.hop_level > 0
+JOIN supply_chain_maps h ON h.bom_version_id = scm.bom_version_id AND h.status = 'completed'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM supply_chain_map v
+                  WHERE v.child_supplier_id = s.supplier_id AND v.verification_status = 'verified')
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+-- C. 자료요청 대장(data_request_log) 백필 — A·B와 동일 대상, 협력사당 1건.
+--    허브 createDataRequest와 동일한 requested_data_type('general_info').
+INSERT INTO data_request_log
+  (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date,
+   response_status, submission_status)
+SELECT
+  '11111111-0000-4000-8000-000000000002', dc.supplier_id, 'general_info',
+  dc.requested_at, dc.requested_at + interval '14 days',
+  CASE WHEN dc.status = 'agreed' THEN 'response_responded' ELSE 'response_pending' END,
+  CASE WHEN dc.status = 'agreed' THEN 'submission_approved' ELSE 'submission_requested' END
+FROM data_provision_consents dc
+WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id = dc.supplier_id);
