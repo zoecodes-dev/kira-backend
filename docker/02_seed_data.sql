@@ -8,7 +8,7 @@
 --   (regulations: schema가 단일 소스, seed는 시나리오 데이터만)
 --
 -- [제품 3축] customer_id(고객사) + model_name(차종) + amperage_ah(Ah)
---   bom_versions.production_from/to 로 생산 Lot 기간 추적.
+--   bom_versions.production_from/to 로 생산기간 추적.
 --
 -- [7계층 트리] 0 Pack / 1 Module / 2 Cell / 3 활물질(CAM·ANO)
 --             / 4 전구체 / 5 제련·정제 / 6 광산
@@ -356,7 +356,7 @@ INSERT INTO supply_chain_map (edge_id, bom_version_id, parent_supplier_id, child
 -- hop4: 한중제련(smelter)→칠레리튬(광산). 광산은 무조건 상위 제련소(smelter)와 엮여야 함(정보관리 주체=smelter).
 ('54444444-0000-4000-8000-000000000005', 'e4444444-0000-4000-8000-000000000004', 'aaaaaaaa-aaaa-4000-8000-00000000000a', 'a9999999-9999-4000-8000-000000000009', 'b1111111-0000-4000-8000-00000000000b', 4, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31');
 
--- 공급망 맵 헤더(supply_chain_maps): bom_version(제품×Lot)당 1개. 엣지의 map_id(헤더 FK) 백필.
+-- 공급망 맵 헤더(supply_chain_maps): bom_version(제품 BOM 버전)당 1개. 엣지의 map_id(헤더 FK) 백필.
 INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status)
 SELECT gen_random_uuid(), bv.bom_version_id, bv.product_id, 'completed'
 FROM bom_versions bv
