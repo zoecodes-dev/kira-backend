@@ -75,6 +75,14 @@ async def _register_subscriptions() -> None:
     from backend.handlers.supplychain_gap_data_request import on_supply_chain_gap_detected
     await subscribe("SupplyChainGapDetected", on_supply_chain_gap_detected)
 
+    # ── 협력사 통지/자진신고 → in-app 알림 (프론트 벨/인박스가 GET /notifications 폴링) ──
+    from backend.handlers.supplier_notification import (
+        notify_supplier_correction,
+        notify_source_change_declared,
+    )
+    await subscribe("supplier.notification_sent", notify_supplier_correction)
+    await subscribe("supplier.source_change_declared", notify_source_change_declared)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

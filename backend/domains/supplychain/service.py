@@ -135,7 +135,9 @@ class SupplyChainService:
 
         # 자진신고 발생 시, 상위 BOM 검증을 위해 이벤트 발행 (Compliance/Verification 트리고)
         payload = {
-            **new_map, 
+            **new_map,
+            "bom_version_id": bom_version_id,  # 수신 핸들러가 원청 테넌트 해석에 사용 (bom→product→tenant)
+            "part_id": part_id,
             "reason": reason,
             "declared_at": datetime.now(timezone.utc).isoformat(),
             "requires_full_revalidation": True  # 상위 BOM 영향에 따른 재검증 트리거 신호
