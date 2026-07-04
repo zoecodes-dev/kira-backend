@@ -355,7 +355,7 @@ CREATE TABLE products (
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- [테이블 역할] 동일 제품의 생산 Lot/배치 유통 기간별 BOM 버전 이력.
+-- [테이블 역할] 동일 제품의 생산기간별 BOM 버전 이력.
 -- [개명] effective_from/to(규제 발효일 성격) → production_from/to(제조·유통 기간 식별).
 --        설계 변경이 아닌 'Lot 추적' 목적임을 컬럼명으로 명확화.
 CREATE TABLE bom_versions (
@@ -426,7 +426,7 @@ CREATE TABLE bom_items (
 -- ============================================================
 
 -- [테이블 역할] 공급망 맵 그 자체(헤더). 엣지(supply_chain_map)들을 묶는 1급 엔티티.
---   맵 1개 = map_id 1개 = bom_version(제품×Lot) 1개. 완료/전송 상태를 여기서 관리.
+--   맵 1개 = map_id 1개 = bom_version(제품 BOM 버전) 1개. 완료/전송 상태를 여기서 관리.
 CREATE TABLE supply_chain_maps (
     map_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     bom_version_id UUID REFERENCES bom_versions(bom_version_id),

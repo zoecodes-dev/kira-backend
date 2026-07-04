@@ -31,7 +31,7 @@ from backend.infrastructure.database import Base
 # 0. SupplyChainMaps — 공급망 맵 헤더(맵 그 자체). 엣지(supply_chain_map)를 묶는 1급 엔티티.
 # ---------------------------------------------------------------------------
 class SupplyChainMaps(Base):
-    """공급망 맵 1개 = map_id 1개 = bom_version(제품×Lot) 1개. 완료/전송 상태 관리."""
+    """공급망 맵 1개 = map_id 1개 = bom_version(제품 BOM 버전) 1개. 완료/전송 상태 관리."""
     __tablename__ = "supply_chain_maps"
 
     map_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
