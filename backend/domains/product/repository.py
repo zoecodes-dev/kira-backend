@@ -77,7 +77,7 @@ class ProductRepository:
                 "customers": [(Customer, is_new), ...],   # is_new=True면 신규 INSERT
                 "products":  [Product, ...],
             }
-            service가 CustomerImported / ProductImported 발행 시 이 반환값을 씀.
+            service가 동기화 요약(반환 dict)을 만들 때 이 값을 씀.
 
         [UPSERT 전략 — idempotent]
             동일 ingest를 두 번 실행해도 중복 row 없음.
@@ -227,8 +227,8 @@ class ProductRepository:
             "마지막으로 확인된 시각"은 항상 최신 유지해요.
 
         [is_new 플래그]
-            service가 CustomerImported 이벤트에 담아 발행해요.
-            downstream이 "신규 고객사 등장" vs "기존 갱신"을 구분할 수 있어요.
+            service가 동기화 요약(customers[].is_new)에 담아 반환해요.
+            "신규 고객사 등장" vs "기존 갱신"을 구분할 수 있어요.
             PostgreSQL의 xmax 컬럼으로 판별: INSERT면 xmax=0, UPDATE면 xmax>0.
 
         [반환]

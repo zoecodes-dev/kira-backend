@@ -26,46 +26,8 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 # ============================================================
-# Product (C)
-# ============================================================
-@dataclass
-class CustomerImportedEvent:
-    """
-    고객사(완성차 OEM) UPSERT 완료 시 발행.
-    발행: C(Product Ingest) → 수신: 공급망·컴플라이언스 등 downstream.
-
-    발행 순서 규칙:
-        CustomerImported → (product UPSERT) → BOMImported → ProductImported
-        products.customer_id FK 의존 때문에 customer가 먼저 확정되어야 한다.
-
-    is_new: True면 신규 INSERT, False면 기존 row 업데이트(UPSERT 충돌).
-        downstream이 "새 고객사 등장" vs "기존 갱신"을 구분할 수 있게 담아요.
-    """
-    customer_id: Optional[UUID] = None
-    customer_code: Optional[str] = None   # 예: 'BMW', 'MERCEDES'
-    external_id: Optional[str] = None     # 원천 ERP 식별자
-    is_new: bool = True                   # 신규 INSERT=True / UPSERT 갱신=False
-    event_name: str = "CustomerImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-@dataclass
-class ProductImportedEvent:
-    product_id: Optional[UUID] = None
-    external_id: Optional[str] = None   # 원천 ERP/PLM 식별자
-    event_name: str = "ProductImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-
-@dataclass
-class BOMImportedEvent:
-    product_id: Optional[UUID] = None
-    bom_version_id: Optional[UUID] = None
-    external_id: Optional[str] = None   # 원천 PLM 식별자
-    event_name: str = "BOMImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
+# (Product ingest 이벤트 CustomerImported/BOMImported/ProductImported/LotImported 는
+#  구독자 부재로 전부 제거됨 — import_products 는 UPSERT만 수행하고 이벤트를 발행하지 않는다.)
 # ============================================================
 # Supplier (B)
 # ============================================================
