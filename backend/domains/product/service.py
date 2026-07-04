@@ -1,8 +1,8 @@
 """
 domains/product/service.py  (담당: 팀원 C)
 
-★ 이 파일은 Product 도메인의 비즈니스 로직을 담당하며, 
-   외부 원천(ERP/PLM) 데이터의 Ingest(동기화) 및 연쇄 이벤트 발행 패턴을 구현한다.
+★ 이 파일은 Product 도메인의 비즈니스 로직을 담당하며,
+   외부 원천(ERP/PLM) 데이터의 Ingest(동기화)를 구현한다.
 
 레이어 규칙 (PROJECT_CORE 5-1):
   router → service → repository → models  (단방향)
@@ -10,22 +10,15 @@ domains/product/service.py  (담당: 팀원 C)
   - 상태 전이는 반드시 state_machine.py 함수를 경유하여 실행한다.
   - 타 도메인의 코드를 직접 import하지 않는다. 도메인 간 통신은 오직 이벤트(publish)로만 수행한다.
 
-이벤트 발행 규칙 (PROJECT_CORE 5-2):
-  - publish(event_name, payload)  ← 2-인자 시그니처 준수. db 세션을 넘기지 않는다.
-  - payload는 dataclasses.asdict(이벤트객체)로 만든 뒤 JSON 직렬화 가능하도록 변환(_serialize_payload)한다.
-  - ★ 이벤트 발행은 반드시 "DB 커밋(db.commit())이 성공하여 영속화가 확정된 뒤"에 수행한다.
-
 [Product 도메인 주요 결정 사항 반영]
   - 결정 #1 (Ingest): 제품은 본 시스템이 직접 생성하지 않고 외부 원천에서 동기화(UPSERT)한다.
-    (BOMImported → LotImported → ProductImported 순서로 연쇄 발행하여 다운스트림의 안정성 보장)
+    (과거 Import 이벤트 연쇄 발행이 있었으나 구독자 부재로 전부 제거 — UPSERT만 수행)
   - 결정 #2 (BOM 트리): N차 공급망의 점진적 발견을 지원하기 위해 get_bom_tree에 only_confirmed 필터 스위치 적용.
   - 최신 규격 반영: events/types.py 업데이트에 따라 external_id, batch_id 파라미터 적용 완료.
 """
 
 from __future__ import annotations
 
-import uuid
-from dataclasses import asdict
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -38,35 +31,6 @@ from backend.domains.product.state_machine import (
     activate_bom_version as sm_activate_bom_version,
     deprecate_bom_version as sm_deprecate_bom_version,
 )
-from backend.events.types import (
-    BOMImportedEvent,
-    CustomerImportedEvent,
-    LotImportedEvent,
-    ProductImportedEvent,
-)
-from backend.infrastructure.event_bus import publish
-
-
-# ---------------------------------------------------------------------------
-# _serialize_payload
-# ---------------------------------------------------------------------------
-
-def _serialize_payload(payload: dict) -> dict:
-    """
-    asdict() 결과의 UUID·datetime을 JSON 직렬화 가능한 str로 변환한다.
-
-    publish()의 payload는 JSON 직렬화 가능해야 하므로
-    UUID → str, datetime → isoformat() 변환이 필요하다.
-    """
-    result = {}
-    for k, v in payload.items():
-        if isinstance(v, uuid.UUID):
-            result[k] = str(v)
-        elif hasattr(v, "isoformat"):
-            result[k] = v.isoformat()
-        else:
-            result[k] = v
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -78,33 +42,18 @@ async def import_products(
     source_system: str = "SEED",
 ) -> Dict[str, Any]:
     """
-    [결정 #1 + W4] 외부 원천에서 고객사·제품 데이터를 동기화하고 이벤트를 발행한다.
+    [결정 #1] 외부 원천에서 고객사·제품 데이터를 동기화(UPSERT)한다.
 
-    [W4 확장]
-    고객사 ingest가 추가됐어요. fetch_from_source가 고객사 UPSERT를 제품보다
-    먼저 처리하고, 이 함수는 그 결과를 받아 이벤트를 올바른 순서로 발행해요.
+    fetch_from_source가 고객사 UPSERT를 제품보다 먼저 처리(products.customer_id
+    → customers FK 의존)하고, 이 함수는 그 결과를 요약 dict로 반환한다.
 
-    [이벤트 발행 순서 — W4]
-        1. CustomerImported  — 고객사 UPSERT 완료 (신규 시만)
-           ※ 기존 고객사 갱신(is_new=False)은 downstream 변화 없으므로 발행 생략.
-        2. BOMImported       — bom_version ingest 완료
-        3. LotImported       — batch(Lot) ingest 완료
-        4. ProductImported   — 제품 전체 ingest 완료 (마지막)
-
-        CustomerImported를 먼저 발행하는 이유:
-          products.customer_id 가 customers.customer_id FK를 참조하기 때문에
-          "고객사 준비됨" 신호가 먼저 가야 downstream이 안전하게 처리할 수 있어요.
-          ProductImported를 마지막에 발행하는 이유는 기존과 동일 — BOM·Lot 준비 후
-          "제품 전체가 준비됐다"는 신호를 보내야 해요.
+    ※ 과거 이 함수는 CustomerImported / BOMImported / (Lot) / ProductImported 를
+      연쇄 발행했으나, 구독자가 하나도 없는 죽은 이벤트라 전부 제거했다.
 
     [호출 흐름]
         router → service.import_products()
-               → repository.fetch_from_source()          # 고객사·제품 UPSERT
+               → repository.fetch_from_source()   # 고객사·제품 UPSERT
                → db.commit()
-               → publish("CustomerImported", ...)        # 신규 고객사만
-               → 제품별: publish("BOMImported", ...)
-                         publish("LotImported", ...)
-                         publish("ProductImported", ...)
 
     [반환]
         동기화된 고객사·제품 수와 목록 요약 dict.
@@ -116,91 +65,6 @@ async def import_products(
 
     customer_results: list = result["customers"]    # [(Customer, is_new), ...]
     products: list         = result["products"]     # [Product, ...]
-
-    # ------------------------------------------------------------------
-    # 1. CustomerImported 발행 — 신규 고객사(is_new=True)만
-    # is_new=False(기존 갱신)는 downstream에 아무 변화 없으므로 이벤트 생략.
-    # ------------------------------------------------------------------
-    for customer, is_new in customer_results:
-        if not is_new:
-            continue
-
-        customer_event = CustomerImportedEvent(
-            customer_id=customer.customer_id,
-            customer_code=customer.customer_code,
-            external_id=customer.external_id,
-            is_new=True,
-        )
-        await publish(
-            "CustomerImported",
-            _serialize_payload(asdict(customer_event)),
-        )
-
-    # ------------------------------------------------------------------
-    # 2. 제품별 BOMImported → LotImported → ProductImported
-    # ------------------------------------------------------------------
-    for product in products:
-        # 2-1. BOMImported
-        bom_event = BOMImportedEvent(
-            product_id=product.product_id,
-            bom_version_id=None,  # TODO: W3에서 실제 bom_version_id 조회 후 채움
-            external_id=product.external_id,
-        )
-        await publish(
-            "BOMImported",
-            _serialize_payload(asdict(bom_event)),
-        )
-
-        # 2-2. LotImported
-        # ──────────────────────────────────────────────────────
-        # [A2 수정 — 은지] batch_id TODO 정리
-        #
-        # [현재 상태]
-        #   A(지혜)의 A1 배치 생성 단일 진입점이 아직 머지되지 않았다.
-        #   batch_id=None으로 방어적 동작. LotImported 이벤트에
-        #   batch_id가 None이어도 downstream(subscriber)이
-        #   None 체크 후 안전하게 처리한다.
-        #
-        # [A1 머지 후 교체할 코드]
-        # ┌────────────────────────────────────────────────────┐
-        # │ # A(지혜)의 배치 생성 단일 진입점으로 위임           │
-        # │ from backend.handlers.batch_trigger import (       │
-        # │     create_batch_for_product,                      │
-        # │ )                                                  │
-        # │ batch = await create_batch_for_product(            │
-        # │     db=db,                                         │
-        # │     product_id=product.product_id,                 │
-        # │     source_system="MES",                           │
-        # │     external_id=product.external_id,               │
-        # │ )                                                  │
-        # │ actual_batch_id = batch.batch_id                   │
-        # └────────────────────────────────────────────────────┘
-        #
-        # [교체 방법]
-        #   1. A1 머지 확인 (handlers/batch_trigger.py 존재 확인)
-        #   2. 위 주석의 import + 함수 호출 코드를 해제
-        #   3. 아래 batch_id=None 을 batch_id=actual_batch_id 로 교체
-        #   4. 이 TODO 주석 블록 삭제
-        # ──────────────────────────────────────────────────────
-        lot_event = LotImportedEvent(
-            batch_id=None,  # → A1 머지 후 actual_batch_id 로 교체
-            product_id=product.product_id,
-            external_id=product.external_id,
-        )
-        await publish(
-            "LotImported",
-            _serialize_payload(asdict(lot_event)),
-        )
-
-        # 2-3. ProductImported
-        product_event = ProductImportedEvent(
-            product_id=product.product_id,
-            external_id=product.external_id,
-        )
-        await publish(
-            "ProductImported",
-            _serialize_payload(asdict(product_event)),
-        )
 
     return {
         "synced_customer_count": len(customer_results),
@@ -306,7 +170,7 @@ async def list_products(
             "manufacturer_id": str(p.manufacturer_id) if p.manufacturer_id else None,
             "type":            p.type,
             "customer_id":     str(p.customer_id) if p.customer_id else None,
-            "customer_name":   p.customer.customer_name if p.customer else None,  # [REVERT-NON-SUPPLIER] 고객사명(export용)
+            "customer_name":   p.customer.customer_name if p.customer else None,
             "model_name":      p.model_name,
             "amperage_ah":     float(p.amperage_ah) if p.amperage_ah else None,
             "source_system":   p.source_system,

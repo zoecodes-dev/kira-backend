@@ -1,11 +1,12 @@
 # Verification Domain
 
 > **스코프 축소 안내**: FEOC(IRA 지분율 심사) 기능은 스코프에서 제외되어 제거되었다.
-> 이 도메인은 현재 **문서 무결성 검증**과 **컴플라이언스 이력 조회 DTO**만 담당한다.
-> (배치 파이프라인의 `stage_verification` 단계도 함께 폐지 — LangGraph 노드로 결선된 적 없음.)
+> 문서 무결성 검증(`verify_document_integrity_rule`)도 어느 그래프 노드에도 결선되지
+> 않아 제거되었다(딸린 `get_integrity_pairs`/`_coerce_number`도 함께 제거).
+> 이 도메인은 현재 **컴플라이언스 이력 조회 DTO**만 담당한다.
+> (배치 파이프라인의 `stage_verification` 단계도 폐지 — LangGraph 노드로 결선된 적 없음.)
 
 ## 책임
-- 문서 무결성 검증(`verify_document_integrity_rule`): 협력사 확정값(confirmed_fields)과 업로드 증빙 추출값을 대조해 불일치 시 `compliance_reject` + `needs_human_review` 처리 (수치 허용오차 ±5%).
 - 컴플라이언스 이력 조회 DTO(`get_compliance_history_dto`): HITL 등 타 도메인이 배치별 판정 이력을 조회할 때 사용하는 읽기 전용 헬퍼.
 
 ## 관련 테이블 (schema.sql 참조)

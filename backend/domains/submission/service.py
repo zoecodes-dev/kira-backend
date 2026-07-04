@@ -19,15 +19,15 @@ from backend.domains.submission.repository import (
     create_data_request, 
     get_data_request, 
     list_data_requests,
-    get_missing_counts,  # [REVERT-NON-SUPPLIER] 이 import 줄 제거
+    get_missing_counts,
     get_completeness_by_supplier,
     get_timeline_by_supplier,
-    list_extractions_for_review,  # [REVERT-NON-SUPPLIER] HITL AI 추출 조회
+    list_extractions_for_review,
 )
 
 
 async def list_ai_extractions(db: AsyncSession, tenant_id) -> list[dict]:
-    """[REVERT-NON-SUPPLIER] HITL 협력사 승인 — AI 추출(parsed_fields+confidence) + 협력사·요청 정보."""
+    """HITL 협력사 승인 — AI 추출(parsed_fields+confidence) + 협력사·요청 정보."""
     rows = await list_extractions_for_review(db, tenant_id)
     out: list[dict] = []
     for r in rows:
@@ -213,13 +213,11 @@ async def get_submissions_list(
     status: Optional[str] = None,
     skip: int = 0,
     limit: int = 100
-) -> list[dict]:  # [REVERT-NON-SUPPLIER] 원복 반환타입: list[DataRequestLog]
+) -> list[dict]:
     """
     [조회 도구] 목록 필터링 조회
     - 협력사(supplier_id)나 현재 진행 상태(status)를 기준으로 다건을 조회합니다.
     """
-    # [REVERT-NON-SUPPLIER:BEGIN] supplier 외(submission) — missing_count 병합(프론트 표시용).
-    #   최종작업 시 아래 블록 전체를 'return await list_data_requests(db, supplier_id, status, skip, limit)' 로 원복.
     logs = await list_data_requests(db, supplier_id, status, skip, limit)
     sids = list({l.target_supplier_id for l in logs if l.target_supplier_id})
     missing_map = await get_missing_counts(db, sids)
@@ -237,7 +235,6 @@ async def get_submissions_list(
         }
         for l in logs
     ]
-    # [REVERT-NON-SUPPLIER:END]
 
 @trace_node("update_submission_status", node_type="agent")
 async def update_submission_status(

@@ -3,10 +3,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# PostgreSQL 클라이언트 빌드 종속성 (asyncpg/psycopg2용) + poppler (pdf2image용)
+# 런타임 시스템 의존성만 설치 — 파이썬 패키지는 전부 manylinux 휠로 설치되므로
+# 컴파일러(build-essential, ~330MB) 불필요.
+#   libpq5: psycopg(langgraph-checkpoint-postgres)가 런타임에 로드하는 libpq
+#   poppler-utils: pdf2image용
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
+    libpq5 \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
