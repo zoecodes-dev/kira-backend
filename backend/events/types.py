@@ -35,7 +35,7 @@ class CustomerImportedEvent:
     발행: C(Product Ingest) → 수신: 공급망·컴플라이언스 등 downstream.
 
     발행 순서 규칙:
-        CustomerImported → (product UPSERT) → BOMImported → LotImported → ProductImported
+        CustomerImported → (product UPSERT) → BOMImported → ProductImported
         products.customer_id FK 의존 때문에 customer가 먼저 확정되어야 한다.
 
     is_new: True면 신규 INSERT, False면 기존 row 업데이트(UPSERT 충돌).
@@ -55,13 +55,6 @@ class ProductImportedEvent:
     event_name: str = "ProductImported"
     occurred_at: datetime = field(default_factory=_now_utc)
 
-@dataclass
-class LotImportedEvent:
-    batch_id: Optional[UUID] = None
-    product_id: Optional[UUID] = None
-    external_id: Optional[str] = None   # 원천 MES 식별자
-    event_name: str = "LotImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
 
 
 @dataclass

@@ -523,8 +523,9 @@ CREATE TABLE batches (
 
     confidence_score NUMERIC(5,4),
 
-    -- [결정 #1 정교화] 외부 원천시스템 연동 마크 주입 (생산 배치는 MES 동기화)
-    source_system   VARCHAR(100) DEFAULT 'MES',
+    -- 배치(컴플라이언스 평가 작업)의 데이터 출처 마크. 런타임 생성 배치는 제출 흐름 기원(SUBMISSION).
+    -- 시드/데모의 'MES 생산 로트' 예시는 INSERT에서 'MES'를 명시한다.
+    source_system   VARCHAR(100) DEFAULT 'SUBMISSION',
     external_id     VARCHAR(255),
     synced_at       TIMESTAMPTZ DEFAULT now()
 );
