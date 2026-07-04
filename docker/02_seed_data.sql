@@ -145,10 +145,6 @@ INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_n
 -- Global Mining 신장 광산 [Sad tier7 — 위반 핵심 노드]
 ('f5555555-0000-4000-8000-000000000005', 'a5555555-5555-4000-8000-000000000005', 'Xinjiang NCM Mine A', 'Xinjiang NCM Mine A', 'CN', 'Xinjiang', ST_SetSRID(ST_MakePoint(86.000, 41.000), 4326), 'mining', 'US', '["UFLPA"]'::jsonb, 100.00);
 
--- view_permissions: ESG 담당자가 한양셀 하위 3차수까지 열람
-INSERT INTO view_permissions (user_id, viewable_supplier_id, can_view_parent, can_view_children, can_view_siblings, depth_limit, granted_by) VALUES
-('11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', FALSE, TRUE, FALSE, 3, '11111111-0000-4000-8000-000000000001');
-
 -- 연락 담당자 (주요 3사)
 INSERT INTO supplier_contacts (supplier_id, factory_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
 ('a1111111-1111-4000-8000-000000000001', 'f1111111-0000-4000-8000-000000000001', '김담당', 'Mr. Kim', 'ESG Manager', 'Sustainability', 'kim@hanyang.demo', '+82-54-000-0001', TRUE, 'ko'),
@@ -310,16 +306,6 @@ INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quan
 ('e4444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000003', 110, 'ea', 60.00, 150.0000, 'KR', 'ERP_PLM', 'ERP-BI-EQS-CELL'),
 ('e4444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000006', 45,  'kg', 18.00,  90.0000, 'KR', 'ERP_PLM', 'ERP-BI-EQS-CAM'),
 ('e4444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-00000000000b', 14,  'kg',  2.00,  12.0000, 'CL', 'ERP_PLM', 'ERP-BI-EQS-LI');
-
--- ------------------------------------------------------------
--- 협력사↔원청 코드 매핑
--- ------------------------------------------------------------
-INSERT INTO part_code_mapping (part_id, supplier_id, supplier_part_code, original_part_code) VALUES
-('b1111111-0000-4000-8000-000000000003', 'a1111111-1111-4000-8000-000000000001', 'HY-CELL-001', 'CELL-NCM811'),
-('b1111111-0000-4000-8000-000000000006', 'a2222222-2222-4000-8000-000000000002', 'DM-CAM-001',  'CAM-NCM811'),
-('b1111111-0000-4000-8000-000000000004', 'a4444444-4444-4000-8000-000000000004', 'DS-PRE-001',  'PRE-NCM'),
-('b1111111-0000-4000-8000-000000000008', 'a5555555-5555-4000-8000-000000000005', 'GMC-NI-001',  'MIN-NI'),
-('b1111111-0000-4000-8000-00000000000b', 'a3333333-3333-4000-8000-000000000003', 'AU-LI-001',   'MIN-LI');
 
 -- ------------------------------------------------------------
 -- 공정 (CSDDD 추적)
@@ -523,14 +509,7 @@ INSERT INTO audit_trail (batch_id, step_number, node_type, node_name, input_hash
 UPDATE users SET manager_id = '11111111-0000-4000-8000-000000000002'
 WHERE user_id = '11111111-0000-4000-8000-000000000003';
 
--- 2) Watchlist (UFLPA Entity List 예시). matched_supplier_id 로 실제 Sad path 공급사에 매칭.
---    'Global Mining Corp' → Xinjiang Nickel Refinery(acac…ac) 매칭 = 소급 강등 시연용.
---    'Xinjiang Mining Group' → 미매칭(NULL, 텍스트 후보만) = 자동대조 미스 케이스 시연.
-INSERT INTO watchlists (watchlist_id, entity_name, country, reason, matched_supplier_id, source) VALUES
-('a0000000-0000-4000-8000-000000000001', 'Global Mining Corp',     'CN', '신장 위구르 강제노동 의혹 제재 대상 (UFLPA Entity List)', 'acacacac-acac-4000-8000-0000000000ac', 'UFLPA_ENTITY_LIST'),
-('a0000000-0000-4000-8000-000000000002', 'Xinjiang Mining Group',  'CN', '신장 지역 채굴 제재 대상',                              NULL,                                   'UFLPA_ENTITY_LIST');
-
--- 3) 실사 정책 문서 1건 (CSDDD 대응, active)
+-- 실사 정책 문서 1건 (CSDDD 대응, active)
 INSERT INTO due_diligence_policies (policy_id, title, version, status, document_url, created_by, published_at) VALUES
 ('d0000000-0000-4000-8000-000000000001', 'KIRA 공급망 실사 정책', 'v1.0', 'active', 's3://kira-documents/policies/dd_policy_v1.pdf', '11111111-0000-4000-8000-000000000002', now());
 
