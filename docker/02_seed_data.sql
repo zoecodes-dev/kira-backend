@@ -122,6 +122,8 @@ UPDATE suppliers SET country = CASE supplier_id
 -- ============================================================
 -- 신장 좌표 ST_MakePoint(86.0, 41.0) = 신장 폴리곤 내부 (Sad 위반 트리거)
 INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
+-- KIRA(원청) 자체 팩 공장 — hop0 엣지 supply_ratio(f0000000) 참조 대상. 03_supply_map_seed 에도 WHERE NOT EXISTS 로 있어 중복 스킵.
+('f0000000-0000-4000-8000-000000000000', 'a0000000-0000-4000-8000-000000000000', 'KIRA 수원 팩 생산공장', 'KIRA Suwon Pack Plant', 'KR', 'Suwon', ST_SetSRID(ST_MakePoint(127.009, 37.264), 4326), 'production', 'BOTH', '["EU_BATTERY","EU_BATTERY_ART7","CSDDD"]'::jsonb, 100.00),
 -- 한양셀 [Happy] 포항(EU向)
 ('f1111111-0000-4000-8000-000000000001', 'a1111111-1111-4000-8000-000000000001', '포항 제1공장', 'Pohang Plant 1', 'KR', 'Pohang', ST_SetSRID(ST_MakePoint(129.343, 36.019), 4326), 'production', 'EU', '["EU_BATTERY","EU_BATTERY_ART7","EU_BATTERY_ART47","EUDR","CSDDD"]'::jsonb, 100.00),
 -- 우진배터리 [Happy] 울산(EU向)
