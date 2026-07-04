@@ -579,12 +579,13 @@ def part_code_to_metal(part_code: Optional[str]) -> Optional[str]:
 
 
 # provider_type별 '소재구성' 요구 방식.
-#   'full'    : Li/Co/Ni 전부 (제조/재활용 — 배터리 화학조성 전체 보유)
+#   'any'     : 광물 1종 이상 입력 (제조/재활용 — 양극/음극 등 취급 광물이 제각각이라
+#               특정 금속을 강제하면 단일 광물 회사(음극재 흑연 등)가 영구 미완성이 된다)
 #   'handled' : 공급망에서 도출한 '다루는 금속'만 (제련소)
 #   'none'    : 소재구성 요구 안 함 (유통/트레이더)
 _MATERIALS_MODE = {
-    "manufacturer": "full",
-    "recycler": "full",
+    "manufacturer": "any",
+    "recycler": "any",
     "smelter": "handled",
     "trader": "none",
 }
@@ -615,9 +616,9 @@ def _required_fields(provider_type: Optional[str], handled_metals: set) -> list:
 
     fields = list(_COMMON_FIELDS)
 
-    mode = _MATERIALS_MODE.get(pt, "full")
-    if mode == "full":
-        fields += [f"materials.{m}" for m in _TRACKED_METALS]
+    mode = _MATERIALS_MODE.get(pt, "any")
+    if mode == "any":
+        fields.append("materials.any")
     elif mode == "handled":
         metals = [m for m in _TRACKED_METALS if m in handled_metals]
         if metals:
@@ -661,7 +662,8 @@ def _field_filled(field: str, snap: dict) -> bool:
     if field == "factories":
         return (snap.get("factory_count") or 0) > 0
     if field == "materials.any":
-        return any(_val_present(cm.get(m)) for m in _TRACKED_METALS)
+        # 광물 키 아무거나 1종(흑연 포함). hazardous_substances는 광물 함량이 아니므로 제외.
+        return any(_val_present(v) for k, v in cm.items() if k != "hazardous_substances")
     if field.startswith("materials."):
         return _val_present(cm.get(field.split(".", 1)[1]))
     if field == "regulation.self_reported_risk_level":
