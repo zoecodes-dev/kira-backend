@@ -269,8 +269,8 @@ async def get_master_form_prefill(db: AsyncSession, supplier_id: UUID) -> Option
     }
 
 
-# 원청(OEM, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
-_OEM_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
+# 원청(tier0) 노드 — Kira 자기 자신. manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
+_PRIME_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
 
 # provider_type → 채워야 할 CTI relationship 속성명 매핑
 _CTI_ATTR_BY_TYPE = {
@@ -453,7 +453,7 @@ async def get_supplier_detail(
         return None
 
     expected_attr = _CTI_ATTR_BY_TYPE.get(supplier.provider_type)
-    if supplier_id != _OEM_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
+    if supplier_id != _PRIME_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
         print(
             f"[CTI 점검] supplier {supplier_id} type={supplier.provider_type} "
             f"이지만 {expected_attr} 미적재 (자료 미수집 가능)"
@@ -988,7 +988,7 @@ async def submit_onboarding(
         # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기).
         await repository.set_supplier_status(db, supplier_id, "supplier_review")
 
-        # 7) 활성 계정 생성 — tenant_id=초대한 OEM, role=supplier_ceo(결정 #3).
+        # 7) 활성 계정 생성 — tenant_id=초대한 원청, role=supplier_ceo(결정 #3).
         #    1차(account=None)는 MES 계정을 이미 보유하므로 계정 생성을 건너뛴다.
         if body.account is not None:
             primary = next((c for c in body.contacts if c.is_primary), None)

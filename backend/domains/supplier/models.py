@@ -696,7 +696,7 @@ class OnboardingDocPrefill(BaseModel):
 
 class OnboardingPrefillResponse(BaseModel):
     """
-    공개 prefill — 회원가입 폼 확인/최신화용 비민감 필드. 이미 DB에 있는 값(1차: OEM ingest,
+    공개 prefill — 회원가입 폼 확인/최신화용 비민감 필드. 이미 DB에 있는 값(1차: 원청 ingest,
     n차: 상위가 입력한 stub)을 그대로 꺼내와 폼을 채운다. 협력사는 확인 후 필요한 부분만 수정한다.
     ★ 온보딩 submit이 저장하는 경로(suppliers·supplier_contacts·supplier_factories)를 역으로 읽어
       값이 있으면 전부 채운다 — 확인 후 필요한 부분만 수정하도록.

@@ -87,7 +87,7 @@ async def supplier_in_tenant(
     return result.scalars().first() is not None
 
 # 원청(자기 회사) 제외 조건 — 공급망 루트(hop_level=0)에 오는 협력사는 원청이므로 협력사 목록에서 뺀다.
-_EXCLUDE_OEM_ROOT = text(
+_EXCLUDE_PRIME_ROOT = text(
     "suppliers.supplier_id NOT IN "
     "(SELECT child_supplier_id FROM supply_chain_map "
     "WHERE hop_level = 0 AND child_supplier_id IS NOT NULL)"
@@ -107,7 +107,7 @@ async def get_suppliers(
     원청(자기 회사)은 supply_chain_map hop_level=0(공급망 루트)으로 존재하므로 협력사 목록에서 제외한다.
     (협력사 = 우리를 제외한 공급사. KIRA Energy Solutions 같은 자기 자신이 목록에 뜨지 않게.)
     """
-    stmt = select(Supplier).where(_EXCLUDE_OEM_ROOT)
+    stmt = select(Supplier).where(_EXCLUDE_PRIME_ROOT)
     if tenant_id is not None:
         stmt = stmt.where(Supplier.tenant_id == tenant_id)
     if status:
@@ -134,7 +134,7 @@ async def count_suppliers(
     tenant_id: Optional[UUID] = None,
 ) -> int:
     """목록 전체 건수(필터 적용, 페이지 무관). X-Total-Count 헤더용(§0.6). 원청(hop0) 제외."""
-    stmt = select(func.count()).select_from(Supplier).where(_EXCLUDE_OEM_ROOT)
+    stmt = select(func.count()).select_from(Supplier).where(_EXCLUDE_PRIME_ROOT)
     if tenant_id is not None:
         stmt = stmt.where(Supplier.tenant_id == tenant_id)
     if status:
