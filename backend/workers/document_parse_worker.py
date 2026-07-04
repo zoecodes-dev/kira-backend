@@ -22,12 +22,14 @@ document_extraction_results에 적재한다. (spec 3-5 라이프사이클 1~2단
   적재 단계가 이 워커다(변환·노출은 supplier.service.get_master_form_prefill).
 """
 from arq.connections import RedisSettings
+from arq.cron import cron
+from sqlalchemy import text
 
 from backend.core.config import config
 from backend.agents.data_gateway import parse_document
 from backend.domains.submission import repository as submission_repo
 from backend.infrastructure.database import AsyncSessionLocal
-from backend.infrastructure.queue import DOCUMENT_PARSE_QUEUE
+from backend.infrastructure.queue import DOCUMENT_PARSE_QUEUE, enqueue
 
 
 async def process_document_parse(ctx, document_id: str, request_id: str | None = None) -> bool:
@@ -100,9 +102,56 @@ async def process_document_parse(ctx, document_id: str, request_id: str | None =
     return True
 
 
+async def reenqueue_missed_documents(ctx) -> int:
+    """
+    [보정 스위퍼 — commit-enqueue 틈 자가치유]
+    업로드 플로우는 'DB commit → enqueue' 순서라, commit 직후 프로세스가 죽으면
+    (배포·크래시 타이밍) submission_documents 행만 남고 파싱 작업은 영영 큐에
+    안 들어간다. 이 cron이 '커밋됐는데 처리 기록(processed_jobs)이 없는' 문서를
+    주기적으로 찾아 재적재해 그 틈을 메운다.
+
+    안전장치:
+      - 유예 10분: 방금 업로드돼 아직 큐/처리 중인 문서는 건드리지 않는다
+        (동일 job_id면 ARQ가 중복 enqueue를 거르지만, 완료 후 keep_result TTL이
+        지난 작업은 재적재될 수 있으므로 processed_jobs 부재 조건이 본선 방어).
+      - 조회 24시간: mark_job_failed 없이 DLQ로 빠진 문서(예: Bedrock 연속 실패)를
+        무한 재시도하지 않도록 재적재를 업로드 후 24시간 내로 한정.
+      - 멱등: 재적재된 작업도 process_document_parse의 processed_jobs claim으로
+        한 번만 처리된다.
+    """
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT d.document_id, d.request_id
+            FROM submission_documents d
+            LEFT JOIN processed_jobs pj
+              ON pj.idempotency_key = 'document_parse:' || d.document_id::text
+            WHERE pj.idempotency_key IS NULL
+              AND d.uploaded_at < now() - interval '10 minutes'
+              AND d.uploaded_at > now() - interval '24 hours'
+        """))).all()
+
+    for document_id, request_id in rows:
+        await enqueue(
+            DOCUMENT_PARSE_QUEUE,
+            "process_document_parse",
+            job_id=f"document_parse:{document_id}",
+            document_id=str(document_id),
+            request_id=str(request_id) if request_id else None,
+        )
+        print(f"[RECONCILE] 유실 문서 재적재: {document_id}")
+
+    if rows:
+        print(f"[RECONCILE] 총 {len(rows)}건 재적재")
+    return len(rows)
+
+
 class WorkerSettings:
     """ARQ 워커 설정. document_parse_queue 전용 (한 워커 = 한 Queue, spec 5-3)."""
     redis_settings = RedisSettings.from_dsn(config.REDIS_URL)
     queue_name = "document_parse_queue"
-    functions = [process_document_parse]
+    functions = [process_document_parse, reenqueue_missed_documents]
+    cron_jobs = [
+        # 10분마다 commit-enqueue 틈 보정 (위 reenqueue_missed_documents 참고)
+        cron(reenqueue_missed_documents, minute={5, 15, 25, 35, 45, 55}),
+    ]
     max_tries = 3  # 지수 백오프 재시도 (spec 1-3). 3회 실패 시 dead_letter_queue.
