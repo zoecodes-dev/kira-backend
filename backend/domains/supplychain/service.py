@@ -9,10 +9,11 @@ import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.events.types import GeoRiskDetectedEvent
+from backend.events.types import GeoRiskDetectedEvent, SupplyChainGapDetectedEvent
 from backend.infrastructure.event_bus import publish
 from backend.infrastructure.trace import trace_node
 from backend.domains.supplychain.repository import SupplyChainRepository
@@ -247,6 +248,58 @@ class SupplyChainService:
             })
 
         return {"product_id": product_id, "nodes": nodes}
+
+    async def trigger_gap_data_requests(
+        self,
+        product_id: UUID,
+        requester_user_id: UUID,
+        actor_id: UUID,
+        due_date: Optional[datetime] = None,
+        supplier_ids: Optional[List[UUID]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        C3 맵 gap→자료요청 트리거(이벤트 방식). gap 있는 노드별로 SupplyChainGapDetected
+        를 발행하고, 발행 대상 노드 목록을 반환한다.
+
+        실제 data_request 생성은 submission 이 이벤트를 수신해 비동기로 수행하므로 여기서는
+        request_id 를 알 수 없다(라우터는 202 Accepted 로 '접수' 목록만 반환).
+
+        도메인 경계(규칙 #4): submission repository/service 를 직접 import·호출하지 않는다.
+          gap 계산까지가 supplychain 책임, 요청 생성은 이벤트로 submission 에 넘긴다.
+        supplier_ids 미지정 시 gap_count>0 인 모든 노드가 대상.
+
+        발행 순서 주의: 이 도메인은 여기서 DB write 를 하지 않는다(순수 read→publish).
+          따라서 커밋 없이 발행해도 롤백 불일치가 없다(규칙 #3의 대상 아님).
+        """
+        gaps = await self.get_gaps(product_id=str(product_id))
+        nodes = gaps.get("nodes", [])
+        target_ids = {str(s) for s in supplier_ids} if supplier_ids else None
+
+        accepted: List[Dict[str, Any]] = []
+        for node in nodes:
+            if node["gap_count"] == 0:
+                continue
+            if target_ids and node["supplier_id"] not in target_ids:
+                continue
+
+            requested_data_type = ",".join(f["field_name"] for f in node["missing_fields"])
+            event = SupplyChainGapDetectedEvent(
+                product_id=product_id,
+                supplier_id=node["supplier_id"],
+                requested_data_type=requested_data_type,
+                requester_user_id=requester_user_id,
+                actor_id=actor_id,
+                due_date=due_date,
+            )
+            await publish("SupplyChainGapDetected", asdict(event))
+            accepted.append({
+                "supplier_id":         node["supplier_id"],
+                "requested_data_type": requested_data_type,
+                "gap_count":           node["gap_count"],
+                "is_root_anchor":      node.get("is_root_anchor", False),
+            })
+
+        return accepted
 
     async def get_geo_risks(self, db: AsyncSession) -> Dict[str, Any]:
         """
