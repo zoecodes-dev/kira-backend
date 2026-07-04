@@ -49,9 +49,10 @@ jobs:
               "cd /home/ubuntu/kira",
               "git fetch origin main",
               "git reset --hard origin/main",
-              "docker compose up -d --build",
+              "docker compose up -d --build --remove-orphans",
               "docker exec kira-nginx nginx -s reload",
               "docker image prune -f",
+              "docker builder prune -f --filter until=168h",
               "docker compose ps"
             ],"executionTimeout":["1200"]}' \
             --query "Command.CommandId" \
