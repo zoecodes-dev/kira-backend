@@ -269,76 +269,78 @@ class ProductRepository:
         모델(model_name) + 암페어(amperage_ah) 필드를 포함해요.
         fetch_from_source가 이 raw dict를 읽어 고객사 → 제품 순으로 UPSERT해요.
 
-        [시드 구성 — 제품 4개, 고객사 2개]
-            BMW    → iX3  108Ah  (product_code: BMW-IX3-108)
-            BMW    → i4    81Ah  (product_code: BMW-I4-81)
-            Mercedes → GLC  90Ah  v1 deprecated  (product_code: MB-GLC-90-V1)
-            Mercedes → GLC  90Ah  v2 active       (product_code: MB-GLC-90-V2)
-            ※ GLC 두 버전은 생산기간이 다른 별도 BOM 버전 시연용.
-               product row는 2개, BOM 버전은 각 product마다 1개씩.
+        [시드 구성 — 제품 4개(전부 KIRA 팩), 고객사 2개] · docker/02_seed_data.sql 정본과 동일
+            KE-CYL-NCM811-108  KIRA PRiMX Cylindrical NCM811 108Ah  → BMW · iX3 50
+            KE-PRI-NCM-081     KIRA PRiMX Prismatic NCM 81Ah        → BMW · i4
+            KE-PRI-NCM-094     KIRA PRiMX Prismatic NCM 94Ah        → Mercedes · GLC EV
+            KE-PRI-NCM-118     KIRA PRiMX Prismatic NCM 118Ah       → Mercedes · EQS
+            ※ 제조사 = KIRA(원청·팩 제조사). 제품명은 자사 브랜드+사양이며 OEM 차종은
+               제품명에 박지 않고 customer_code/model_name 으로 분리.
 
         [실환경 전환 포인트]
         이 함수를 ERP API 클라이언트 호출로 교체하면
         fetch_from_source() 나머지 로직은 그대로 재사용 가능.
         """
+        # 정본: docker/02_seed_data.sql 과 동일한 (제품 × 고객사 × BOM) 마스터.
+        # 제조사 = KIRA(원청·팩 제조사) 자기 자신. 제품명은 자사 브랜드(KIRA PRiMX)+사양이며
+        # OEM 차종은 제품명에 박지 않고 customer_code/model_name 으로 분리한다.
+        KIRA_MANUFACTURER_ID = "a0000000-0000-4000-8000-000000000000"
         return [
             {
-                # ── BMW iX3 50 108Ah ───────────────────────────────────
-                "product_code":         "BMW-IX3-NCM811-108",
-                "product_name":         "BMW iX3 Cylindrical NCM811 108Ah",
+                # ── KIRA PRiMX Cylindrical NCM811 108Ah → BMW iX3 50 ──
+                "product_code":         "KE-CYL-NCM811-108",
+                "product_name":         "KIRA PRiMX Cylindrical NCM811 108Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-IX3",
-                # 고객사 정보
+                # 고객사(완성차 OEM)
                 "customer_code":        "BMW",
                 "customer_name":        "BMW AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-BMW",
-                # 제품 3축
+                # 납품 차종 + 용량
                 "model_name":           "iX3 50",
                 "amperage_ah":          108.00,
             },
             {
-                # ── BMW i4 81Ah ────────────────────────────────────────
-                "product_code":         "BMW-I4-NCM-81",
-                "product_name":         "BMW i4 Prismatic NCM 81Ah",
+                # ── KIRA PRiMX Prismatic NCM 81Ah → BMW i4 ──
+                "product_code":         "KE-PRI-NCM-081",
+                "product_name":         "KIRA PRiMX Prismatic NCM 81Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-I4",
-                # 고객사 정보 — BMW는 위와 동일 customer_code → UPSERT 재사용
                 "customer_code":        "BMW",
                 "customer_name":        "BMW AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-BMW",
-                # 제품 3축
                 "model_name":           "i4",
                 "amperage_ah":          81.00,
             },
             {
-                # ── Mercedes GLC EV 94Ah ───────────────────────────────
-                "product_code":         "MB-GLC-NCM-94",
-                "product_name":         "Mercedes GLC EV Prismatic NCM 94Ah",
+                # ── KIRA PRiMX Prismatic NCM 94Ah → Mercedes GLC EV ──
+                "product_code":         "KE-PRI-NCM-094",
+                "product_name":         "KIRA PRiMX Prismatic NCM 94Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-GLC",
-                # 고객사 정보
                 "customer_code":        "MERCEDES",
                 "customer_name":        "Mercedes-Benz Group AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-MB",
-                # 제품 3축
                 "model_name":           "GLC EV",
                 "amperage_ah":          94.00,
             },
             {
-                # ── Mercedes EQS 118Ah ─────────────────────────────────
-                "product_code":         "MB-EQS-NCM-118",
-                "product_name":         "Mercedes EQS Prismatic NCM 118Ah",
+                # ── KIRA PRiMX Prismatic NCM 118Ah → Mercedes EQS ──
+                "product_code":         "KE-PRI-NCM-118",
+                "product_name":         "KIRA PRiMX Prismatic NCM 118Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-EQS",
-                # 고객사 정보 — MERCEDES는 위와 동일 → UPSERT 재사용
                 "customer_code":        "MERCEDES",
                 "customer_name":        "Mercedes-Benz Group AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-MB",
-                # 제품 3축
                 "model_name":           "EQS",
                 "amperage_ah":          118.00,
             },
