@@ -60,9 +60,10 @@ class BatchState(TypedDict, total=False):
 
     # 협력사 확정값 — SubmissionCompleted(=협력사 확정 시점) payload의 confirmed_fields를
     #   배치 트리거가 그래프 초기 state에 주입한다(미영속 값이라 state로 운반). 키 공간은
-    #   parsed_fields와 동일(협력사가 'AI 파싱결과를 확정'한 값). document_integrity 검증
-    #   (협력사 확정값 vs 증빙 추출값 불일치 → reject)의 비교 한쪽 축. 폼 미입력이면 None/{}.
-    confirmed_fields: Optional[dict]     # 주입: batch_trigger(A) / 소비: get_integrity_pairs(B)
+    #   parsed_fields와 동일(협력사가 'AI 파싱결과를 확정'한 값). 폼 미입력이면 None/{}.
+    #   NOTE: 원 소비자였던 document_integrity 검증(verification 도메인)이 제거되어 현재
+    #   state로만 운반되고 읽는 곳은 없다(배관만 잔존). 재사용/제거는 후속 결정.
+    confirmed_fields: Optional[dict]     # 주입: batch_trigger(A) / 소비자 없음(구 get_integrity_pairs 제거됨)
 
     # ----- 각 노드 결과 누적 (각 노드가 자기 키에만 기록) -----
     extraction_result: Optional[dict]    # data_gateway (B, stage_extraction)
