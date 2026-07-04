@@ -404,7 +404,6 @@ class BomVersion(Base):
 
     [결정 #1] BOM도 외부 원천(ERP/PLM)에서 가져오는 복사본.
       - source_system / external_id / synced_at 컬럼 동일하게 추가.
-      - BOMImported 이벤트 발행은 service.py 에서 담당.
 
     [불변 규칙 — PROJECT_CORE.md 3-1]
     status ∈ {draft, active, deprecated}
