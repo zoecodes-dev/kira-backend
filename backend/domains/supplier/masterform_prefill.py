@@ -38,6 +38,17 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     "duns_number":         ("company", "str", "DUNS 번호"),
     "provider_type":       ("company", "str", "공급자 유형(manufacturer/recycler/trader/miner)"),
 
+    # 핵심광물 함량(%) — suppliers.core_minerals JSONB 저장 대상
+    "li_content":          ("company", "float", "리튬(Li) 함량(%)"),
+    "co_content":          ("company", "float", "코발트(Co) 함량(%)"),
+    "ni_content":          ("company", "float", "니켈(Ni) 함량(%)"),
+    "mn_content":          ("company", "float", "망간(Mn) 함량(%)"),
+    "natural_graphite_content": ("company", "float", "천연흑연 함량(%)"),
+    "artificial_graphite_content": ("company", "float", "인조흑연 함량(%)"),
+
+    # 실사 자가진단 결과 — supplier_risk_profiles.self_reported_risk_level 저장 대상
+    "self_reported_risk_level": ("company", "str", "실사 자가진단 결과(low/medium/high/critical 중 하나로 명시된 경우만 추출)"),
+
     # 섹션 1 — 탄소발자국 (supplier_manufacturer_details)
     "energy_source":         ("manufacturing", "str",   "에너지원"),
     "carbon_intensity":      ("manufacturing", "float", "탄소집약도(kgCO2eq/kg)"),
