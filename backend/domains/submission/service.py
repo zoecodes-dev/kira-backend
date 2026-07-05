@@ -288,17 +288,14 @@ async def update_submission_status(
         if not file_urls and not confirmed_fields:
             raise ValueError("제출 완료(SUBMITTED) 상태로 전이하려면 파일(file_urls)이 첨부되거나 폼 입력값(confirmed_fields)이 있어야 합니다.")
 
-        # [필수 검증] 완성도 100% 미만 물리 차단
+        # [필수 검증] 🔴필수(blocking) 필드 미충족 시에만 물리 차단.
+        #   🟡권장(광물비율·탄소집약도·환경성적서 등)은 완성도 %에 반영되지만 제출을 막지 않는다.
+        #   (지연 import — submission→supplier 방향 참조로 순환 회피)
         req_log_before = await get_data_request(db, request_id)
-        if req_log_before:
-            stmt = select(DataCompletenessStatus).where(
-                DataCompletenessStatus.entity_type == 'supplier',
-                DataCompletenessStatus.entity_id == req_log_before.target_supplier_id
-            )
-            result = await db.execute(stmt)
-            comp_status = result.scalar_one_or_none()
-            if not comp_status or (comp_status.completion_rate or 0) < 100:
-                raise ValueError("필수 입력 항목이 100% 작성되지 않아 제출할 수 없습니다.")
+        if req_log_before and req_log_before.target_supplier_id:
+            from backend.domains.supplier import service as supplier_service
+            if await supplier_service.has_blocking_gaps(db, req_log_before.target_supplier_id):
+                raise ValueError("필수 입력 항목이 작성되지 않아 제출할 수 없습니다.")
 
     try:
         req_log, status_event = await transition_submission(
