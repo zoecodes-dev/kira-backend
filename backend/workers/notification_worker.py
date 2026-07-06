@@ -1,6 +1,7 @@
+import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from arq.connections import RedisSettings
 from arq.cron import cron
@@ -21,6 +22,7 @@ async def process_notification(
     subject: str,
     body: str,
     dedup_key: str,
+    target: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     [Notification Queue Worker]
@@ -36,9 +38,9 @@ async def process_notification(
             inserted = await db.execute(
                 text("""
                     INSERT INTO notifications
-                        (user_id, channel, notification_type, subject, body, status, dedup_key)
+                        (user_id, channel, notification_type, subject, body, status, dedup_key, target)
                     VALUES
-                        (:user_id, :channel, :ntype, :subject, :body, 'pending', :dedup_key)
+                        (:user_id, :channel, :ntype, :subject, :body, 'pending', :dedup_key, CAST(:target AS JSONB))
                     ON CONFLICT (dedup_key) DO NOTHING
                     RETURNING notification_id
                 """),
@@ -49,6 +51,8 @@ async def process_notification(
                     "subject": subject,
                     "body": body,
                     "dedup_key": dedup_key,
+                    # dict → JSON 문자열로 바인딩 후 ::JSONB 캐스팅. 없으면 NULL.
+                    "target": json.dumps(target) if target is not None else None,
                 },
             )
             row = inserted.first()

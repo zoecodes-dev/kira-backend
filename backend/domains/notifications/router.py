@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -34,7 +36,7 @@ async def list_notifications(
     """로그인한 사용자의 in-app 알림 목록 (최근 50건, 실패 제외)."""
     result = await db.execute(
         text("""
-            SELECT notification_id, notification_type, subject, body, status, created_at
+            SELECT notification_id, notification_type, subject, body, status, created_at, target
             FROM notifications
             WHERE user_id = :user_id
               AND channel = 'in-app'
@@ -45,6 +47,18 @@ async def list_notifications(
         {"user_id": str(current_user.user_id)},
     )
     rows = result.mappings().all()
+
+    def _parse_target(v):
+        # JSONB 컬럼은 드라이버 설정에 따라 dict 또는 JSON 문자열로 온다 — 둘 다 안전 처리.
+        if v is None:
+            return None
+        if isinstance(v, (dict, list)):
+            return v
+        try:
+            return json.loads(v)
+        except (TypeError, ValueError):
+            return None
+
     return [
         {
             "notification_id": str(r["notification_id"]),
@@ -54,6 +68,8 @@ async def list_notifications(
             "status": "read" if r["status"] == "read" else "pending",
             "created_at": r["created_at"].isoformat() if r["created_at"] else "",
             "deep_link": _DEEP_LINK.get(r["notification_type"] or ""),
+            # 맵+협력사 딥링크 좌표(있을 때만). 프론트가 있으면 deep_link보다 우선 사용.
+            "target": _parse_target(r["target"]),
         }
         for r in rows
     ]
