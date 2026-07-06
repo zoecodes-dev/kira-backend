@@ -33,7 +33,7 @@ _DOC_CATEGORY = {
     "business_reg": "business_registration",
     "environmental_report": "environmental_impact_assessment",
     "self_assessment": "dd_audit_report",
-    "material_composition": "product_spec",  # 광물 함량 추출용 (전용 카테고리 미지정 시 product_spec 임시 매핑)
+    "material_composition": "material_composition",
 }
 
 # 확장자 → file_type (CHECK 제약: pdf/xlsx/csv/image/docx/other)
