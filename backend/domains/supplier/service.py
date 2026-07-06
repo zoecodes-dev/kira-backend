@@ -735,18 +735,12 @@ async def has_blocking_gaps(db: AsyncSession, supplier_id: UUID) -> bool:
 # ============================================================
 async def get_factories(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
     """사업장 탭 — 공장 목록(좌표 lat/lng 포함).
-    제련소가 입력한 공장 = 곧 광산이므로, 광산 페이지는 자기 공장 대신 '정보관리 주체'인 상위
-    제련소가 입력한 supplier_factories 를 그대로 읽어 보여준다(광산은 입력 주체 아님).
-    상위 제련소 링크가 없으면 광산 자기 공장(대개 없음)을 그대로 반환."""
+    광산은 '광산 자체가 곧 공장'이므로 상위 제련소로 리다이렉트하지 않고, 모든 유형이
+    자기 supplier_factories 를 그대로 반환한다."""
     supplier = await repository.get_supplier_by_id(db, supplier_id)
     if supplier is None:
         return None
-    source_id = supplier_id
-    if supplier.provider_type == "miner":
-        smelter_id = await repository.get_managing_smelter_id(db, supplier_id)
-        if smelter_id is not None:
-            source_id = smelter_id
-    factories = await repository.get_factories(db, source_id)
+    factories = await repository.get_factories(db, supplier_id)
     return {"supplier_id": supplier_id, "factories": factories}
 
 
