@@ -516,15 +516,29 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
     # [공급원 변경 자진신고 배선] bom_version_id 동봉 — 협력사 포털이 declare_source_change
     # 실호출에 쓸 (bom_version, part) 컨텍스트를 여기서 제공한다. 한 부품이 여러 BOM 버전에
     # 걸치면 (part, bom_version)별로 행이 분리된다. version_number는 드롭다운 표시용.
+    # [맵별 탭] product 컨텍스트(고객사·차종·BOM버전)·hop·core_minerals 동봉 —
+    # 협력사 페이지가 이 협력사가 속한 맵(=bom_version)별로 탭을 나누고, 탭마다 달라지는
+    # '대는 부품·차수·소재구성(광물)'을 이 한 번의 호출로 렌더한다.
+    # core_minerals 는 엣지 override 우선, 없으면 협력사 회사값 폴백(COALESCE).
     stmt = text(
         """
         SELECT DISTINCT p.part_id, p.part_code, p.part_name, p.tier_level, p.material_type,
-               scm.bom_version_id, bv.version_number AS bom_version_number
+               scm.bom_version_id, bv.version_number AS bom_version_number,
+               bv.product_id,
+               pr.model_name,
+               pr.product_name,
+               c.customer_name,
+               scm.hop_level,
+               COALESCE(scm.core_minerals, s.core_minerals) AS core_minerals
         FROM supply_chain_map scm
         JOIN parts p ON p.part_id = scm.part_id
         LEFT JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+        LEFT JOIN products pr      ON pr.product_id = bv.product_id
+        LEFT JOIN customers c      ON c.customer_id = pr.customer_id
+        LEFT JOIN suppliers s      ON s.supplier_id = scm.child_supplier_id
         WHERE scm.child_supplier_id = :sid
-        ORDER BY p.tier_level NULLS LAST, p.part_code
+        ORDER BY c.customer_name NULLS LAST, pr.model_name NULLS LAST,
+                 scm.bom_version_id, p.tier_level NULLS LAST, p.part_code
         """
     )
     rows = (await db.execute(stmt, {"sid": str(supplier_id)})).mappings().all()

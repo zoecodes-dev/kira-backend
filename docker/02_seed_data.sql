@@ -1072,15 +1072,22 @@ INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quan
 --     Sad 시나리오(위반 판정)의 서사 그 자체 — 채우면 오히려 시나리오가 깨짐.
 --   · Unverified Precursor Trading(abababab): Gray 시나리오의 "미확인 트레이더".
 --     원산지·서류 불명이 이름 그대로의 의미 — 공장·서류 미보유가 정상.
---   · 한양셀 core_minerals: 이전 세션에서 마스터폼으로 직접 수정한 값 — 덮어쓰지 않음.
+--   · 한양셀 core_minerals: fresh-seed에서 빈칸이던 것 → 19-1에서 peer 셀과 동일 NCM811로 채움(아래).
 -- ============================================================
 
 -- 19-1. 기준정보 백필 (사업자등록번호/주소/서류 URL)
 UPDATE suppliers SET business_reg_no = '101-86-40001', address = '경상북도 포항시 남구 오천읍 포항산단로 55',
+  -- [fresh-seed] 최상위 셀(한양셀) 회사 기본값 채움 — 마스터폼 미입력 상태에서 소재구성이 빈칸이던 문제 정정.
+  --   다른 셀(우진셀·우진배터리)과 동일 NCM811 조성. 제품별 상이값은 supply_chain_map 엣지 override가 담당.
+  core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb,
   business_reg_doc_url = 's3://kira-docs/suppliers/a1111111/biz_reg.pdf',
   environmental_report_url = 's3://kira-docs/suppliers/a1111111/env_report.pdf',
   self_assessment_doc_url = 's3://kira-docs/suppliers/a1111111/self_assess.pdf'
 WHERE supplier_id = 'a1111111-1111-4000-8000-000000000001';
+
+-- [fresh-seed] 원청(KIRA, 완제품 팩) 회사값 채움 — 고객사 데이터 다운로드(DPP/엑셀)에 완제품 핵심광물로 들어감.
+UPDATE suppliers SET core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb
+WHERE supplier_id = 'a0000000-0000-4000-8000-000000000000';
 
 UPDATE suppliers SET business_reg_no = '102-86-40002', address = '울산광역시 울주군 온산읍 산업로 700',
   core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb,
