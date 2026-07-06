@@ -742,11 +742,14 @@ class SupplyChainRepository:
                 scm.verification_status,
                 scm.supply_period_from,
                 scm.supply_period_to,
-                scm.created_at
+                scm.created_at,
+                -- 제품별 핵심광물: 엣지 override 우선, 없으면 child 협력사 회사값으로 폴백
+                COALESCE(scm.core_minerals, cs.core_minerals) AS core_minerals
             FROM supply_chain_map scm
             JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
             JOIN products pr     ON pr.product_id = bv.product_id
-            LEFT JOIN parts p    ON p.part_id = scm.part_id
+            LEFT JOIN parts p     ON p.part_id = scm.part_id
+            LEFT JOIN suppliers cs ON cs.supplier_id = scm.child_supplier_id
             WHERE {where}
             ORDER BY p.tier_level NULLS LAST, scm.edge_id
         """)

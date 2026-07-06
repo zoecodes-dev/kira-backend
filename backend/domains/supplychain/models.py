@@ -19,7 +19,7 @@ import uuid
 from typing import List
 
 from sqlalchemy import Column, Date, ForeignKey, Integer, Numeric, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.types import TIMESTAMP
@@ -69,7 +69,11 @@ class SupplyChainMap(Base):
     invoice_number = Column(String(50))
     supply_period_from = Column(Date)
     supply_period_to = Column(Date)
-    
+    core_minerals = Column(
+        JSONB,
+        comment="제품별 핵심광물 함량(%) override. NULL이면 조회 시 child 협력사 core_minerals로 폴백",
+    )
+
     link_status = Column(
         String(30),
         server_default="supplychain_declared",

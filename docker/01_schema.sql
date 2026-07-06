@@ -452,7 +452,8 @@ CREATE TABLE supply_chain_map (
     hop_level          INT,  -- 차수 SSOT: 원청(parent NULL)=0 기준 경로 순번(+1 연속). (구 suppliers.tier 대체)
     supply_period_from DATE,
     supply_period_to   DATE,
-    
+    core_minerals      JSONB,  -- 제품별 핵심광물 원소 질량(%) override. NULL이면 조회 시 child 협력사 suppliers.core_minerals로 폴백. 예: {"Li":7.1,"Ni":48.3,"Co":6.1,"Mn":5.6}
+
     -- [결정 #2 / #9-여파4] 발견 및 정합성 컬럼 추가
     link_status        VARCHAR(30) DEFAULT 'supplychain_declared'
         CONSTRAINT chk_link_status CHECK (link_status IN ('supplychain_declared', 'supplychain_confirmed')),
