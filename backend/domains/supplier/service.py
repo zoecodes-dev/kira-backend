@@ -42,6 +42,7 @@ from backend.infrastructure.trace import trace_node
 # AP: 추출결과 read는 E 제공(submission repository), 마스터폼 prefill 변환은 B(supplier)
 #   masterform_prefill. 둘 다 무거운 LLM 스택을 끌어오지 않는 가벼운 호출이다.
 from backend.domains.submission import repository as submission_repo
+from backend.domains.submission.models import DataRequestLog
 from backend.domains.supplier import masterform_prefill
 # [회원가입 — 결정 #4] 온보딩 제출은 "제출→즉시 로그인 / 중복 즉시 409"라 이벤트가 아니라
 #   동기 처리한다. 도메인 격리는 users repository '재사용 + 단일 커밋'으로 지킨다(새 계정
@@ -53,7 +54,7 @@ from backend.infrastructure.security import get_password_hash
 #   '재사용 + 온보딩 단일 커밋'으로 처리(새 트랜잭션·커밋을 열지 않는다).
 import hashlib
 from backend.domains.data_consent import repository as consent_repo
-from backend.domains.data_consent.models import ConsentUpdateBody
+from backend.domains.data_consent.models import ConsentCreateBody, ConsentUpdateBody
 
 # ── 정책 상수 ───────────────────────────────────────────────
 # 협력사 온보딩 SLA. PROJECT_CORE: 14일 미응답 → Reminder, 21일 → Escalation.
@@ -1028,6 +1029,58 @@ async def submit_onboarding(
         # 7-b) 완성도 재계산(같은 트랜잭션) — 온보딩으로 채운 회사·공장·문서 반영.
         await recompute_completeness(db, supplier_id)
 
+        # 7-c) [FIX] 하위협력사 캐스케이드 초대(STEP3) — 예전엔 프론트 로컬 state로만 남고
+        #   어디에도 저장되지 않았다(PM 확인 후 정식 연결). 무토큰 공개 submit 트랜잭션
+        #   안에서 create_supplier_and_invite 와 동일한 절차(협력사+리스크프로필+온보딩행+
+        #   PIC+완성도)를 그대로 반복하되, 커밋은 이 트랜잭션 한 번으로 묶는다.
+        invited_sub_suppliers: list[dict] = []
+        for sub in body.sub_suppliers:
+            sub_supplier = await repository.create_supplier(db, {
+                "company_name": sub.company_name,
+                "provider_type": "manufacturer",  # STEP3 화면엔 유형 선택이 없어 기본값(원청이 추후 조정 가능)
+                "tenant_id": supplier.tenant_id,
+                "status": "supplier_pending",
+            })
+            db.add(SupplierRiskProfile(
+                supplier_id=sub_supplier.supplier_id,
+                overall_risk_score=0,
+                risk_level="low",
+                is_high_risk_flag=False,
+            ))
+            sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
+            db.add(SupplierOnboarding(
+                supplier_id=sub_supplier.supplier_id,
+                consent_status="consent_pending",
+                agreement_status="pending",
+                last_invited_at=datetime.now(timezone.utc),
+                sla_due_date=sub_sla_due,
+                reminder_count=0,
+            ))
+            await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
+                MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
+            ])
+            await recompute_completeness(db, sub_supplier.supplier_id)
+            # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
+            # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
+            await consent_repo.create(
+                db, tenant_id=supplier.tenant_id, requested_by=None,
+                body=ConsentCreateBody(
+                    supplier_id=sub_supplier.supplier_id,
+                    data_scope=["company", "contacts", "factories", "carbon_epd", "origin"],
+                    purpose="EU_BATTERY",
+                    third_party_sharing=True,
+                    valid_from=datetime.now(timezone.utc).date(),
+                    form_version="v1.0",
+                ),
+            )
+            await submission_repo.create_data_request(db, DataRequestLog(
+                target_supplier_id=sub_supplier.supplier_id,
+                requested_data_type="general_info",
+            ))
+            invited_sub_suppliers.append({
+                "supplier_id": sub_supplier.supplier_id, "email": sub.email, "sla_due_date": sub_sla_due,
+            })
+
         # 8) 단일 커밋(atomic) — 여기 도달해야만 전체 영속화.
         await db.commit()
     except OnboardingConflictError:
@@ -1035,6 +1088,14 @@ async def submit_onboarding(
     except Exception:
         await db.rollback()
         raise
+
+    # 9) 커밋 성공 후에만 이벤트 발행(G1과 동일 규칙) — 하위협력사마다 SupplierInvited.
+    for inv in invited_sub_suppliers:
+        event = SupplierInvitedEvent(
+            supplier_id=inv["supplier_id"], email=inv["email"], sla_due_date=inv["sla_due_date"],
+            inviter_supplier_id=supplier_id,
+        )
+        await publish("SupplierInvited", dataclasses.asdict(event))
 
     return {
         "supplier_id": supplier_id,

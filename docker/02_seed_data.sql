@@ -2231,3 +2231,131 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) V
 ('da777777-0000-4000-8000-000000000003', '7d000000-0000-4000-8000-000000000003', 40.00, 16800, 'kg'),
 ('da888888-0000-4000-8000-000000000004', '7d000000-0000-4000-8000-000000000004', 40.00,  8000, 'kg'),
 ('da999999-0000-4000-8000-000000000005', '7d000000-0000-4000-8000-000000000005', 40.00, 16800, 'kg');
+
+
+-- ============================================================
+-- 27. PM테스트협력사01~10 전용 테스트 Ingest 번들
+-- ============================================================
+-- 목적: PM테스트협력사01~10(기존 ID 그대로)을 1차 협력사로 정식 연결한 전용 테스트
+--   제품+BOM+공급망 맵을 새로 만든다. 제품명은 다른 제품과 겹쳐도 무방(요청 확인됨),
+--   BOM 버전명만 다른 제품과 안 헷갈리게 TEST- 접두어로 구분한다.
+
+-- 27-1. 신규 부품 2개(루트 Pack + 1차 공통 부품)
+INSERT INTO parts (part_id, part_code, part_name, tier_level, parent_part_id, material_type, source_system, external_id) VALUES
+('bf000000-0000-4000-8000-000000000001', 'PM-TEST-PACK', 'PM Test Pack',      0, NULL, 'assembly', 'MANUAL_TEST', 'PM-TEST-PART-PACK'),
+('bf000000-0000-4000-8000-000000000002', 'PM-TEST-COMP', 'PM Test Component', 1, 'bf000000-0000-4000-8000-000000000001', 'component', 'MANUAL_TEST', 'PM-TEST-PART-COMP')
+ON CONFLICT (part_id) DO NOTHING;
+
+-- 27-2. 신규 제품
+INSERT INTO products (product_id, product_code, product_name, manufacturer_id, tenant_id, customer_id, model_name, amperage_ah, type, source_system, external_id) VALUES
+('bf100000-0000-4000-8000-000000000001', 'PM-TEST-BATT-01', 'PM테스트 배터리팩', 'a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0000000-0000-4000-8000-0000000000b4', 'PM Test', 100.00, 'battery_pack', 'MANUAL_TEST', 'PM-TEST-PRODUCT')
+ON CONFLICT (product_id) DO NOTHING;
+
+-- 27-3. BOM 버전
+INSERT INTO bom_versions (bom_version_id, product_id, version_number, production_from, production_to, status, source_system, external_id) VALUES
+('bf200000-0000-4000-8000-000000000001', 'bf100000-0000-4000-8000-000000000001', 'TEST-v1.0', '2026-07-06', '2027-07-06', 'active', 'MANUAL_TEST', 'PM-TEST-BOM')
+ON CONFLICT (bom_version_id) DO NOTHING;
+
+-- 27-4. BOM 항목(루트 Pack 100% + 1차 공통부품 100%)
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000001', 1, 'ea', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-PACK'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000002', 10, 'ea', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-COMP');
+
+-- 27-5. 공급망 맵 헤더(building — PM님이 STEP2부터 진행하는 시나리오)
+INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status) VALUES
+('bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', 'bf100000-0000-4000-8000-000000000001', 'building')
+ON CONFLICT (bom_version_id) DO NOTHING;
+
+-- 27-6. hop0 앵커(원청 KIRA)
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+('bf400000-0000-4000-8000-000000000000', 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', NULL, 'a0000000-0000-4000-8000-000000000000', 'bf000000-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2026-07-06', '2027-07-06');
+
+-- 27-7. hop1 — PM테스트협력사01~10, 전부 원청(KIRA) 직속 1차로 연결
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to)
+SELECT uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001',
+       'a0000000-0000-4000-8000-000000000000', s.supplier_id, 'bf000000-0000-4000-8000-000000000002', 1,
+       'supplychain_declared', 'ERP', 'unverified', '2026-07-06', '2027-07-06'
+FROM suppliers s
+WHERE s.company_name LIKE 'PM테스트협력사%'
+  AND NOT EXISTS (
+    SELECT 1 FROM supply_chain_map scm
+    WHERE scm.bom_version_id = 'bf200000-0000-4000-8000-000000000001' AND scm.child_supplier_id = s.supplier_id
+  );
+
+
+-- ============================================================
+-- 28. PM테스트 번들 — 유형별 현실적 Tier 재배치
+-- ============================================================
+-- 문제: 27번에서 10곳을 전부 Tier1(원청 직속)로 뭉쳐 연결해서, 광산이 1차 협력사로
+--   뜨는 등 도메인상 말이 안 되는 구조였다. 제조사(1~3차)→유통(3차, 트레이딩)→
+--   제련소(4차)→광산(5차) 순서의 2개 평행 체인으로 재배치한다.
+
+-- 28-1. 기존 Tier1 연결 전부 제거(27번에서 만든 것)
+DELETE FROM supply_chain_map
+WHERE bom_version_id = 'bf200000-0000-4000-8000-000000000001' AND hop_level > 0;
+
+-- 28-2. 티어별 부품 추가(2~5차) — 1차 부품(PM Test Component)은 27번 것 재사용
+INSERT INTO parts (part_id, part_code, part_name, tier_level, parent_part_id, material_type, source_system, external_id) VALUES
+('bf000000-0000-4000-8000-000000000003', 'PM-TEST-CAM',  'PM Test CAM',          2, 'bf000000-0000-4000-8000-000000000002', 'active_material', 'MANUAL_TEST', 'PM-TEST-PART-CAM'),
+('bf000000-0000-4000-8000-000000000004', 'PM-TEST-DIST', 'PM Test Distribution', 3, 'bf000000-0000-4000-8000-000000000003', 'trading',         'MANUAL_TEST', 'PM-TEST-PART-DIST'),
+('bf000000-0000-4000-8000-000000000005', 'PM-TEST-REF',  'PM Test Refined Material', 4, 'bf000000-0000-4000-8000-000000000004', 'refined_metal', 'MANUAL_TEST', 'PM-TEST-PART-REF'),
+('bf000000-0000-4000-8000-000000000006', 'PM-TEST-ORE',  'PM Test Ore',          5, 'bf000000-0000-4000-8000-000000000005', 'mineral',         'MANUAL_TEST', 'PM-TEST-PART-ORE')
+ON CONFLICT (part_id) DO NOTHING;
+
+-- 28-3. BOM 항목 추가(신규 부품 4개)
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000003', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-CAM'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000004', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-DIST'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000005', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-REF'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000006', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-ORE')
+ON CONFLICT DO NOTHING;
+
+-- 28-4. 체인 A: 01(제조사,1차) → 02(제조사,2차) → 09(유통,3차) → 07(제련소,4차) → 05(광산,5차)
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', '71000001-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000001-0000-4000-8000-000000000001', '71000002-0000-4000-8000-000000000002', 'bf000000-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000002-0000-4000-8000-000000000002', '71000009-0000-4000-8000-000000000009', 'bf000000-0000-4000-8000-000000000004', 3, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000009-0000-4000-8000-000000000009', '71000007-0000-4000-8000-000000000007', 'bf000000-0000-4000-8000-000000000005', 4, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000007-0000-4000-8000-000000000007', '71000005-0000-4000-8000-000000000005', 'bf000000-0000-4000-8000-000000000006', 5, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06');
+
+-- 28-5. 체인 B: 04(제조사,1차) → 03(제조사,2차) → 10(유통,3차) → 08(제련소,4차) → 06(광산,5차)
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', '71000004-0000-4000-8000-000000000004', 'bf000000-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000004-0000-4000-8000-000000000004', '71000003-0000-4000-8000-000000000003', 'bf000000-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000003-0000-4000-8000-000000000003', '7100000a-0000-4000-8000-00000000000a', 'bf000000-0000-4000-8000-000000000004', 3, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '7100000a-0000-4000-8000-00000000000a', '71000008-0000-4000-8000-000000000008', 'bf000000-0000-4000-8000-000000000005', 4, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000008-0000-4000-8000-000000000008', '71000006-0000-4000-8000-000000000006', 'bf000000-0000-4000-8000-000000000006', 5, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06');
+
+
+-- ============================================================
+-- 29. PM테스트협력사01~10 — MES 연동 기본정보 채우기
+-- ============================================================
+-- 문제: "1차협력사 정보는 MES에서 연동" 되는 기본 데이터(회사명/사업자등록번호/
+--   주소/담당자 연락처)까지 전부 비워서 만들었었다. 이 기본정보는 원래 MES에서
+--   이미 넘어와 있어야 하는 값이라 채워두고, 소재/공장/규제/문서(협력사가 직접
+--   입력해야 하는 부분)만 비워둔 채로 유지한다.
+
+UPDATE suppliers SET business_reg_no = '111-86-71001', country = 'KR', address = '경기도 화성시 동탄산단로 101' WHERE supplier_id = '71000001-0000-4000-8000-000000000001';
+UPDATE suppliers SET business_reg_no = '111-86-71002', country = 'KR', address = '경기도 화성시 동탄산단로 102' WHERE supplier_id = '71000002-0000-4000-8000-000000000002';
+UPDATE suppliers SET business_reg_no = '111-86-71003', country = 'KR', address = '충청남도 아산시 배방읍 산단로 103' WHERE supplier_id = '71000003-0000-4000-8000-000000000003';
+UPDATE suppliers SET business_reg_no = '111-86-71004', country = 'KR', address = '충청남도 아산시 배방읍 산단로 104' WHERE supplier_id = '71000004-0000-4000-8000-000000000004';
+UPDATE suppliers SET business_reg_no = '111-86-71005', country = 'AU', address = 'Pilbara Mining District, Western Australia' WHERE supplier_id = '71000005-0000-4000-8000-000000000005';
+UPDATE suppliers SET business_reg_no = '111-86-71006', country = 'ID', address = 'Sulawesi Tengah Mining Zone, Indonesia' WHERE supplier_id = '71000006-0000-4000-8000-000000000006';
+UPDATE suppliers SET business_reg_no = '111-86-71007', country = 'KR', address = '울산광역시 남구 산업로 107' WHERE supplier_id = '71000007-0000-4000-8000-000000000007';
+UPDATE suppliers SET business_reg_no = '111-86-71008', country = 'KR', address = '경상북도 포항시 남구 산단로 108' WHERE supplier_id = '71000008-0000-4000-8000-000000000008';
+UPDATE suppliers SET business_reg_no = '111-86-71009', country = 'KR', address = '서울특별시 강남구 테헤란로 109' WHERE supplier_id = '71000009-0000-4000-8000-000000000009';
+UPDATE suppliers SET business_reg_no = '111-86-71010', country = 'SG', address = '10 Marina Boulevard, Singapore' WHERE supplier_id = '7100000a-0000-4000-8000-00000000000a';
+
+-- 대표 PIC 1명씩(MES 연동 담당자 정보) — factory_id는 아직 공장 미등록이라 NULL.
+INSERT INTO supplier_contacts (supplier_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('71000001-0000-4000-8000-000000000001', '김민준', 'Kim MJ', 'ESG 담당자', 'ESG팀',   'mj.kim@pmtest01.demo',   '+82-31-711-0001', TRUE, 'ko'),
+('71000002-0000-4000-8000-000000000002', '이서연', 'Lee SY', 'ESG 담당자', 'ESG팀',   'sy.lee@pmtest02.demo',   '+82-31-711-0002', TRUE, 'ko'),
+('71000003-0000-4000-8000-000000000003', '박도윤', 'Park DY', 'ESG 담당자', 'ESG팀',  'dy.park@pmtest03.demo',  '+82-41-711-0003', TRUE, 'ko'),
+('71000004-0000-4000-8000-000000000004', '최지우', 'Choi JW', 'ESG 담당자', 'ESG팀',  'jw.choi@pmtest04.demo',  '+82-41-711-0004', TRUE, 'ko'),
+('71000005-0000-4000-8000-000000000005', 'James Carter', 'James Carter', 'Compliance Manager', 'Operations', 'j.carter@pmtest05.demo', '+61-8-711-0005', TRUE, 'en'),
+('71000006-0000-4000-8000-000000000006', 'Budi Santoso', 'Budi Santoso', 'Mine Manager', 'Operations', 'budi@pmtest06.demo', '+62-21-711-0006', TRUE, 'en'),
+('71000007-0000-4000-8000-000000000007', '정하은', 'Jung HE', 'ESG 담당자', 'ESG팀',  'he.jung@pmtest07.demo',  '+82-52-711-0007', TRUE, 'ko'),
+('71000008-0000-4000-8000-000000000008', '한지호', 'Han JH', 'ESG 담당자', 'ESG팀',  'jh.han@pmtest08.demo',   '+82-54-711-0008', TRUE, 'ko'),
+('71000009-0000-4000-8000-000000000009', '오세훈', 'Oh SH', '구매 담당자', '구매팀',  'sh.oh@pmtest09.demo',    '+82-2-711-0009',  TRUE, 'ko'),
+('7100000a-0000-4000-8000-00000000000a', 'Grace Lim', 'Grace Lim', 'Trading Manager', 'Trading', 'grace.lim@pmtest10.demo', '+65-711-0010', TRUE, 'en')
+ON CONFLICT DO NOTHING;

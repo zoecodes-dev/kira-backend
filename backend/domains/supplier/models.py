@@ -750,6 +750,16 @@ class OnboardingContact(BaseModel):
     department: Optional[str] = None
 
 
+class SubSupplierInvite(BaseModel):
+    """온보딩 STEP3(하위협력사 담당자 등록) 입력 1건 — 캐스케이드 초대용.
+    무토큰 공개 submit 트랜잭션 안에서 그대로 신규 협력사 생성 + 동의요청까지 처리한다
+    (기존엔 프론트 로컬 state로만 남고 어디에도 저장 안 되던 것을 PM 확인 후 정식 연결)."""
+    company_name: str
+    name: str
+    email: str
+    phone: Optional[str] = None
+
+
 class OnboardingSubmitRequest(BaseModel):
     """공개 submit 요청 — §6 계약. consent_agreed 는 entry 동의 게이트 통과 표식.
     account 는 선택 — 1차 협력사는 MES 기반 계정을 이미 보유하므로 null(신규 계정 생성 안 함).
@@ -761,6 +771,7 @@ class OnboardingSubmitRequest(BaseModel):
     unverified: bool = False
     consent_agreed: bool = False
     contacts: list[OnboardingContact] = []
+    sub_suppliers: list[SubSupplierInvite] = []  # STEP3 — 말단이 아니면 하위협력사 캐스케이드 초대
 
 
 class OnboardingSubmitResponse(BaseModel):
