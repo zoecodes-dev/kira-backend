@@ -355,6 +355,7 @@ async def update_supplier_detail(
         "business_reg_doc_url": "business_reg",
         "environmental_report_url": "environmental_report",
         "self_assessment_doc_url": "self_assessment",
+        "material_composition_doc_url": "material_composition",
     }
     prev_doc_urls = {col: getattr(supplier, col, None) for col in doc_url_kinds}
     # 입력 양식 영속화 — 테이블별로 분배(보낸 필드만).

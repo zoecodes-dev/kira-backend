@@ -61,6 +61,7 @@ class Supplier(Base):
     business_reg_doc_name: Mapped[Optional[str]] = mapped_column(String(255))  # 사업자등록증 원본 파일명(표시용)
     environmental_report_url: Mapped[Optional[str]] = mapped_column(String(500))  # 환경성적서(회원가입 수집) 업로드 URL
     self_assessment_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 실사 자가진단 보고서 업로드 URL
+    material_composition_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 소재구성 문서(핵심광물 함량) 업로드 URL
     is_unverified: Mapped[bool] = mapped_column(Boolean, default=False)  # 회원가입: 사업자등록증 미보유 '미확인 등록'
     parent_supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id")
@@ -336,6 +337,7 @@ class SupplierDetailUpdateRequest(BaseModel):
     business_reg_doc_url: Optional[str] = None       # 사업자등록증
     environmental_report_url: Optional[str] = None   # 환경성적서
     self_assessment_doc_url: Optional[str] = None     # 실사 자가진단 보고서
+    material_composition_doc_url: Optional[str] = None  # 소재구성 문서(핵심광물 함량)
 
 
 # ----- CTI 상세 응답 DTO (목요일: provider type별 상세 노출) -----
@@ -379,6 +381,7 @@ class SupplierDetailResponse(BaseModel):
     business_reg_doc_url: Optional[str] = None  # 사업자등록증 업로드 URL(확인용)
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL(확인용)
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL(확인용)
+    material_composition_doc_url: Optional[str] = None  # 소재구성 문서(핵심광물 함량) 업로드 URL(확인용)
     status: str
     risk_level: str
     manufacturer_detail: Optional[ManufacturerDetailDTO] = None
@@ -557,6 +560,7 @@ class MasterFormCompany(BaseModel):
     business_reg_doc_url: Optional[str] = None  # 사업자등록증 업로드 URL
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL
+    material_composition_doc_url: Optional[str] = None  # 소재구성 문서(핵심광물 함량) 업로드 URL
     established_year: Optional[int] = None
     employee_count: Optional[int] = None
 

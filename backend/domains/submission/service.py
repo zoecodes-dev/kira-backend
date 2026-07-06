@@ -57,6 +57,9 @@ async def list_ai_extractions(db: AsyncSession, tenant_id) -> list[dict]:
             "detected_document_type": r.get("detected_document_type"),
             "evidence_summary": r.get("evidence_summary"),
             "doc_category": r.get("doc_category"),
+            # 원본 문서 S3 키(버킷 내 영구 키) — 프론트가 '방금 업로드한 문서'를
+            # s3Key 일치로 찾을 때 사용(소재구성 문서 파싱 결과 폴링 등).
+            "doc_s3_key": s3_key,
             # 원본 문서(PDF 뷰어) — 임시 다운로드 URL + 파일명. 없으면 None.
             "document_url": document_url,
             "document_file_name": r.get("doc_file_name"),
