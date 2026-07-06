@@ -35,7 +35,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload  # [REVERT-NON-SUPPLIER] 이 import 제거 (customer eager load용)
+from sqlalchemy.orm import selectinload
 
 from backend.domains.product.models import (
     BomVersion,
@@ -77,7 +77,7 @@ class ProductRepository:
                 "customers": [(Customer, is_new), ...],   # is_new=True면 신규 INSERT
                 "products":  [Product, ...],
             }
-            service가 CustomerImported / ProductImported 발행 시 이 반환값을 씀.
+            service가 동기화 요약(반환 dict)을 만들 때 이 값을 씀.
 
         [UPSERT 전략 — idempotent]
             동일 ingest를 두 번 실행해도 중복 row 없음.
@@ -227,8 +227,8 @@ class ProductRepository:
             "마지막으로 확인된 시각"은 항상 최신 유지해요.
 
         [is_new 플래그]
-            service가 CustomerImported 이벤트에 담아 발행해요.
-            downstream이 "신규 고객사 등장" vs "기존 갱신"을 구분할 수 있어요.
+            service가 동기화 요약(customers[].is_new)에 담아 반환해요.
+            "신규 고객사 등장" vs "기존 갱신"을 구분할 수 있어요.
             PostgreSQL의 xmax 컬럼으로 판별: INSERT면 xmax=0, UPDATE면 xmax>0.
 
         [반환]
@@ -269,76 +269,78 @@ class ProductRepository:
         모델(model_name) + 암페어(amperage_ah) 필드를 포함해요.
         fetch_from_source가 이 raw dict를 읽어 고객사 → 제품 순으로 UPSERT해요.
 
-        [시드 구성 — 제품 4개, 고객사 2개]
-            BMW    → iX3  108Ah  (product_code: BMW-IX3-108)
-            BMW    → i4    81Ah  (product_code: BMW-I4-81)
-            Mercedes → GLC  90Ah  v1 deprecated  (product_code: MB-GLC-90-V1)
-            Mercedes → GLC  90Ah  v2 active       (product_code: MB-GLC-90-V2)
-            ※ GLC 두 버전은 생산기간이 다른 별도 BOM 버전 시연용.
-               product row는 2개, BOM 버전은 각 product마다 1개씩.
+        [시드 구성 — 제품 4개(전부 KIRA 팩), 고객사 2개] · docker/02_seed_data.sql 정본과 동일
+            KE-CYL-NCM811-108  KIRA PRiMX Cylindrical NCM811 108Ah  → BMW · iX3 50
+            KE-PRI-NCM-081     KIRA PRiMX Prismatic NCM 81Ah        → BMW · i4
+            KE-PRI-NCM-094     KIRA PRiMX Prismatic NCM 94Ah        → Mercedes · GLC EV
+            KE-PRI-NCM-118     KIRA PRiMX Prismatic NCM 118Ah       → Mercedes · EQS
+            ※ 제조사 = KIRA(원청·팩 제조사). 제품명은 자사 브랜드+사양이며 OEM 차종은
+               제품명에 박지 않고 customer_code/model_name 으로 분리.
 
         [실환경 전환 포인트]
         이 함수를 ERP API 클라이언트 호출로 교체하면
         fetch_from_source() 나머지 로직은 그대로 재사용 가능.
         """
+        # 정본: docker/02_seed_data.sql 과 동일한 (제품 × 고객사 × BOM) 마스터.
+        # 제조사 = KIRA(원청·팩 제조사) 자기 자신. 제품명은 자사 브랜드(KIRA PRiMX)+사양이며
+        # OEM 차종은 제품명에 박지 않고 customer_code/model_name 으로 분리한다.
+        KIRA_MANUFACTURER_ID = "a0000000-0000-4000-8000-000000000000"
         return [
             {
-                # ── BMW iX3 50 108Ah ───────────────────────────────────
-                "product_code":         "BMW-IX3-NCM811-108",
-                "product_name":         "BMW iX3 Cylindrical NCM811 108Ah",
+                # ── KIRA PRiMX Cylindrical NCM811 108Ah → BMW iX3 50 ──
+                "product_code":         "KE-CYL-NCM811-108",
+                "product_name":         "KIRA PRiMX Cylindrical NCM811 108Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-IX3",
-                # 고객사 정보
+                # 고객사(완성차 OEM)
                 "customer_code":        "BMW",
                 "customer_name":        "BMW AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-BMW",
-                # 제품 3축
+                # 납품 차종 + 용량
                 "model_name":           "iX3 50",
                 "amperage_ah":          108.00,
             },
             {
-                # ── BMW i4 81Ah ────────────────────────────────────────
-                "product_code":         "BMW-I4-NCM-81",
-                "product_name":         "BMW i4 Prismatic NCM 81Ah",
+                # ── KIRA PRiMX Prismatic NCM 81Ah → BMW i4 ──
+                "product_code":         "KE-PRI-NCM-081",
+                "product_name":         "KIRA PRiMX Prismatic NCM 81Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-I4",
-                # 고객사 정보 — BMW는 위와 동일 customer_code → UPSERT 재사용
                 "customer_code":        "BMW",
                 "customer_name":        "BMW AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-BMW",
-                # 제품 3축
                 "model_name":           "i4",
                 "amperage_ah":          81.00,
             },
             {
-                # ── Mercedes GLC EV 94Ah ───────────────────────────────
-                "product_code":         "MB-GLC-NCM-94",
-                "product_name":         "Mercedes GLC EV Prismatic NCM 94Ah",
+                # ── KIRA PRiMX Prismatic NCM 94Ah → Mercedes GLC EV ──
+                "product_code":         "KE-PRI-NCM-094",
+                "product_name":         "KIRA PRiMX Prismatic NCM 94Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-GLC",
-                # 고객사 정보
                 "customer_code":        "MERCEDES",
                 "customer_name":        "Mercedes-Benz Group AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-MB",
-                # 제품 3축
                 "model_name":           "GLC EV",
                 "amperage_ah":          94.00,
             },
             {
-                # ── Mercedes EQS 118Ah ─────────────────────────────────
-                "product_code":         "MB-EQS-NCM-118",
-                "product_name":         "Mercedes EQS Prismatic NCM 118Ah",
+                # ── KIRA PRiMX Prismatic NCM 118Ah → Mercedes EQS ──
+                "product_code":         "KE-PRI-NCM-118",
+                "product_name":         "KIRA PRiMX Prismatic NCM 118Ah",
+                "manufacturer_id":      KIRA_MANUFACTURER_ID,
                 "type":                 "battery_pack",
                 "external_id":          "ERP-PROD-EQS",
-                # 고객사 정보 — MERCEDES는 위와 동일 → UPSERT 재사용
                 "customer_code":        "MERCEDES",
                 "customer_name":        "Mercedes-Benz Group AG",
                 "customer_country":     "DE",
                 "customer_external_id": "ERP-CUST-MB",
-                # 제품 3축
                 "model_name":           "EQS",
                 "amperage_ah":          118.00,
             },
@@ -418,7 +420,7 @@ class ProductRepository:
         """
         result = await self.session.execute(
             select(Product)
-            .options(selectinload(Product.customer))  # [REVERT-NON-SUPPLIER] customer eager load(고객사명용)
+            .options(selectinload(Product.customer))
             .order_by(
                 Product.synced_at.desc().nulls_last(),
                 Product.created_at.desc(),
@@ -518,7 +520,6 @@ class ProductRepository:
         #   5계층(Pack=0 ~ 광물=4) 초과는 데이터 오염으로 간주.
         # ------------------------------------------------------------------
         # [결정 #2] link_status 필터 문자열 생성
-        # [REVERT-NON-SUPPLIER] supplier 외 — supply_chain_map 엣지 PK가 edge_id로 개명됨(주석 참고용).
         # scm.edge_id IS NULL 조건: supply_chain_map에 매핑이 없는 부품(직접 BOM 항목)도 포함.
         # 허용값은 schema chk_link_status 그대로 사용 ('supplychain_confirmed').
         link_status_filter = ""
@@ -536,7 +537,7 @@ class ProductRepository:
                     p.parent_part_id,
                     p.hs_code,
                     p.material_type,
-                    p.function_purpose,  -- [REVERT-NON-SUPPLIER] product 외 지원 — 프론트 BOM 트리 '용도/기능' 표시용
+                    p.function_purpose,
                     p.unit_price,
                     bi.required_quantity,
                     bi.required_quantity_unit,
@@ -568,7 +569,7 @@ class ProductRepository:
                     p.parent_part_id,
                     p.hs_code,
                     p.material_type,
-                    p.function_purpose,  -- [REVERT-NON-SUPPLIER] product 외 지원 — 프론트 BOM 트리 '용도/기능' 표시용
+                    p.function_purpose,
                     p.unit_price,
                     NULL::numeric(15,4) AS required_quantity,
                     NULL::varchar(20) AS required_quantity_unit,
@@ -623,7 +624,7 @@ class ProductRepository:
                 "parent_part_id":         str(row["parent_part_id"]) if row["parent_part_id"] else None,
                 "hs_code":                row["hs_code"],
                 "material_type":          row["material_type"],
-                "function_purpose":       row["function_purpose"],  # [REVERT-NON-SUPPLIER] 용도/기능
+                "function_purpose":       row["function_purpose"],
                 "unit_price":             float(row["unit_price"]) if row["unit_price"] is not None else None,
                 "required_quantity":      float(row["required_quantity"]) if row["required_quantity"] is not None else None,
                 "required_quantity_unit": row["required_quantity_unit"],
@@ -658,12 +659,7 @@ class ProductRepository:
         #       root_nodes[0]만 쓰면 나머지 2개 서브트리가 누락된다. 완전 수정은
         #       다중 루트 반환이 필요(응답 계약 변경) — 백엔드 담당자 검토 요망.
         # ───────────────────────────────────────────────────────────────
-        # [REVERT-NON-SUPPLIER:BEGIN] supplier 외(product) — BOM 트리 404 수정(공급망 맵 노드 표시용).
         #   원인: parent_part_id IS NULL 루트가 0건 → 404. 앵커(depth=0) 기준으로 수정.
-        #   최종작업 시 아래 블록을 원복:
-        #       root_nodes = [n for n in node_map.values() if n["parent_part_id"] is None]
-        #       if not root_nodes: return None
-        #       root_node = root_nodes[0]
         root_nodes = [
             n for n in node_map.values()
             if n["depth"] == 0
@@ -682,7 +678,7 @@ class ProductRepository:
                 "parent_part_id":         None,
                 "hs_code":                None,
                 "material_type":          None,
-                "function_purpose":       None,  # [REVERT-NON-SUPPLIER] 제품 루트(부품 아님)
+                "function_purpose":       None,
                 "unit_price":             None,
                 "required_quantity":      None,
                 "required_quantity_unit": None,
@@ -691,7 +687,6 @@ class ProductRepository:
                 "depth":                  0,
                 "children":               root_nodes,
             }
-        # [REVERT-NON-SUPPLIER:END]
 
         # ------------------------------------------------------------------
         # 최종 응답 조립

@@ -27,6 +27,8 @@ class Batch(Base):
     status: Mapped[str] = mapped_column(String(30), default="batch_processing", server_default="batch_processing", nullable=True)
     confidence_score: Mapped[float] = mapped_column(Numeric(5, 4), nullable=True)
 
-    source_system: Mapped[str] = mapped_column(String(100), default="MES", server_default="MES", nullable=True)
+    # 배치(컴플라이언스 평가 작업) 데이터 출처. 런타임 생성 배치는 제출 흐름 기원(SUBMISSION).
+    # 시드/데모의 'MES 생산 로트' 예시는 INSERT에서 'MES'를 명시적으로 세팅한다.
+    source_system: Mapped[str] = mapped_column(String(100), default="SUBMISSION", server_default="SUBMISSION", nullable=True)
     external_id: Mapped[str] = mapped_column(String(255), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"), nullable=True)

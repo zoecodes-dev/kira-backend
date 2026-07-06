@@ -1,11 +1,17 @@
+import json
+import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 from sqlalchemy import text
 
+from backend.domains.submission.service import send_overdue_reminders
 from backend.infrastructure.database import AsyncSessionLocal
 from backend.infrastructure.mail import send_email
+
+logger = logging.getLogger(__name__)
 
 
 async def process_notification(
@@ -16,6 +22,7 @@ async def process_notification(
     subject: str,
     body: str,
     dedup_key: str,
+    target: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     [Notification Queue Worker]
@@ -31,9 +38,9 @@ async def process_notification(
             inserted = await db.execute(
                 text("""
                     INSERT INTO notifications
-                        (user_id, channel, notification_type, subject, body, status, dedup_key)
+                        (user_id, channel, notification_type, subject, body, status, dedup_key, target)
                     VALUES
-                        (:user_id, :channel, :ntype, :subject, :body, 'pending', :dedup_key)
+                        (:user_id, :channel, :ntype, :subject, :body, 'pending', :dedup_key, CAST(:target AS JSONB))
                     ON CONFLICT (dedup_key) DO NOTHING
                     RETURNING notification_id
                 """),
@@ -44,6 +51,8 @@ async def process_notification(
                     "subject": subject,
                     "body": body,
                     "dedup_key": dedup_key,
+                    # dict → JSON 문자열로 바인딩 후 ::JSONB 캐스팅. 없으면 NULL.
+                    "target": json.dumps(target) if target is not None else None,
                 },
             )
             row = inserted.first()
@@ -82,8 +91,25 @@ async def process_notification(
             raise e
 
 
+async def check_overdue_submissions(ctx: Dict[str, Any]) -> None:
+    """
+    [Submission Cron]
+    매일 오전 9시에 기한 초과 데이터 요청을 찾아 협력사에게 독촉 알림을 발송한다.
+
+    구 submission_worker에서 이관. 같은 notification_queue를 별도 워커 컨테이너가
+    소비하면 ARQ가 미등록 함수 작업을 재시도 없이 실패 처리해 알림이 유실됐다
+    (경쟁 소비자 문제). 한 큐 = 한 워커로 병합해 해결.
+    """
+    async with AsyncSessionLocal() as db:
+        count = await send_overdue_reminders(db)
+    logger.info("[notification_worker] 독촉 알림 발송 완료 (처리 건수: %d)", count)
+
+
 class WorkerSettings:
-    functions = [process_notification]
+    functions = [process_notification, check_overdue_submissions]
+    cron_jobs = [
+        cron(check_overdue_submissions, hour=9, minute=0)  # 매일 오전 9시 (워커 TZ 기준)
+    ]
     redis_settings = RedisSettings.from_dsn(os.getenv("REDIS_URL", "redis://redis:6379/0"))
     queue_name = "notification_queue"
     max_tries = 3

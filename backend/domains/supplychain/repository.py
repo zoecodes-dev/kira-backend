@@ -96,11 +96,9 @@ def resolve_xinjiang_region(value: Optional[str]) -> Optional[Dict[str, Any]]:
     return None
 
 
-# [REVERT-NON-SUPPLIER:BEGIN] supplier 외(supplychain) — 맵 헤더(supply_chain_maps) 도입에 따른 개명.
 #   supply_chain_map.map_id(엣지 PK) → edge_id, supply_ratio.map_id → edge_id 로 전 쿼리 정합.
 #   프론트 응답 키는 보호 위해 최종 출력에서 'map_id' 별칭/CTE 컬럼명 유지(edge_id AS map_id).
 #   최종 작업 시 이 클래스의 map_id↔edge_id 관련 변경을 원복 대상으로 식별.
-# [REVERT-NON-SUPPLIER:END]
 class SupplyChainRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -167,7 +165,7 @@ class SupplyChainRepository:
                 company_name, provider_type,
                 depth,           -- [F1 주축] 프론트 트리 표시 기준
                 hop_level,       -- [F1 보조] 엣지 메타 — 겸업 탐색·JOIN 조건용
-                is_root_anchor,  -- [F2] parent_supplier_id IS NULL 파생 — OEM/tier0 동적 판정
+                is_root_anchor,  -- [F2] parent_supplier_id IS NULL 파생 — 원청/tier0 동적 판정
                 country, location_geojson, is_cycle
             FROM sc_tree
             ORDER BY depth, hop_level;
@@ -217,7 +215,6 @@ class SupplyChainRepository:
         return [dict(row._mapping) for row in result]
 
     @trace_tool("supply_chain_create")
-    # [REVERT-NON-SUPPLIER:BEGIN] supplier 외(supplychain) — 신규 엣지를 소속 맵 헤더에 연결.
     async def _ensure_map_header(self, bom_version_id: str) -> str:
         """이 bom_version의 공급망 맵 헤더(supply_chain_maps) 보장 — 없으면 생성하고 map_id 반환."""
         q = text("""
@@ -228,7 +225,6 @@ class SupplyChainRepository:
         """)
         r = await self.session.execute(q, {"bv": bom_version_id})
         return str(r.scalar_one())
-    # [REVERT-NON-SUPPLIER:END]
 
     async def create_supply_relation(
         self,
@@ -243,7 +239,7 @@ class SupplyChainRepository:
         discovered_via: 이 엣지가 '누구의 초대/대리신고로 발견됐는지'(상위 협력사 FK).
         ERP 원천 신고면 None. 상위 협력사가 하위를 풀에 편입시킨 경우 그 상위 supplier_id.
         """
-        map_header_id = await self._ensure_map_header(bom_version_id)  # [REVERT-NON-SUPPLIER]
+        map_header_id = await self._ensure_map_header(bom_version_id)
         query = text("""
             INSERT INTO supply_chain_map
                 (map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level,
@@ -284,7 +280,7 @@ class SupplyChainRepository:
         part_id: str,
     ) -> Dict[str, Any]:
         """협력사 자진신고: 공급원 변경 시 새로운 노드를 SUPPLIER_DECLARED 상태로 생성"""
-        map_header_id = await self._ensure_map_header(bom_version_id)  # [REVERT-NON-SUPPLIER] 헤더 연결
+        map_header_id = await self._ensure_map_header(bom_version_id)
         query = text("""
             INSERT INTO supply_chain_map
                 (map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id,
@@ -332,7 +328,6 @@ class SupplyChainRepository:
         r = await self.session.execute(q, {"inviter": inviter_supplier_id, "invitee": invitee_supplier_id})
         return len(r.fetchall())
 
-    # [REVERT-NON-SUPPLIER:BEGIN] 협력사 확인(verify) — supply_chain_map.verification_status 갱신.
     #   supplier 외(supplychain) 도메인. 최종 작업 시 이 메서드 전체 주석/삭제.
     async def set_supplier_verification(
         self,
@@ -356,7 +351,6 @@ class SupplyChainRepository:
         rows = result.fetchall()
         await self.session.flush()
         return len(rows)
-    # [REVERT-NON-SUPPLIER:END]
 
     @trace_tool("get_supplier_master_and_gps_dto")
     async def get_supplier_master_and_gps_dto(self, supplier_id: str) -> dict:
@@ -498,7 +492,11 @@ class SupplyChainRepository:
             WITH RECURSIVE sc_tree AS (
                 SELECT
                     scm.child_supplier_id, s.provider_type,
-                    0 AS depth,
+                    -- [차수 SSOT] 표시 차수 = 엣지 hop_level(원청 0 기준 경로순번). 트리 재귀깊이
+                    --   대신 hop_level을 쓰는 이유: 겸업(한양셀 Module hop1 → Cell hop2)의 self-edge가
+                    --   아래 사이클 가드로 스킵돼, 재귀깊이로는 하위 노드가 1씩 당겨진다(예: 동성머티리얼
+                    --   실제 hop3인데 재귀깊이 2 → '2차' 오표시). hop_level은 seed 차수 SSOT라 정합.
+                    scm.hop_level AS depth,
                     -- 사이클 가드용 방문 경로. child_supplier_id는 suppliers INNER JOIN이라 NULL 없음.
                     ARRAY[scm.child_supplier_id] AS path,
                     scm.bom_version_id
@@ -512,7 +510,7 @@ class SupplyChainRepository:
 
                 SELECT
                     scm.child_supplier_id, s.provider_type,
-                    sct.depth + 1,
+                    scm.hop_level,
                     sct.path || scm.child_supplier_id,
                     scm.bom_version_id
                 FROM supply_chain_map scm
@@ -737,18 +735,21 @@ class SupplyChainRepository:
                     LIMIT 1
                 )                      AS factory_id,
                 p.tier_level,
-                scm.hop_level,  -- [REVERT-NON-SUPPLIER] supplier 외(supplychain) — 차수 SSOT(1차=hop 1). 프론트 1차 판정/트리 tier용
-                p.part_name,   -- [REVERT-NON-SUPPLIER] supplier 외(supplychain) — 프론트 맵 트리 부품명 표시용
-                p.part_code,   -- [REVERT-NON-SUPPLIER]
+                scm.hop_level,
+                p.part_name,
+                p.part_code,
                 scm.link_status,
-                scm.verification_status,  -- [REVERT-NON-SUPPLIER] STEP3 협력사 '확인' 상태 하이드레이션용
+                scm.verification_status,
                 scm.supply_period_from,
                 scm.supply_period_to,
-                scm.created_at
+                scm.created_at,
+                -- 제품별 핵심광물: 엣지 override 우선, 없으면 child 협력사 회사값으로 폴백
+                COALESCE(scm.core_minerals, cs.core_minerals) AS core_minerals
             FROM supply_chain_map scm
             JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
             JOIN products pr     ON pr.product_id = bv.product_id
-            LEFT JOIN parts p    ON p.part_id = scm.part_id
+            LEFT JOIN parts p     ON p.part_id = scm.part_id
+            LEFT JOIN suppliers cs ON cs.supplier_id = scm.child_supplier_id
             WHERE {where}
             ORDER BY p.tier_level NULLS LAST, scm.edge_id
         """)
@@ -1095,33 +1096,50 @@ class SupplyChainRepository:
         result = await self.session.execute(query)
         return [dict(row._mapping) for row in result]
 
-    # [REVERT-NON-SUPPLIER:BEGIN] supplier 외(supplychain) — 공급망 맵 헤더(supply_chain_maps) 조회/상태.
     async def list_map_headers(self, tenant_id: str) -> List[Dict[str, Any]]:
-        """내 테넌트의 공급망 맵 헤더 목록 + 엣지 수. (맵 그 자체를 map_id로 관리)"""
+        """내 테넌트의 공급망 맵 헤더 목록 + 엣지 수. (맵 그 자체를 map_id로 관리)
+
+        목록 화면이 제품 × 생산기간(BOM 버전) × 고객사 단위로 한 번에 렌더링할 수 있도록
+        고객사명(customers)과 BOM 버전의 생산기간(bom_versions)을 함께 조인해 반환한다.
+        (프론트가 제품×버전을 순회하며 맵을 재조회하지 않도록 목록 쿼리에서 일괄 제공.)
+        """
         query = text("""
-            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
+                   p.customer_id, c.customer_name,
+                   bv.version_number, bv.production_from, bv.production_to,
                    h.status, h.completed_at, COUNT(e.edge_id) AS edge_count
             FROM supply_chain_maps h
             JOIN products p ON p.product_id = h.product_id
+            LEFT JOIN customers c ON c.customer_id = p.customer_id
+            LEFT JOIN bom_versions bv ON bv.bom_version_id = h.bom_version_id
             LEFT JOIN supply_chain_map e ON e.map_id = h.map_id
             WHERE p.tenant_id = :tenant_id
-            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name, h.status, h.completed_at
+            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
+                     p.customer_id, c.customer_name,
+                     bv.version_number, bv.production_from, bv.production_to,
+                     h.status, h.completed_at
             ORDER BY p.product_name;
         """)
         result = await self.session.execute(query, {"tenant_id": tenant_id})
         return [dict(r._mapping) for r in result]
 
     async def get_map_header(self, map_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-        """맵 헤더 단건(map_id). 내 테넌트 소유만(아니면 None)."""
+        """맵 헤더 단건(map_id). 내 테넌트 소유만(아니면 None). 목록과 동일 필드셋(+completed_by)."""
         query = text("""
-            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            SELECT h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
+                   p.customer_id, c.customer_name,
+                   bv.version_number, bv.production_from, bv.production_to,
                    h.status, h.completed_by, h.completed_at,
                    COUNT(e.edge_id) AS edge_count
             FROM supply_chain_maps h
             JOIN products p ON p.product_id = h.product_id
+            LEFT JOIN customers c ON c.customer_id = p.customer_id
+            LEFT JOIN bom_versions bv ON bv.bom_version_id = h.bom_version_id
             LEFT JOIN supply_chain_map e ON e.map_id = h.map_id
             WHERE h.map_id = :map_id AND p.tenant_id = :tenant_id
-            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name,
+            GROUP BY h.map_id, h.bom_version_id, h.product_id, p.product_name, p.product_code,
+                     p.customer_id, c.customer_name,
+                     bv.version_number, bv.production_from, bv.production_to,
                      h.status, h.completed_by, h.completed_at;
         """)
         row = (await self.session.execute(query, {"map_id": map_id, "tenant_id": tenant_id})).first()
@@ -1146,4 +1164,3 @@ class SupplyChainRepository:
         })).first()
         await self.session.flush()
         return dict(row._mapping) if row else None
-    # [REVERT-NON-SUPPLIER:END]

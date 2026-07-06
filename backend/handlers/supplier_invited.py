@@ -87,7 +87,8 @@ async def send_supplier_invitation_email(payload: dict) -> None:
         logger.info("[supplier_invited] 동일일자 중복발송 스킵 key=%s", dedup_key)
         return
 
-    signup_url = f"{config.FRONTEND_BASE_URL}/supplier/onboarding?supplierId={invitee_supplier_id}"
+    # /supplier/* 는 /partner/* 리다이렉트 별칭으로만 남음(프론트 2026-07 이동) — 직접 새 경로 사용.
+    signup_url = f"{config.FRONTEND_BASE_URL}/partner/onboarding?supplierId={invitee_supplier_id}"
     subject = "[KIRA] 공급망 정보 제공 협조 요청 (회원가입 및 자료 입력)"
     body_text = (
         "안녕하세요, KIRA 공급망 데이터 플랫폼입니다.\n\n"

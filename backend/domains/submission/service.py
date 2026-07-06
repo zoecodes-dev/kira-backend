@@ -8,7 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.config import config
 from backend.infrastructure.event_bus import publish
+from backend.infrastructure.mail import send_email
 from backend.infrastructure.queue import enqueue, NOTIFICATION_QUEUE
 from backend.infrastructure import storage  # presigned URL(원본 문서 PDF 뷰어)
 from backend.infrastructure.trace import trace_node, trace_tool
@@ -19,15 +21,15 @@ from backend.domains.submission.repository import (
     create_data_request, 
     get_data_request, 
     list_data_requests,
-    get_missing_counts,  # [REVERT-NON-SUPPLIER] 이 import 줄 제거
+    get_missing_counts,
     get_completeness_by_supplier,
     get_timeline_by_supplier,
-    list_extractions_for_review,  # [REVERT-NON-SUPPLIER] HITL AI 추출 조회
+    list_extractions_for_review,
 )
 
 
 async def list_ai_extractions(db: AsyncSession, tenant_id) -> list[dict]:
-    """[REVERT-NON-SUPPLIER] HITL 협력사 승인 — AI 추출(parsed_fields+confidence) + 협력사·요청 정보."""
+    """HITL 협력사 승인 — AI 추출(parsed_fields+confidence) + 협력사·요청 정보."""
     rows = await list_extractions_for_review(db, tenant_id)
     out: list[dict] = []
     for r in rows:
@@ -55,6 +57,9 @@ async def list_ai_extractions(db: AsyncSession, tenant_id) -> list[dict]:
             "detected_document_type": r.get("detected_document_type"),
             "evidence_summary": r.get("evidence_summary"),
             "doc_category": r.get("doc_category"),
+            # 원본 문서 S3 키(버킷 내 영구 키) — 프론트가 '방금 업로드한 문서'를
+            # s3Key 일치로 찾을 때 사용(소재구성 문서 파싱 결과 폴링 등).
+            "doc_s3_key": s3_key,
             # 원본 문서(PDF 뷰어) — 임시 다운로드 URL + 파일명. 없으면 None.
             "document_url": document_url,
             "document_file_name": r.get("doc_file_name"),
@@ -168,7 +173,33 @@ async def create_and_request_submission(
     )).fetchall()
 
     if not supplier_users:
-        logger.warning("[notification] 협력사 담당자 없음 (supplier_id=%s)", target_supplier_id)
+        # 미가입 협력사(계정 없음) — user 기반 알림이 불가능하므로 supplier_contacts의
+        # PIC 이메일로 온보딩 초대 링크를 직접 발송한다(supplier_invited 핸들러와 동일 패턴).
+        # 링크의 supplierId 로 가입 화면이 회사·담당자 정보를 prefill 한다(무토큰 키잉, decision #8).
+        contact_rows = (await db.execute(
+            text("""
+                SELECT email FROM supplier_contacts
+                WHERE supplier_id = :supplier_id AND email IS NOT NULL AND email <> ''
+                ORDER BY is_primary DESC, created_at
+            """),
+            {"supplier_id": str(target_supplier_id)},
+        )).fetchall()
+        if not contact_rows:
+            logger.warning("[notification] 협력사 담당자 없음 (supplier_id=%s)", target_supplier_id)
+        else:
+            signup_url = f"{config.FRONTEND_BASE_URL}/partner/onboarding?supplierId={target_supplier_id}"
+            body_text = (
+                "안녕하세요, KIRA 공급망 데이터 플랫폼입니다.\n\n"
+                "원청으로부터 공급망 정보 입력을 요청받았습니다.\n"
+                "아래 링크로 접속하시면 담당자 정보 확인 후 회원가입과 자료 입력을 진행하실 수 있습니다.\n\n"
+                f"접속 링크: {signup_url}\n\n"
+                "※ 본 메일은 표준 템플릿으로 발송되었습니다.\n"
+            )
+            for row in contact_rows:
+                try:
+                    await send_email(str(row[0]), "[KIRA] 공급망 정보 입력 요청 (회원가입 안내)", body_text=body_text)
+                except Exception:
+                    logger.exception("[notification] 미가입 협력사 초대 메일 실패 to=%s", row[0])
     else:
         for row in supplier_users:
             uid = str(row[0])
@@ -213,13 +244,11 @@ async def get_submissions_list(
     status: Optional[str] = None,
     skip: int = 0,
     limit: int = 100
-) -> list[dict]:  # [REVERT-NON-SUPPLIER] 원복 반환타입: list[DataRequestLog]
+) -> list[dict]:
     """
     [조회 도구] 목록 필터링 조회
     - 협력사(supplier_id)나 현재 진행 상태(status)를 기준으로 다건을 조회합니다.
     """
-    # [REVERT-NON-SUPPLIER:BEGIN] supplier 외(submission) — missing_count 병합(프론트 표시용).
-    #   최종작업 시 아래 블록 전체를 'return await list_data_requests(db, supplier_id, status, skip, limit)' 로 원복.
     logs = await list_data_requests(db, supplier_id, status, skip, limit)
     sids = list({l.target_supplier_id for l in logs if l.target_supplier_id})
     missing_map = await get_missing_counts(db, sids)
@@ -237,7 +266,6 @@ async def get_submissions_list(
         }
         for l in logs
     ]
-    # [REVERT-NON-SUPPLIER:END]
 
 @trace_node("update_submission_status", node_type="agent")
 async def update_submission_status(
@@ -263,17 +291,14 @@ async def update_submission_status(
         if not file_urls and not confirmed_fields:
             raise ValueError("제출 완료(SUBMITTED) 상태로 전이하려면 파일(file_urls)이 첨부되거나 폼 입력값(confirmed_fields)이 있어야 합니다.")
 
-        # [필수 검증] 완성도 100% 미만 물리 차단
+        # [필수 검증] 🔴필수(blocking) 필드 미충족 시에만 물리 차단.
+        #   🟡권장(광물비율·탄소집약도·환경성적서 등)은 완성도 %에 반영되지만 제출을 막지 않는다.
+        #   (지연 import — submission→supplier 방향 참조로 순환 회피)
         req_log_before = await get_data_request(db, request_id)
-        if req_log_before:
-            stmt = select(DataCompletenessStatus).where(
-                DataCompletenessStatus.entity_type == 'supplier',
-                DataCompletenessStatus.entity_id == req_log_before.target_supplier_id
-            )
-            result = await db.execute(stmt)
-            comp_status = result.scalar_one_or_none()
-            if not comp_status or (comp_status.completion_rate or 0) < 100:
-                raise ValueError("필수 입력 항목이 100% 작성되지 않아 제출할 수 없습니다.")
+        if req_log_before and req_log_before.target_supplier_id:
+            from backend.domains.supplier import service as supplier_service
+            if await supplier_service.has_blocking_gaps(db, req_log_before.target_supplier_id):
+                raise ValueError("필수 입력 항목이 작성되지 않아 제출할 수 없습니다.")
 
     try:
         req_log, status_event = await transition_submission(

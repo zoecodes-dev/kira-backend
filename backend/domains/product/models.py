@@ -4,8 +4,7 @@
 # KIRA Compliance Intelligence Platform — Product Domain ORM Models
 #
 # 구현 대상: schema.sql 영역 7 (Product / BOM / Parts)
-#   - products, bom_versions, parts, bom_items,
-#     part_code_mapping, manufacturing_process
+#   - products, bom_versions, parts, bom_items
 #
 # 설계 원칙 (PROJECT_CORE.md 5-1 ~ 5-5 준수):
 #   1. 도메인 격리 — 타 도메인 모델 클래스 import 금지.
@@ -405,7 +404,6 @@ class BomVersion(Base):
 
     [결정 #1] BOM도 외부 원천(ERP/PLM)에서 가져오는 복사본.
       - source_system / external_id / synced_at 컬럼 동일하게 추가.
-      - BOMImported 이벤트 발행은 service.py 에서 담당.
 
     [불변 규칙 — PROJECT_CORE.md 3-1]
     status ∈ {draft, active, deprecated}
@@ -736,20 +734,6 @@ class Part(Base):
         lazy="select",
     )
 
-    part_code_mappings: Mapped[List["PartCodeMapping"]] = relationship(
-        "PartCodeMapping",
-        back_populates="part",
-        cascade="all, delete-orphan",
-        lazy="select",
-    )
-
-    manufacturing_processes: Mapped[List["ManufacturingProcess"]] = relationship(
-        "ManufacturingProcess",
-        back_populates="part",
-        cascade="all, delete-orphan",
-        lazy="select",
-    )
-
     def __repr__(self) -> str:
         return (
             f"<Part code={self.part_code!r} "
@@ -866,156 +850,6 @@ class BomItem(Base):
         )
 
 
-# ---------------------------------------------------------------------------
-# 5. PartCodeMapping
-# ---------------------------------------------------------------------------
-
-class PartCodeMapping(Base):
-    """
-    원청 코드 ↔ 협력사 코드 매핑 브릿지 테이블.
-
-    [도메인 격리]
-    supplier_id → suppliers.supplier_id
-      ForeignKey 문자열 참조만 선언. relationship 없음.
-    """
-
-    __tablename__ = "part_code_mapping"
-
-    mapping_id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=func.uuid_generate_v4(),
-        comment="매핑 고유 식별자",
-    )
-
-    part_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("parts.part_id", ondelete="CASCADE"),
-        nullable=False,
-        comment="원청 기준 부품 FK",
-    )
-
-    supplier_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.supplier_id"),
-        nullable=True,
-        comment=(
-            "협력사 FK → suppliers.supplier_id. "
-            "도메인 격리 원칙: 문자열 FK만 선언, relationship 없음."
-        ),
-    )
-
-    supplier_part_code = Column(
-        String(50),
-        nullable=True,
-        comment="협력사 내부 사용 부품 코드. 예: 'POS-CAM-NCM-811-A'",
-    )
-
-    original_part_code = Column(
-        String(50),
-        nullable=True,
-        comment="원청 기준 부품 코드. 예: 'CAM-NCM811'",
-    )
-
-    part: Mapped["Part"] = relationship(
-        "Part",
-        back_populates="part_code_mappings",
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<PartCodeMapping part_id={self.part_id!r} "
-            f"supplier_part_code={self.supplier_part_code!r}>"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 6. ManufacturingProcess
-# ---------------------------------------------------------------------------
-
-class ManufacturingProcess(Base):
-    """
-    부품별 제조 공정도.
-
-    [도메인 격리]
-    outsourced_to_supplier_id → suppliers.supplier_id
-      ForeignKey 문자열 참조만 선언. relationship 없음.
-
-    [유효성 검사]
-    is_outsourced=True + outsourced_to_supplier_id=NULL → Service 레이어에서 HTTP 422.
-    """
-
-    __tablename__ = "manufacturing_process"
-
-    process_id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=func.uuid_generate_v4(),
-        comment="공정 고유 식별자",
-    )
-
-    part_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("parts.part_id", ondelete="CASCADE"),
-        nullable=False,
-        comment="해당 부품 FK",
-    )
-
-    sequence_no = Column(
-        Integer,
-        nullable=True,
-        comment="공정 순서 번호. 작을수록 앞 공정.",
-    )
-
-    process_name = Column(
-        String(255),
-        nullable=True,
-        comment="공정명. 예: '양극재 소성', '조립', '화성'",
-    )
-
-    process_description = Column(
-        Text,
-        nullable=True,
-        comment="공정 상세 설명",
-    )
-
-    is_outsourced = Column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default="false",
-        comment="아웃소싱 공정 여부. True이면 outsourced_to_supplier_id 필수.",
-    )
-
-    outsourced_to_supplier_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.supplier_id"),
-        nullable=True,
-        comment=(
-            "아웃소싱 대상 협력사 FK → suppliers.supplier_id. "
-            "도메인 격리 원칙: 문자열 FK만 선언, relationship 없음."
-        ),
-    )
-
-    process_image_url = Column(
-        String(500),
-        nullable=True,
-        comment="제조 공정도 이미지 URL.",
-    )
-
-    part: Mapped["Part"] = relationship(
-        "Part",
-        back_populates="manufacturing_processes",
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<ManufacturingProcess part_id={self.part_id!r} "
-            f"seq={self.sequence_no!r} "
-            f"outsourced={self.is_outsourced!r}>"
-        )
-
-
 # ============================================================
 # [2] Pydantic 입출력 스키마(DTO) 영역
 # ============================================================
@@ -1049,7 +883,7 @@ class ProductBrief(BaseModel):
     type: Optional[str] = None
     manufacturer_id: Optional[uuid.UUID] = None
     customer_id: Optional[uuid.UUID] = None      # W4 추가
-    customer_name: Optional[str] = None          # [REVERT-NON-SUPPLIER] 고객사명(제출 export용)
+    customer_name: Optional[str] = None
     model_name: Optional[str] = None             # W4 추가
     amperage_ah: Optional[float] = None          # W4 추가
     source_system: Optional[str] = None          # 결정 #1

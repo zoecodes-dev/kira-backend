@@ -26,53 +26,8 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 # ============================================================
-# Product (C)
-# ============================================================
-@dataclass
-class CustomerImportedEvent:
-    """
-    고객사(완성차 OEM) UPSERT 완료 시 발행.
-    발행: C(Product Ingest) → 수신: 공급망·컴플라이언스 등 downstream.
-
-    발행 순서 규칙:
-        CustomerImported → (product UPSERT) → BOMImported → LotImported → ProductImported
-        products.customer_id FK 의존 때문에 customer가 먼저 확정되어야 한다.
-
-    is_new: True면 신규 INSERT, False면 기존 row 업데이트(UPSERT 충돌).
-        downstream이 "새 고객사 등장" vs "기존 갱신"을 구분할 수 있게 담아요.
-    """
-    customer_id: Optional[UUID] = None
-    customer_code: Optional[str] = None   # 예: 'BMW', 'MERCEDES'
-    external_id: Optional[str] = None     # 원천 ERP 식별자
-    is_new: bool = True                   # 신규 INSERT=True / UPSERT 갱신=False
-    event_name: str = "CustomerImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-@dataclass
-class ProductImportedEvent:
-    product_id: Optional[UUID] = None
-    external_id: Optional[str] = None   # 원천 ERP/PLM 식별자
-    event_name: str = "ProductImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-@dataclass
-class LotImportedEvent:
-    batch_id: Optional[UUID] = None
-    product_id: Optional[UUID] = None
-    external_id: Optional[str] = None   # 원천 MES 식별자
-    event_name: str = "LotImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class BOMImportedEvent:
-    product_id: Optional[UUID] = None
-    bom_version_id: Optional[UUID] = None
-    external_id: Optional[str] = None   # 원천 PLM 식별자
-    event_name: str = "BOMImported"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
+# (Product ingest 이벤트 CustomerImported/BOMImported/ProductImported/LotImported 는
+#  구독자 부재로 전부 제거됨 — import_products 는 UPSERT만 수행하고 이벤트를 발행하지 않는다.)
 # ============================================================
 # Supplier (B)
 # ============================================================
@@ -125,7 +80,7 @@ class SupplierDocumentUploadedEvent:
     발행: B(supplier) → 수신: E(submission)가 submission_documents 행 생성 + 파싱 큐 enqueue.
 
     s3_key: files 버킷 내 키(영구 URL 아님). data_gateway가 이 키로 바이트를 읽어 파싱한다.
-    doc_kind: 'business_reg' | 'environmental_report' | 'self_assessment'
+    doc_kind: 'business_reg' | 'environmental_report' | 'self_assessment' | 'material_composition'
     """
     supplier_id: Optional[UUID] = None
     s3_key: Optional[str] = None
@@ -212,6 +167,32 @@ class SubmissionStatusChangedEvent:
 # ============================================================
 # SupplyChain / Geo (D · 영수) — 본 도메인에서 실제 발행
 # ============================================================
+@dataclass
+class SupplyChainGapDetectedEvent:
+    """
+    공급망 맵 gap→자료요청 트리거. 어떤 협력사 노드가 규제 필수 필드를 미보유해서
+    '자료 제출 요청'이 필요하다는 사실을 발행한다. (노드 1개당 이벤트 1건)
+
+    발행: D(supplychain) — POST /trigger-data-requests 는 gap을 계산해 이 이벤트만
+      노드별로 발행하고 즉시 202를 반환한다(요청 생성은 동기 아님).
+    수신: E(submission)가 create_and_request_submission 으로 data_request 를 생성.
+      → submission 이 자기 트랜잭션·커밋 소유. supplychain 은 submission repository/service
+        를 직접 import 하지 않는다(규칙 #4 정면 준수).
+
+    requester_user_id / actor_id / due_date 는 트리거 요청 맥락(누가·언제까지)이라
+      payload 에 실어 submission 이 그대로 사용한다. requested_data_type 은 미보유 필드명
+      CSV(예: "carbon_intensity,mine_coordinates").
+    """
+    product_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
+    requested_data_type: Optional[str] = None
+    requester_user_id: Optional[UUID] = None
+    actor_id: Optional[UUID] = None
+    due_date: Optional[datetime] = None
+    event_name: str = "SupplyChainGapDetected"
+    occurred_at: datetime = field(default_factory=_now_utc)
+
+
 @dataclass
 class GeoRiskDetectedEvent:
     """
@@ -320,31 +301,27 @@ class ValidationResult:
 
 
 # ============================================================
-# RecycledMaterialsSchema (B·C 공유 — 도메인 간 계약)
-#
-# supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
-# B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
-#
-# 사용법:
-#   저장(B): RecycledMaterialsSchema(co=18.0, ni=7.0).model_dump(exclude_none=True)
-#   검증(C): RecycledMaterialsSchema(**row.recycled_materials)
+# [비활성화 2026-07] RecycledMaterialsSchema — 재활용 함량 판정 제거에 따라 폐기.
+#   재활용 함량은 입력받는 값이 아니고(마스터폼·문서추출·전용 테이블 부재),
+#   supplier_recycler_details 테이블도 스키마에 존재하지 않던 dangling 계약이었음.
+#   compliance.py judge_recycled_content 비활성화와 동기화. 입력 경로가 생기면 복구할 것.
 # ============================================================
-class RecycledMaterialsSchema(BaseModel):
-    """
-    supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
-    key = 소문자 원소기호(co/ni/li/pb), value = 재활용 함량(%).
-    B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
-    """
-    co: Optional[float] = None   # 코발트 함량 %
-    ni: Optional[float] = None   # 니켈 함량 %
-    li: Optional[float] = None   # 리튬 함량 %
-    pb: Optional[float] = None   # 납 함량 %
-
-    @field_validator("co", "ni", "li", "pb")
-    @classmethod
-    def _pct_range(cls, v):
-        if v is not None and not (0 <= v <= 100):
-            raise ValueError("재활용 함량은 0~100% 범위여야 합니다")
-        return v
-
-    model_config = {"extra": "forbid"}   # 정의 안 된 key 저장 시 에러 → 오타·오용 즉시 발견
+# class RecycledMaterialsSchema(BaseModel):
+#     """
+#     supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
+#     key = 소문자 원소기호(co/ni/li/pb), value = 재활용 함량(%).
+#     B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
+#     """
+#     co: Optional[float] = None   # 코발트 함량 %
+#     ni: Optional[float] = None   # 니켈 함량 %
+#     li: Optional[float] = None   # 리튬 함량 %
+#     pb: Optional[float] = None   # 납 함량 %
+#
+#     @field_validator("co", "ni", "li", "pb")
+#     @classmethod
+#     def _pct_range(cls, v):
+#         if v is not None and not (0 <= v <= 100):
+#             raise ValueError("재활용 함량은 0~100% 범위여야 합니다")
+#         return v
+#
+#     model_config = {"extra": "forbid"}   # 정의 안 된 key 저장 시 에러 → 오타·오용 즉시 발견

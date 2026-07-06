@@ -50,7 +50,6 @@ class FileRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    # [REVERT-NON-SUPPLIER:BEGIN] context별 파일 목록(환경성적서 첨부 조회용). files=공통(비-supplier) 도메인.
     async def list_by_context(
         self, context: str, tenant_id: Optional[uuid.UUID] = None
     ):
@@ -61,7 +60,6 @@ class FileRepository:
         stmt = stmt.order_by(FileObject.created_at.desc())
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
-    # [REVERT-NON-SUPPLIER:END]
 
     async def delete(self, obj: FileObject) -> None:
         await self.db.delete(obj)

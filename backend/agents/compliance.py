@@ -141,9 +141,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 REGULATION_BY_DESTINATION: dict[str, list[str]] = {
-    # EU 시장 진입 제품 — EU 규제 8종
+    # EU 시장 진입 제품 — EU 규제 (재활용 EU_BATTERY 제외 → 실검사 7종)
     "EU": [
-        "EU_BATTERY",
+        # "EU_BATTERY",  ← [비활성화 2026-07] 재활용 함량: 입력 경로 없어 판정 제외
         "EU_BATTERY_ART7",
         "EU_BATTERY_ART47",
         "EUDR",
@@ -161,7 +161,7 @@ REGULATION_BY_DESTINATION: dict[str, list[str]] = {
     "KR": [],
     # EU·US 동시 납품 — 합집합 (CONFLICT_MINERALS 중복 1회)
     "BOTH": [
-        "EU_BATTERY",
+        # "EU_BATTERY",  ← [비활성화 2026-07] 재활용 함량: 입력 경로 없어 판정 제외
         "EU_BATTERY_ART7",
         "EU_BATTERY_ART47",
         "EUDR",
@@ -574,12 +574,16 @@ _CARBON_THRESHOLD_WARNING:   float = 75.0   # 초과 시 compliance_warning
 # EU 배터리법 2023/1542 Annex XII — 재활용 함량 최소 기준 (단위: %)
 # key: 소문자 원소기호 (events/types.py RecycledMaterialsSchema 컨벤션 — B·C 공유)
 # 2031년 강화 전 현행 기준.
-_RECYCLED_CONTENT_MIN: dict[str, float] = {
-    "co": 16.0,  # 코발트
-    "ni":  6.0,  # 니켈
-    "li":  6.0,  # 리튬
-    "pb": 85.0,  # 납
-}
+# [비활성화 2026-07] EU 배터리법 재활용 함량 임계치 — 입력받는 값이 아니라 판정 대상에서 제외.
+#   재활용 함량은 마스터폼 입력·문서추출 어디에서도 들어오지 않고, 전용 테이블
+#   (supplier_recycler_details)도 스키마에 존재하지 않아 judge가 항상 compliance_reject로 떨어졌음.
+#   입력 경로가 생기면 이 상수와 아래 judge_recycled_content, REGULATION_JUDGES 매핑을 복구할 것.
+# _RECYCLED_CONTENT_MIN: dict[str, float] = {
+#     "co": 16.0,  # 코발트
+#     "ni":  6.0,  # 니켈
+#     "li":  6.0,  # 리튬
+#     "pb": 85.0,  # 납
+# }
 
 
 # ---------------------------------------------------------------------------
@@ -657,7 +661,7 @@ async def judge_carbon_footprint(
                     / NULLIF(SUM(sr.ratio_percentage), 0) AS weighted_carbon_intensity
             FROM batches b
             JOIN supply_chain_map scm ON scm.bom_version_id = b.bom_version_id
-            JOIN supply_ratio sr      ON sr.edge_id = scm.edge_id  -- [REVERT-NON-SUPPLIER] supplier 외 — map_id→edge_id 개명
+            JOIN supply_ratio sr      ON sr.edge_id = scm.edge_id
             JOIN factory_carbon_declarations fcd
                  ON fcd.factory_id = sr.factory_id AND fcd.is_active = TRUE
             WHERE b.batch_id = :batch_id
@@ -677,7 +681,7 @@ async def judge_carbon_footprint(
             SELECT COUNT(*) AS missing_declaration_count
             FROM batches b
             JOIN supply_chain_map scm ON scm.bom_version_id = b.bom_version_id
-            JOIN supply_ratio sr      ON sr.edge_id = scm.edge_id  -- [REVERT-NON-SUPPLIER] supplier 외 — map_id→edge_id 개명
+            JOIN supply_ratio sr      ON sr.edge_id = scm.edge_id
             LEFT JOIN factory_carbon_declarations fcd
                  ON fcd.factory_id = sr.factory_id AND fcd.is_active = TRUE
             WHERE b.batch_id = :batch_id
@@ -738,72 +742,75 @@ async def judge_carbon_footprint(
     return result
 
 
-@trace_tool("compliance_judge_RECYCLED")
-async def judge_recycled_content(
-    batch_id: str, context: dict, db: AsyncSession
-) -> dict:
-    """
-    EU 배터리법 재활용 함량 검증. (Day2)
-
-    판정 기준 (EU 2023/1542 Annex XII):
-      - recycled_materials 내 광물별 함량 < _RECYCLED_CONTENT_MIN → compliance_violation
-      - recycled_content_ratio 있으나 광물 특정 불가               → compliance_warning
-      - 기준 충족                                                   → compliance_passed
-      - 데이터 전체 없음                                            → compliance_reject + needs_human_review
-
-    미구현 사항:
-      - recycling_efficiency(효율%) 검증 — 2025-12 시행 전 스프린트에서 처리.
-        schema에 recycling_efficiency 컬럼 추가됨(Day2). extraction 연동 후 구현 예정.
-    """
-    clauses = await search_regulations(
-        "recycled content minimum threshold cobalt nickel lithium battery Annex XII",
-        "EU_BATTERY",
-        db,
-        top_k=5,
-    )
-
-    ratio: float | None = context.get("recycled_content_ratio")
-    materials: dict     = context.get("recycled_materials") or {}
-
-    # 사전 판정: 데이터 전체 누락
-    if ratio is None and not materials:
-        return {
-            "verdict":            "compliance_reject",
-            "needs_human_review": True,
-            "cited_clauses":      [],
-            "confidence_score":   0.0,
-            "reasoning_text": (
-                "recycled_content_ratio 와 recycled_materials 모두 없어요. "
-                "supplier_recycler_details 데이터를 확인해주세요."
-            ),
-        }
-
-    # 광물별 임계치 위반 사전 계산 — LLM 힌트로 제공
-    threshold_violations: list[str] = [
-        f"{mineral.upper()} {materials[mineral]}% < 최소 {min_pct}%"
-        for mineral, min_pct in _RECYCLED_CONTENT_MIN.items()
-        if mineral in materials and float(materials[mineral]) < min_pct
-    ]
-
-    enriched_context = {
-        **context,
-        "recycled_content_min_thresholds": _RECYCLED_CONTENT_MIN,
-        "threshold_violations_hint":       threshold_violations,
-        "pre_verdict_hint": "violation" if threshold_violations else "passed",
-    }
-
-    try:
-        result = await _call_llm_for_verdict("EU_BATTERY", clauses, enriched_context)
-    except (json.JSONDecodeError, KeyError, Exception) as exc:
-        return {
-            "verdict":            "compliance_reject",
-            "needs_human_review": True,
-            "cited_clauses":      [],
-            "confidence_score":   0.0,
-            "reasoning_text":     f"LLM 호출 실패: {exc}",
-        }
-
-    return _validate_cited_clauses(result, "EU_BATTERY")
+# [비활성화 2026-07] EU 배터리법 재활용 함량 judge — 입력받는 값이 아니라 판정 대상에서 제외.
+#   REGULATION_JUDGES 매핑·REGULATION_BY_DESTINATION·_build_judge_context 키도 함께 주석 처리됨.
+#   입력 경로(전용 테이블/추출/마스터폼)가 생기면 아래 전체를 복구할 것.
+# @trace_tool("compliance_judge_RECYCLED")
+# async def judge_recycled_content(
+#     batch_id: str, context: dict, db: AsyncSession
+# ) -> dict:
+#     """
+#     EU 배터리법 재활용 함량 검증. (Day2)
+#
+#     판정 기준 (EU 2023/1542 Annex XII):
+#       - recycled_materials 내 광물별 함량 < _RECYCLED_CONTENT_MIN → compliance_violation
+#       - recycled_content_ratio 있으나 광물 특정 불가               → compliance_warning
+#       - 기준 충족                                                   → compliance_passed
+#       - 데이터 전체 없음                                            → compliance_reject + needs_human_review
+#
+#     미구현 사항:
+#       - recycling_efficiency(효율%) 검증 — 2025-12 시행 전 스프린트에서 처리.
+#         schema에 recycling_efficiency 컬럼 추가됨(Day2). extraction 연동 후 구현 예정.
+#     """
+#     clauses = await search_regulations(
+#         "recycled content minimum threshold cobalt nickel lithium battery Annex XII",
+#         "EU_BATTERY",
+#         db,
+#         top_k=5,
+#     )
+#
+#     ratio: float | None = context.get("recycled_content_ratio")
+#     materials: dict     = context.get("recycled_materials") or {}
+#
+#     # 사전 판정: 데이터 전체 누락
+#     if ratio is None and not materials:
+#         return {
+#             "verdict":            "compliance_reject",
+#             "needs_human_review": True,
+#             "cited_clauses":      [],
+#             "confidence_score":   0.0,
+#             "reasoning_text": (
+#                 "recycled_content_ratio 와 recycled_materials 모두 없어요. "
+#                 "supplier_recycler_details 데이터를 확인해주세요."
+#             ),
+#         }
+#
+#     # 광물별 임계치 위반 사전 계산 — LLM 힌트로 제공
+#     threshold_violations: list[str] = [
+#         f"{mineral.upper()} {materials[mineral]}% < 최소 {min_pct}%"
+#         for mineral, min_pct in _RECYCLED_CONTENT_MIN.items()
+#         if mineral in materials and float(materials[mineral]) < min_pct
+#     ]
+#
+#     enriched_context = {
+#         **context,
+#         "recycled_content_min_thresholds": _RECYCLED_CONTENT_MIN,
+#         "threshold_violations_hint":       threshold_violations,
+#         "pre_verdict_hint": "violation" if threshold_violations else "passed",
+#     }
+#
+#     try:
+#         result = await _call_llm_for_verdict("EU_BATTERY", clauses, enriched_context)
+#     except (json.JSONDecodeError, KeyError, Exception) as exc:
+#         return {
+#             "verdict":            "compliance_reject",
+#             "needs_human_review": True,
+#             "cited_clauses":      [],
+#             "confidence_score":   0.0,
+#             "reasoning_text":     f"LLM 호출 실패: {exc}",
+#         }
+#
+#     return _validate_cited_clauses(result, "EU_BATTERY")
 
 
 # 나머지 실판정 3종 RAG 쿼리 힌트
@@ -845,8 +852,8 @@ async def judge_generic(
 REGULATION_JUDGES: dict[str, Callable] = {
     # 시연 핵심 — 전용 judge
     "UFLPA":            judge_uflpa,
-    # Day2 신규 — 탄소발자국·재활용 전용 judge
-    "EU_BATTERY":       judge_recycled_content,
+    # Day2 신규 — 탄소발자국 전용 judge
+    # "EU_BATTERY":       judge_recycled_content,  ← [비활성화 2026-07] 재활용 함량: 입력 경로 없음
     "EU_BATTERY_ART7":  judge_carbon_footprint,
     # 실판정 3종 — 공통 judge (regulation_code를 인자로 넘김)
     "EU_BATTERY_ART47": judge_generic,
@@ -975,8 +982,9 @@ def _build_judge_context(state) -> dict:
         "geo_risk_flags":          geo.get("risk_flags", []),
 
         # ── Day2 신규 키 ──
-        "recycled_content_ratio":  extraction.get("recycled_content_ratio"),
-        "recycled_materials":      extraction.get("recycled_materials"),
+        # [비활성화 2026-07] 재활용 함량: 입력 경로 없어 judge 제외 (extraction에도 안 채워짐)
+        # "recycled_content_ratio":  extraction.get("recycled_content_ratio"),
+        # "recycled_materials":      extraction.get("recycled_materials"),
     }
 
 
@@ -1040,7 +1048,7 @@ async def compliance_node(state: BatchState) -> BatchState:
             # stub(2-인자) / Day2 전용(3-인자) / UFLPA 전용(3-인자) / generic(4-인자) 분기
             if reg_code in _STUB_REGULATIONS:
                 result = await judge_fn(reg_code)
-            elif reg_code in ("UFLPA", "EU_BATTERY_ART7", "EU_BATTERY"):
+            elif reg_code in ("UFLPA", "EU_BATTERY_ART7"):   # EU_BATTERY(재활용) 제외 — 입력 경로 없음
                 result = await judge_fn(batch_id, context, db)
             else:
                 result = await judge_fn(batch_id, reg_code, context, db)

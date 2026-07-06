@@ -25,7 +25,7 @@ from backend.domains.supplychain.service import SupplyChainService
 logger = logging.getLogger(__name__)
 
 # 원청(발주사) 역할 — 최종 검증 알림 수신 대상. (협력사 역할 supplier_* 제외)
-_OEM_ROLES = ("owner_esg", "owner_purchasing", "admin")
+_PRIME_ROLES = ("owner_esg", "owner_purchasing", "admin")
 
 
 async def notify_final_validation_ready(payload: dict) -> None:
@@ -59,8 +59,23 @@ async def notify_final_validation_ready(payload: dict) -> None:
         if not summary.get("ready_for_final"):
             return
 
+        # 딥링크 target 좌표 — 이 회차 맵(map_id)을 특정. supply_chain_maps.UNIQUE(bom_version_id)라
+        # bom_version_id 하나로 map_id가 유일하게 결정된다. 맵 전체 완결 알림이므로 협력사 포커스는 없음
+        # (프론트가 productId·bomVersionId로 그 맵을 연다). map_id는 추적·검증용으로 함께 싣는다.
+        map_id = None
+        if bom_version_id:
+            map_id = (await db.execute(
+                text("SELECT map_id FROM supply_chain_maps WHERE bom_version_id = :b"),
+                {"b": bom_version_id},
+            )).scalar()
+        target = {"productId": product_id}
+        if bom_version_id:
+            target["bomVersionId"] = bom_version_id
+        if map_id:
+            target["mapId"] = str(map_id)
+
         # 원청 담당자 조회 (역할은 하드코딩 상수 → 안전하게 인라인)
-        roles_sql = ", ".join(f"'{r}'" for r in _OEM_ROLES)
+        roles_sql = ", ".join(f"'{r}'" for r in _PRIME_ROLES)
         oem_users = (await db.execute(
             text(f"""
                 SELECT user_id FROM users
@@ -88,5 +103,6 @@ async def notify_final_validation_ready(payload: dict) -> None:
                 f"(협력사 {summary.get('supplier_count')}곳 · 최대 {summary.get('max_tier')}차)"
             ),
             dedup_key=f"final_validation:{scope}:{uid}",
+            target=target,
         )
     logger.info("[final_validation] 최종 검증 알림 enqueue product=%s users=%d", product_id, len(oem_users))
