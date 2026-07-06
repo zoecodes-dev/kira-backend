@@ -764,23 +764,35 @@ async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict
     if await repository.get_supplier_by_id(db, supplier_id) is None:
         return None
     comp = await repository.get_completeness(db, supplier_id)
-    if comp is None:
-        comp = {
-            "required_field_count": None,
-            "filled_field_count": None,
-            "completion_rate": None,
-            "missing_fields": [],
-            "last_updated_at": None,
-        }
     # provider_type별 추적 필드 키(🔴필수+🟡권장 전체 — 프론트 섹션 총계·'해당 없음' 판정용).
     #   제련소는 공급망 도출 금속을 반영. 권장 필드도 포함해 완성도 표시에서 티 나지 않게 한다.
     required: List[str] = []
     snap = await repository.get_completeness_inputs(db, supplier_id)
+    handled = await _handled_metals(db, supplier_id) if snap is not None else set()
     if snap is not None:
-        blocking, recommended = _classify_fields(
-            snap.get("provider_type"), await _handled_metals(db, supplier_id)
-        )
+        blocking, recommended = _classify_fields(snap.get("provider_type"), handled)
         required = blocking + recommended
+    if comp is None:
+        # 저장된 집계가 없으면(시드/최초 집계 전) 현재 스냅샷으로 즉시 계산해 반환한다.
+        #   특히 광산(miner)은 required=0 → required_field_count=0(≠null)이라야 프론트가
+        #   백엔드 SSOT 경로로 '해당 없음'을 그린다(폴백 경로의 오탐 '미입력' 방지).
+        if snap is not None:
+            r = _compute_completeness(snap, handled)
+            comp = {
+                "required_field_count": r["required"],
+                "filled_field_count": r["filled"],
+                "completion_rate": r["rate"],
+                "missing_fields": r["missing"],
+                "last_updated_at": None,
+            }
+        else:
+            comp = {
+                "required_field_count": None,
+                "filled_field_count": None,
+                "completion_rate": None,
+                "missing_fields": [],
+                "last_updated_at": None,
+            }
     return {"supplier_id": supplier_id, "required_fields": required, **comp}
 
 

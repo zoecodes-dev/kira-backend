@@ -1120,12 +1120,12 @@ UPDATE suppliers SET business_reg_no = '106-86-40006', address = '경상남도 �
 WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a';
 
 UPDATE suppliers SET business_reg_no = 'CL-RUT-770511', address = 'Antofagasta Region, Salar de Atacama Industrial Zone, Chile',
-  core_minerals = '{"Li":99.6}'::jsonb,
+  core_minerals = '{"Li":2.8}'::jsonb,   -- 원광 Li 함량(순도 99 아님). 광산 회사값=원광등급, supply_chain_map 엣지값(Li 2.8)과 일치.
   business_reg_doc_url = 's3://kira-docs/suppliers/a9999999/biz_reg.pdf'
 WHERE supplier_id = 'a9999999-9999-4000-8000-000000000009';
 
 UPDATE suppliers SET business_reg_no = 'AU-ABN-51824753556', address = 'Western Australia, Greenbushes Mining District, Australia',
-  core_minerals = '{"Li":99.8}'::jsonb,
+  core_minerals = '{"Li":2.8}'::jsonb,   -- 원광 Li 함량(스포듀민 정광 ~6% Li2O 환산). 순도 99 아님 — 엣지값과 일치.
   business_reg_doc_url = 's3://kira-docs/suppliers/a3333333/biz_reg.pdf'
 WHERE supplier_id = 'a3333333-3333-4000-8000-000000000003';
 
@@ -2231,3 +2231,55 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) V
 ('da777777-0000-4000-8000-000000000003', '7d000000-0000-4000-8000-000000000003', 40.00, 16800, 'kg'),
 ('da888888-0000-4000-8000-000000000004', '7d000000-0000-4000-8000-000000000004', 40.00,  8000, 'kg'),
 ('da999999-0000-4000-8000-000000000005', '7d000000-0000-4000-8000-000000000005', 40.00, 16800, 'kg');
+
+
+-- ============================================================
+-- 27. 광산/사업장 데이터 정합 (PM 지적) — 전부 멱등(idempotent), append 전용
+--   ① 사업장 원산지 주소(supplier_factories.address) 백필: 좌표·region만 있고 텍스트 주소가
+--      전부 NULL이라 '위치(원산지)' 표시가 공란이던 것 보완. 국내='region, 대한민국', 해외='region, Country'.
+--      (상세 지번은 데모 범위 밖 — Geo audit SSOT는 location 좌표. 회사주소 suppliers.address와 별개.)
+--   ② 광산(mining) 사업장 '공장 담당자' 제거: 광산은 자체 입력 주체가 아니라 제련소(직상위)가
+--      원산지·광물을 대신 제공하는 구조 → 광산 사업장에 factory_manager가 붙는 건 모델상 부정합.
+--   (리튬 광산 회사값 core_minerals 99.x→2.8 정정은 위 섹션 19-1 원본 라인에서 인라인 수정함.)
+-- ============================================================
+
+-- ① 원산지 주소 백필 (address가 비어있는 전체 사업장)
+UPDATE supplier_factories
+SET address = region || ', ' || CASE country
+    WHEN 'KR' THEN '대한민국'
+    WHEN 'CN' THEN 'China'
+    WHEN 'ID' THEN 'Indonesia'
+    WHEN 'AU' THEN 'Australia'
+    WHEN 'CL' THEN 'Chile'
+    WHEN 'ZM' THEN 'Zambia'
+    WHEN 'BR' THEN 'Brazil'
+    WHEN 'MZ' THEN 'Mozambique'
+    ELSE country
+  END
+WHERE address IS NULL AND region IS NOT NULL;
+
+-- ② 광산 사업장 공장 담당자 제거 (입력 주체 아님 — 제련소가 대신 제공)
+UPDATE supplier_factories
+SET factory_manager_name  = NULL,
+    factory_manager_role  = NULL,
+    factory_manager_phone = NULL,
+    factory_manager_email = NULL
+WHERE factory_role = 'mining';
+
+-- ③ 광산 완성도 행 시드: 광산은 입력 주체가 아니라 required=0 → 100%('해당 없음'). 저장 행이
+--    없으면 프론트가 폴백 경로로 regulation/documents를 오탐 '미입력'으로 표시하므로, 명시적으로
+--    required=0 행을 넣어 '해당 없음'으로 렌더되게 한다. (백엔드 get_completeness도 행 없을 때
+--    즉시계산하도록 보강했으나, 그 배포 전에도 재시드만으로 맞게 뜨도록 데이터로도 보장.)
+--    (entity_type,entity_id) 유니크 제약이 없어 NOT EXISTS로 멱등 처리.
+INSERT INTO data_completeness_status
+  (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields)
+SELECT 'supplier', s.supplier_id, 0, 0, 100.00, '[]'::jsonb
+FROM suppliers s
+WHERE s.provider_type = 'miner'
+  AND NOT EXISTS (
+    SELECT 1 FROM data_completeness_status d
+    WHERE d.entity_type = 'supplier' AND d.entity_id = s.supplier_id
+  );
+
+
+-- ============================================================
