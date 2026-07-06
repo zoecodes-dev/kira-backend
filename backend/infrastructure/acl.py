@@ -26,22 +26,23 @@ from backend.infrastructure.auth import CurrentUser, get_current_user
 from backend.infrastructure.database import get_db
 
 # 이 역할들은 공급망 ACL 적용 면제 (전체 데이터 접근 허용).
-# 원청측 역할 — chk_user_role 정식 어휘(영문)와 정합. (기존 한글 값은 어떤 role과도 매칭되지 않던 버그)
-_EXEMPT_ROLES = {"admin", "owner_esg", "owner_purchasing"}
+# 원청(OEM)측 역할 — chk_user_role 정식 어휘(영문)와 정합. (기존 한글 값은 어떤 role과도 매칭되지 않던 버그)
+# [REVERT-NON-SUPPLIER] supplier 외(infrastructure) — 자료요청 기능 활성화용 수정. 최종작업 시 주석처리(소유자 적용 전제).
+_EXEMPT_ROLES = {"admin", "owner_esg", "owner_purchasing"}  # [REVERT-NON-SUPPLIER] 원복: {"관리자", "원청", "감사자"}
 
 
 async def get_supplier_id_for_user(user_id: UUID, db: AsyncSession) -> UUID | None:
     """user_id에 연결된 협력사 supplier_id를 반환한다. 없으면 None.
 
-    users.tenant_id == suppliers.tenant_id 조인으로 매핑.
+    users.supplier_id 컬럼을 직접 사용한다.
+    (기존 tenant_id 조인 방식은 tenant 하나에 협력사가 여러 개 걸리는 경우
+     LIMIT 1이 임의의 협력사를 골라버리는 버그가 있었음 — users.supplier_id로 대체)
     """
     row = (await db.execute(
         text("""
-            SELECT s.supplier_id
-            FROM suppliers s
-            JOIN users u ON s.tenant_id = u.tenant_id
-            WHERE u.user_id = :uid
-            LIMIT 1
+            SELECT supplier_id
+            FROM users
+            WHERE user_id = :uid
         """),
         {"uid": user_id},
     )).one_or_none()
