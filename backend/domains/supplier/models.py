@@ -481,6 +481,13 @@ class SuppliedItemDTO(BaseModel):
     # [공급원 변경 자진신고] declare_source_change 실호출용 BOM 컨텍스트.
     bom_version_id: Optional[uuid.UUID] = None
     bom_version_number: Optional[str] = None
+    # [맵별 탭] 협력사 페이지 맵(=bom_version)별 탭 구성용 product 컨텍스트 + 맵별 상이 데이터.
+    product_id: Optional[uuid.UUID] = None
+    model_name: Optional[str] = None       # 차종 (예: iX3 50) — 탭 라벨
+    product_name: Optional[str] = None
+    customer_name: Optional[str] = None    # 고객사 (예: BMW) — 탭 라벨
+    hop_level: Optional[int] = None        # 이 맵에서 협력사 차수
+    core_minerals: Optional[dict] = None   # 이 맵(엣지)의 핵심광물 함량 %; 없으면 회사값 폴백
     model_config = {"from_attributes": True}
 
 

@@ -1072,15 +1072,22 @@ INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quan
 --     Sad 시나리오(위반 판정)의 서사 그 자체 — 채우면 오히려 시나리오가 깨짐.
 --   · Unverified Precursor Trading(abababab): Gray 시나리오의 "미확인 트레이더".
 --     원산지·서류 불명이 이름 그대로의 의미 — 공장·서류 미보유가 정상.
---   · 한양셀 core_minerals: 이전 세션에서 마스터폼으로 직접 수정한 값 — 덮어쓰지 않음.
+--   · 한양셀 core_minerals: fresh-seed에서 빈칸이던 것 → 19-1에서 peer 셀과 동일 NCM811로 채움(아래).
 -- ============================================================
 
 -- 19-1. 기준정보 백필 (사업자등록번호/주소/서류 URL)
 UPDATE suppliers SET business_reg_no = '101-86-40001', address = '경상북도 포항시 남구 오천읍 포항산단로 55',
+  -- [fresh-seed] 최상위 셀(한양셀) 회사 기본값 채움 — 마스터폼 미입력 상태에서 소재구성이 빈칸이던 문제 정정.
+  --   다른 셀(우진셀·우진배터리)과 동일 NCM811 조성. 제품별 상이값은 supply_chain_map 엣지 override가 담당.
+  core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb,
   business_reg_doc_url = 's3://kira-docs/suppliers/a1111111/biz_reg.pdf',
   environmental_report_url = 's3://kira-docs/suppliers/a1111111/env_report.pdf',
   self_assessment_doc_url = 's3://kira-docs/suppliers/a1111111/self_assess.pdf'
 WHERE supplier_id = 'a1111111-1111-4000-8000-000000000001';
+
+-- [fresh-seed] 원청(KIRA, 완제품 팩) 회사값 채움 — 고객사 데이터 다운로드(DPP/엑셀)에 완제품 핵심광물로 들어감.
+UPDATE suppliers SET core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb
+WHERE supplier_id = 'a0000000-0000-4000-8000-000000000000';
 
 UPDATE suppliers SET business_reg_no = '102-86-40002', address = '울산광역시 울주군 온산읍 산업로 700',
   core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb,
@@ -1120,12 +1127,12 @@ UPDATE suppliers SET business_reg_no = '106-86-40006', address = '경상남도 �
 WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a';
 
 UPDATE suppliers SET business_reg_no = 'CL-RUT-770511', address = 'Antofagasta Region, Salar de Atacama Industrial Zone, Chile',
-  core_minerals = '{"Li":99.6}'::jsonb,
+  core_minerals = '{"Li":2.8}'::jsonb,   -- 원광 Li 함량(순도 99 아님). 광산 회사값=원광등급, supply_chain_map 엣지값(Li 2.8)과 일치.
   business_reg_doc_url = 's3://kira-docs/suppliers/a9999999/biz_reg.pdf'
 WHERE supplier_id = 'a9999999-9999-4000-8000-000000000009';
 
 UPDATE suppliers SET business_reg_no = 'AU-ABN-51824753556', address = 'Western Australia, Greenbushes Mining District, Australia',
-  core_minerals = '{"Li":99.8}'::jsonb,
+  core_minerals = '{"Li":2.8}'::jsonb,   -- 원광 Li 함량(스포듀민 정광 ~6% Li2O 환산). 순도 99 아님 — 엣지값과 일치.
   business_reg_doc_url = 's3://kira-docs/suppliers/a3333333/biz_reg.pdf'
 WHERE supplier_id = 'a3333333-3333-4000-8000-000000000003';
 
@@ -2231,3 +2238,115 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) V
 ('da777777-0000-4000-8000-000000000003', '7d000000-0000-4000-8000-000000000003', 40.00, 16800, 'kg'),
 ('da888888-0000-4000-8000-000000000004', '7d000000-0000-4000-8000-000000000004', 40.00,  8000, 'kg'),
 ('da999999-0000-4000-8000-000000000005', '7d000000-0000-4000-8000-000000000005', 40.00, 16800, 'kg');
+
+
+-- ============================================================
+-- 27. 광산/사업장 데이터 정합 (PM 지적) — 전부 멱등(idempotent), append 전용
+--   ① 사업장 원산지 주소(supplier_factories.address) 백필: 좌표·region만 있고 텍스트 주소가
+--      전부 NULL이라 '위치(원산지)' 표시가 공란이던 것 보완. 국내='region, 대한민국', 해외='region, Country'.
+--      (상세 지번은 데모 범위 밖 — Geo audit SSOT는 location 좌표. 회사주소 suppliers.address와 별개.)
+--   ② 광산(mining) 사업장 '공장 담당자' 제거: 광산은 자체 입력 주체가 아니라 제련소(직상위)가
+--      원산지·광물을 대신 제공하는 구조 → 광산 사업장에 factory_manager가 붙는 건 모델상 부정합.
+--   (리튬 광산 회사값 core_minerals 99.x→2.8 정정은 위 섹션 19-1 원본 라인에서 인라인 수정함.)
+-- ============================================================
+
+-- ① 원산지 주소 백필 (address가 비어있는 전체 사업장)
+UPDATE supplier_factories
+SET address = region || ', ' || CASE country
+    WHEN 'KR' THEN '대한민국'
+    WHEN 'CN' THEN 'China'
+    WHEN 'ID' THEN 'Indonesia'
+    WHEN 'AU' THEN 'Australia'
+    WHEN 'CL' THEN 'Chile'
+    WHEN 'ZM' THEN 'Zambia'
+    WHEN 'BR' THEN 'Brazil'
+    WHEN 'MZ' THEN 'Mozambique'
+    ELSE country
+  END
+WHERE address IS NULL AND region IS NOT NULL;
+
+-- ② 광산 사업장 공장 담당자 제거 (입력 주체 아님 — 제련소가 대신 제공)
+UPDATE supplier_factories
+SET factory_manager_name  = NULL,
+    factory_manager_role  = NULL,
+    factory_manager_phone = NULL,
+    factory_manager_email = NULL
+WHERE factory_role = 'mining';
+
+-- ③ 광산 완성도 행 시드: 광산은 입력 주체가 아니라 required=0 → 100%('해당 없음'). 저장 행이
+--    없으면 프론트가 폴백 경로로 regulation/documents를 오탐 '미입력'으로 표시하므로, 명시적으로
+--    required=0 행을 넣어 '해당 없음'으로 렌더되게 한다. (백엔드 get_completeness도 행 없을 때
+--    즉시계산하도록 보강했으나, 그 배포 전에도 재시드만으로 맞게 뜨도록 데이터로도 보장.)
+--    (entity_type,entity_id) 유니크 제약이 없어 NOT EXISTS로 멱등 처리.
+INSERT INTO data_completeness_status
+  (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields)
+SELECT 'supplier', s.supplier_id, 0, 0, 100.00, '[]'::jsonb
+FROM suppliers s
+WHERE s.provider_type = 'miner'
+  AND NOT EXISTS (
+    SELECT 1 FROM data_completeness_status d
+    WHERE d.entity_type = 'supplier' AND d.entity_id = s.supplier_id
+  );
+
+
+-- ============================================================
+-- 28. iX3(e1111111) 풀트리 레퍼런스 — Cell 밑을 양극+음극 전 갈래로 완성 (PM 요청)
+--   기존 iX3는 리튬 단일 말단(CAM→한중제련 LiOH→호주리튬)만 있었다. 이 제품 하나를 표준
+--   레퍼런스로 삼아 부품트리(parts) 구조 그대로 supplier 체인을 펼친다. 기존 엣지는 건드리지
+--   않고 아래 가지만 append(멱등: 엣지 PK / supplier PK / NOT EXISTS).
+--     · 양극: CAM(동성) →(신규)→ 전구체(동신) → REF-NI/CO/MN(제련) → Ni/Co/Mn 광산
+--       (리튬 가지 CAM→LiOH→Li광산은 기존 유지 — CAM의 두 입력 = 전구체 + LiOH)
+--     · 음극: Cell(한양셀) → ANO(한빛음극재) → 구형화(Qingdao) → 천연흑연광(Balama)
+--   망간(Mn) 제련·광산 노드는 미존재라 신설. 나머지(전구체·Ni/Co 제련·광산·흑연체인)는 재사용.
+--   엣지 core_minerals = 그 엣지에 흐르는 부품의 원소 질량%(제련=정제염 함량, 광산=원광 등급).
+-- ============================================================
+
+-- 28-1. 신규 망간(Mn) 제련소 + 광산 (기존에 Mn 노드 부재 — 트리 완성용)
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'Zhao Lei CEO', 'smelter', '{"Mn":32.5}'::jsonb, 'CN', 'Hunan, Xiangtan Manganese Industrial Zone, China', 's3://kira-docs/suppliers/64666666/biz_reg.pdf', NULL, 74, 'supplier_verified', 'low'),
+('65666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'Pieter Botha CEO', 'miner', '{"Mn":38.0}'::jsonb, 'ZA', 'Northern Cape, Kalahari Manganese Field, South Africa', 's3://kira-docs/suppliers/65666666/biz_reg.pdf', NULL, 60, 'supplier_verified', 'low')
+ON CONFLICT (supplier_id) DO NOTHING;
+UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id = '64666666-0000-4000-8000-000000000006';
+
+-- 신규 사업장 (address 인라인 — 섹션 27 백필은 이 뒤 신설분을 못 잡으므로 직접 채움)
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, address, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
+('74666666-0000-4000-8000-000000000006', '64666666-0000-4000-8000-000000000006', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'Xiangtan, Hunan, China', 'CN', 'Hunan', ST_SetSRID(ST_MakePoint(112.944, 27.829), 4326), 'processing', 'BOTH', '["CRMA","CBAM"]'::jsonb, 100.00),
+('75666666-0000-4000-8000-000000000006', '65666666-0000-4000-8000-000000000006', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'Hotazel, Northern Cape, South Africa', 'ZA', 'Northern Cape', ST_SetSRID(ST_MakePoint(22.960, -27.220), 4326), 'mining', 'BOTH', '["CRMA","EUDR"]'::jsonb, 100.00)
+ON CONFLICT (factory_id) DO NOTHING;
+
+INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from)
+SELECT '65666666-0000-4000-8000-000000000006', 'Kalahari Manganese Mine', 'open_pit', 55000.00, ST_SetSRID(ST_MakePoint(22.960, -27.220), 4326), '2015-01-01'
+WHERE NOT EXISTS (SELECT 1 FROM supplier_miner_details WHERE supplier_id = '65666666-0000-4000-8000-000000000006');
+
+-- Mn 광산 완성도 행(입력 주체 아님 → required=0/100%). 섹션 27 ③은 이 신설 광산을 못 잡으므로 여기서.
+INSERT INTO data_completeness_status (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields)
+SELECT 'supplier', '65666666-0000-4000-8000-000000000006', 0, 0, 100.00, '[]'::jsonb
+WHERE NOT EXISTS (SELECT 1 FROM data_completeness_status d WHERE d.entity_type='supplier' AND d.entity_id='65666666-0000-4000-8000-000000000006');
+
+-- 28-2. iX3 트리 엣지 append (양극 전구체 가지 + 음극 흑연 가지)
+INSERT INTO supply_chain_map (edge_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+-- [양극] CAM(동성) → 전구체(동신) → Ni/Co/Mn 제련 → 광산
+('5b111111-0000-4000-8000-000000000001', 'e1111111-0000-4000-8000-000000000001', 'a2222222-2222-4000-8000-000000000002', '63111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000004', 4, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000002', 'e1111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '64333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000011', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000003', 'e1111111-0000-4000-8000-000000000001', '64333333-0000-4000-8000-000000000003', '65333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000008', 6, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000004', 'e1111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '64444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000012', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000005', 'e1111111-0000-4000-8000-000000000001', '64444444-0000-4000-8000-000000000004', '65444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000009', 6, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000006', 'e1111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '64666666-0000-4000-8000-000000000006', 'b1111111-0000-4000-8000-000000000013', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000007', 'e1111111-0000-4000-8000-000000000001', '64666666-0000-4000-8000-000000000006', '65666666-0000-4000-8000-000000000006', 'b1111111-0000-4000-8000-00000000000a', 6, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+-- [음극] Cell(한양셀) → ANO(한빛음극재) → 구형화(Qingdao) → 천연흑연광(Balama)
+('5b111111-0000-4000-8000-000000000008', 'e1111111-0000-4000-8000-000000000001', 'a1111111-1111-4000-8000-000000000001', '66111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000007', 3, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000009', 'e1111111-0000-4000-8000-000000000001', '66111111-0000-4000-8000-000000000001', '66222222-0000-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000014', 4, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-00000000000a', 'e1111111-0000-4000-8000-000000000001', '66222222-0000-4000-8000-000000000002', '66333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000015', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31')
+ON CONFLICT (edge_id) DO NOTHING;
+
+-- 28-3. 엣지 core_minerals(원소 질량%) — 부품별
+UPDATE supply_chain_map SET core_minerals = '{"Ni":50.8,"Co":6.4,"Mn":5.9}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000001'; -- PRE-NCM(전구체 수산화물)
+UPDATE supply_chain_map SET core_minerals = '{"Ni":22.3}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000002'; -- REF-NI(황산니켈)
+UPDATE supply_chain_map SET core_minerals = '{"Ni":1.8}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-000000000003'; -- MIN-NI(니켈 라테라이트 원광)
+UPDATE supply_chain_map SET core_minerals = '{"Co":20.9}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000004'; -- REF-CO(황산코발트)
+UPDATE supply_chain_map SET core_minerals = '{"Co":2.5}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-000000000005'; -- MIN-CO(코발트 원광)
+UPDATE supply_chain_map SET core_minerals = '{"Mn":32.5}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000006'; -- REF-MN(황산망간)
+UPDATE supply_chain_map SET core_minerals = '{"Mn":38.0}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000007'; -- MIN-MN(망간 원광)
+UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":95.0}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-000000000008'; -- ANO-GRAPHITE(음극활물질)
+UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":99.95}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000009'; -- PROC-GRAPHITE(구형화 정제)
+UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":10.0}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-00000000000a'; -- MIN-GRAPHITE(천연흑연 원광)

@@ -47,8 +47,36 @@ def create_access_token(
 
 # ----- 3. 토큰 검증 -----
 def verify_access_token(token: str) -> Optional[dict]:
-    """토큰 유효성·만료 검증. 성공 시 payload, 실패 시 None."""
+    """액세스 토큰 유효성·만료 검증. 성공 시 payload, 실패 시 None.
+    리프레시 토큰(type='refresh')이 액세스로 쓰이는 것을 막는다."""
     try:
-        return jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+        payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
     except JWTError:
         return None
+    if payload.get("type") == "refresh":
+        return None
+    return payload
+
+
+# ----- 4. 리프레시 토큰 발급/검증 -----
+#   무상태(테이블 없음): 액세스와 같은 시크릿으로 서명하되 type='refresh'로 구분한다.
+#   /auth/refresh 에서 이 토큰을 검증해 새 액세스를 발급한다.
+def create_refresh_token(data: dict) -> str:
+    """긴 만료의 리프레시 JWT 발급 (type='refresh')."""
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=config.REFRESH_TOKEN_EXPIRE_MINUTES
+    )
+    to_encode.update({"exp": expire, "type": "refresh"})
+    return jwt.encode(to_encode, config.SECRET_KEY, algorithm=config.ALGORITHM)
+
+
+def verify_refresh_token(token: str) -> Optional[dict]:
+    """리프레시 토큰 검증. type='refresh'가 아니면(=액세스 토큰이면) 거부."""
+    try:
+        payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+    except JWTError:
+        return None
+    if payload.get("type") != "refresh":
+        return None
+    return payload
