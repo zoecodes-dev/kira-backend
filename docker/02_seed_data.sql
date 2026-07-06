@@ -2102,3 +2102,68 @@ SELECT
   CASE WHEN dc.status = 'agreed' THEN 'submission_approved' ELSE 'submission_requested' END
 FROM data_provision_consents dc
 WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id = dc.supplier_id);
+
+
+-- ============================================================
+-- 26. [fan-out] 제련소 → 광산 다:다 보강
+--   문제: 제련소(4차)마다 광산(5차)이 1:1이라 "제련소 밑 광산이 여러 개면 tier로
+--         다 표시돼야 하는데 안 보임" + "제련소 다음 티어 광산" 표현 부족.
+--   보강: ⑤~⑨ 제품의 제련소 5곳(64111111~64555555)에 형제 광산(5차)을 1개씩 추가
+--         연결하고, 광산=mining 사업장(=광산 자체)과 좌표를 부여한다.
+--   기존 블록은 수정하지 않고 이 섹션만 append. 멱등(ON CONFLICT / IN절 UPDATE).
+-- ============================================================
+
+-- 26-1. 형제 광산 supplier (miner)
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, country, address, business_reg_doc_url, completeness_score, status, risk_level) VALUES
+('d5000000-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Morowali Nickel Mine 2', 'Morowali Nickel Mine 2', 'Rudi Salim CEO',       'miner', 'ID', 'Sulawesi Tengah, Morowali Mining District B', NULL, 32, 'supplier_review',      'medium'),
+('d6000000-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Obi Island Nickel Mine', 'Obi Island Nickel Mine', 'Hendra Gunawan CEO',  'miner', 'ID', 'North Maluku, Obi Island Mining Zone',        NULL, 30, 'supplier_in_progress', 'medium'),
+('d7000000-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Mt Keith Nickel Mine',   'Mt Keith Nickel Mine',   'David Brown CEO',     'miner', 'AU', 'Western Australia, Mt Keith Mining District', 's3://kira-docs/suppliers/d7000000/biz_reg.pdf', 66, 'supplier_verified', 'low'),
+('d8000000-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kolwezi Cobalt Mine',    'Kolwezi Cobalt Mine',    'Jean-Pierre Mbaya CEO','miner', 'CD', 'Lualaba Province, Kolwezi Mining Zone',       NULL, 25, 'supplier_review',      'high'),
+('d9000000-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Barro Alto Nickel Mine', 'Barro Alto Nickel Mine', 'Ricardo Souza CEO',   'miner', 'BR', 'Goiás State, Barro Alto Mining District',     's3://kira-docs/suppliers/d9000000/biz_reg.pdf', 64, 'supplier_verified', 'low')
+ON CONFLICT (supplier_id) DO NOTHING;
+
+-- 26-2. 광산 사업장 (factory_role='mining' — 광산이 곧 사업장)
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
+('7d000000-0000-4000-8000-000000000001', 'd5000000-0000-4000-8000-000000000001', 'Morowali Nickel Mine B', 'Morowali Nickel Mine B', 'ID', 'Sulawesi',          ST_SetSRID(ST_MakePoint(121.800, -2.100), 4326),  'mining', 'BOTH', '["CRMA","CONFLICT_MINERALS","EUDR"]'::jsonb, 100.00),
+('7d000000-0000-4000-8000-000000000002', 'd6000000-0000-4000-8000-000000000002', 'Obi Island Mine',        'Obi Island Mine',        'ID', 'North Maluku',      ST_SetSRID(ST_MakePoint(127.550, -1.550), 4326),  'mining', 'BOTH', '["CRMA","EUDR"]'::jsonb, 100.00),
+('7d000000-0000-4000-8000-000000000003', 'd7000000-0000-4000-8000-000000000003', 'Mt Keith Nickel Mine',   'Mt Keith Nickel Mine',   'AU', 'Western Australia', ST_SetSRID(ST_MakePoint(120.550, -27.250), 4326), 'mining', 'BOTH', '["CRMA"]'::jsonb, 100.00),
+('7d000000-0000-4000-8000-000000000004', 'd8000000-0000-4000-8000-000000000004', 'Kolwezi Cobalt Mine',    'Kolwezi Cobalt Mine',    'CD', 'Lualaba',           ST_SetSRID(ST_MakePoint(25.470, -10.720), 4326),  'mining', 'EU',   '["CONFLICT_MINERALS","CRMA"]'::jsonb, 100.00),
+('7d000000-0000-4000-8000-000000000005', 'd9000000-0000-4000-8000-000000000005', 'Barro Alto Nickel Mine', 'Barro Alto Nickel Mine', 'BR', 'Goias',             ST_SetSRID(ST_MakePoint(-48.920, -14.970), 4326), 'mining', 'BOTH', '["CRMA"]'::jsonb, 100.00)
+ON CONFLICT (factory_id) DO NOTHING;
+
+-- 26-3. 광산 상세(좌표)
+INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from) VALUES
+('d5000000-0000-4000-8000-000000000001', 'Morowali Nickel Mine B', 'open_pit', 30000.00, ST_SetSRID(ST_MakePoint(121.800, -2.100), 4326),  '2021-01-01'),
+('d6000000-0000-4000-8000-000000000002', 'Obi Island Nickel Mine', 'open_pit', 28000.00, ST_SetSRID(ST_MakePoint(127.550, -1.550), 4326),  '2020-01-01'),
+('d7000000-0000-4000-8000-000000000003', 'Mt Keith Nickel Mine',   'open_pit', 35000.00, ST_SetSRID(ST_MakePoint(120.550, -27.250), 4326), '2016-01-01'),
+('d8000000-0000-4000-8000-000000000004', 'Kolwezi Cobalt Mine',    'open_pit', 22000.00, ST_SetSRID(ST_MakePoint(25.470, -10.720), 4326),  '2018-01-01'),
+('d9000000-0000-4000-8000-000000000005', 'Barro Alto Nickel Mine', 'open_pit', 33000.00, ST_SetSRID(ST_MakePoint(-48.920, -14.970), 4326), '2017-01-01');
+
+-- 26-4. 형제 광산 엣지(hop_level=5) — 각 제련소 하위에 광산 추가 연결
+INSERT INTO supply_chain_map (edge_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+('da555555-0000-4000-8000-000000000001', 'e5555555-0000-4000-8000-000000000005', '64111111-0000-4000-8000-000000000001', 'd5000000-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000008', 5, 'supplychain_declared',  'SUPPLIER_DECLARED', 'unverified', '2024-07-01', '2025-06-30'),
+('da666666-0000-4000-8000-000000000002', 'e6666666-0000-4000-8000-000000000006', '64222222-0000-4000-8000-000000000002', 'd6000000-0000-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000008', 5, 'supplychain_declared',  'SUPPLIER_DECLARED', 'unverified', '2024-04-01', '2025-03-31'),
+('da777777-0000-4000-8000-000000000003', 'e7777777-0000-4000-8000-000000000007', '64333333-0000-4000-8000-000000000003', 'd7000000-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000008', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified',   '2024-01-01', '2024-12-31'),
+('da888888-0000-4000-8000-000000000004', 'e8888888-0000-4000-8000-000000000008', '64444444-0000-4000-8000-000000000004', 'd8000000-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000009', 5, 'supplychain_declared',  'SUPPLIER_DECLARED', 'unverified', '2024-03-01', '2025-02-28'),
+('da999999-0000-4000-8000-000000000005', 'e9999999-0000-4000-8000-000000000009', '64555555-0000-4000-8000-000000000005', 'd9000000-0000-4000-8000-000000000005', 'b1111111-0000-4000-8000-000000000008', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified',   '2024-06-01', '2024-12-31')
+ON CONFLICT (edge_id) DO NOTHING;
+
+-- 26-5. 새 엣지 map_id 백필(소속 맵 헤더 연결)
+UPDATE supply_chain_map scm SET map_id = h.map_id
+FROM supply_chain_maps h
+WHERE h.bom_version_id = scm.bom_version_id AND scm.map_id IS NULL;
+
+-- 26-6. 공급비율 — 기존 광산 60% + 형제 광산 40% (합 100)
+UPDATE supply_ratio SET ratio_percentage = 60.00 WHERE edge_id IN (
+  '85555555-0000-4000-8000-000000000007',
+  '86666666-0000-4000-8000-000000000006',
+  '87777777-0000-4000-8000-000000000006',
+  '88888888-0000-4000-8000-000000000006',
+  '89999999-0000-4000-8000-000000000006'
+);
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
+('da555555-0000-4000-8000-000000000001', '7d000000-0000-4000-8000-000000000001', 40.00, 16800, 'kg'),
+('da666666-0000-4000-8000-000000000002', '7d000000-0000-4000-8000-000000000002', 40.00, 16800, 'kg'),
+('da777777-0000-4000-8000-000000000003', '7d000000-0000-4000-8000-000000000003', 40.00, 16800, 'kg'),
+('da888888-0000-4000-8000-000000000004', '7d000000-0000-4000-8000-000000000004', 40.00,  8000, 'kg'),
+('da999999-0000-4000-8000-000000000005', '7d000000-0000-4000-8000-000000000005', 40.00, 16800, 'kg');

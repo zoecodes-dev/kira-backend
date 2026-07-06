@@ -80,7 +80,7 @@ class SupplierDocumentUploadedEvent:
     발행: B(supplier) → 수신: E(submission)가 submission_documents 행 생성 + 파싱 큐 enqueue.
 
     s3_key: files 버킷 내 키(영구 URL 아님). data_gateway가 이 키로 바이트를 읽어 파싱한다.
-    doc_kind: 'business_reg' | 'environmental_report' | 'self_assessment'
+    doc_kind: 'business_reg' | 'environmental_report' | 'self_assessment' | 'material_composition'
     """
     supplier_id: Optional[UUID] = None
     s3_key: Optional[str] = None

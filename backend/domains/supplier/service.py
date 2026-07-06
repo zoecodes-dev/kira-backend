@@ -355,6 +355,7 @@ async def update_supplier_detail(
         "business_reg_doc_url": "business_reg",
         "environmental_report_url": "environmental_report",
         "self_assessment_doc_url": "self_assessment",
+        "material_composition_doc_url": "material_composition",
     }
     prev_doc_urls = {col: getattr(supplier, col, None) for col in doc_url_kinds}
     # 입력 양식 영속화 — 테이블별로 분배(보낸 필드만).
@@ -578,62 +579,55 @@ def part_code_to_metal(part_code: Optional[str]) -> Optional[str]:
     return None
 
 
-# provider_type별 '소재구성' 요구 방식.
-#   'any'     : 광물 1종 이상 입력 (제조/재활용 — 양극/음극 등 취급 광물이 제각각이라
-#               특정 금속을 강제하면 단일 광물 회사(음극재 흑연 등)가 영구 미완성이 된다)
-#   'handled' : 공급망에서 도출한 '다루는 금속'만 (제련소)
-#   'none'    : 소재구성 요구 안 함 (유통/트레이더)
-_MATERIALS_MODE = {
-    "manufacturer": "any",
-    "recycler": "any",
-    "smelter": "handled",
-    "trader": "none",
-}
+# ─── 필드 분류: 🔴필수(제출 차단) / 🟡권장(완성도 반영·비차단) / ⚪해당없음 ───
+# EU 배터리법(Annex XIII)상 소재·탄소·실사는 '필요한' 데이터라 완성도엔 계속 반영하되(권장은
+# 표시상 티 내지 않음), 제출 게이트는 🔴필수만 물리 차단한다. 데이터완비 베스트프랙티스의
+# 'at least one' 패턴 적용 — '모든 값'이 아니라 '핵심 최소 1개' 게이트:
+#   · smelter               : 취급 금속 중 '최소 1개'면 소재구성 충족 — 🔴필수(전 금속 강제 아님)
+#   · manufacturer/recycler : 광물 '최소 1개' — 🟡권장(비차단)
+#   · trader                : 소재구성 없음, 공장은 🟡권장
+#   · miner                 : 입력 주체 아님 → 전부 ⚪ (required=0, rate=100)
+# 필드 키 네임스페이스는 프론트 섹션과 일치: 'company.*' · 'materials.*' · 'factories'
+#   · 'regulation.*' · 'documents.*'.
 
-# 탄소집약도/에너지원은 supplier_manufacturer_details 소유이고, 저장 가드(§8-J)가
-# provider_type='manufacturer'일 때만 upsert한다 → 제조사만 요구(다른 유형은 저장 불가라 요구 불가).
-_REQUIRE_CARBON = {"manufacturer"}
-# 환경성적서(탄소 근거 문서)도 탄소 요구가 있는 제조사에만 필수.
-_REQUIRE_ENV_REPORT = {"manufacturer"}
-
-# 모든 판정대상 유형 공통 필수(회사·공장·자가진단). ※ 사업자등록증은 필수 아님(사용자 지시).
-_COMMON_FIELDS = (
+# 모든 판정대상 공통 🔴필수(회사·자가진단). ※ 사업자등록증은 필수 아님(사용자 지시).
+_COMMON_BLOCKING = (
     "company.company_name",
     "company.country",
     "company.business_reg_no",
     "company.provider_type",
-    "factories",
     "regulation.self_reported_risk_level",
 )
 
 
-def _required_fields(provider_type: Optional[str], handled_metals: set) -> list:
-    """provider_type(+제련소는 공급망 도출 금속)로 필수 필드 키 목록을 만든다.
-    miner면 빈 목록(입력 주체 아님)."""
+def _classify_fields(provider_type: Optional[str], handled_metals: set) -> tuple:
+    """provider_type(+제련소는 공급망 도출 금속)로 (🔴blocking, 🟡recommended) 필드 키를 만든다.
+    miner면 ([], []) — 입력 주체 아님."""
     pt = provider_type or ""
     if pt == "miner":
-        return []
+        return [], []
 
-    fields = list(_COMMON_FIELDS)
+    blocking = list(_COMMON_BLOCKING)
+    recommended: list = []
 
-    mode = _MATERIALS_MODE.get(pt, "any")
-    if mode == "any":
-        fields.append("materials.any")
-    elif mode == "handled":
-        metals = [m for m in _TRACKED_METALS if m in handled_metals]
-        if metals:
-            fields += [f"materials.{m}" for m in metals]
-        else:
-            # 공급망에서 다루는 금속을 못 찾음(맵 미구축 등) → '최소 1개 금속' 게이트로
-            #   순환(0/0=100%)을 막는다. 프론트는 이 키를 '금속 1개 이상 입력'으로 표시.
-            fields.append("materials.any")
-    # mode == "none" → 소재구성 요구 없음(유통/트레이더)
+    # 공장/사업장 — trader만 권장, 그 외(입력 주체)는 필수.
+    (recommended if pt == "trader" else blocking).append("factories")
 
-    if pt in _REQUIRE_CARBON:
-        fields += ["regulation.carbon_intensity", "regulation.energy_source"]
-    if pt in _REQUIRE_ENV_REPORT:
-        fields.append("documents.environmental_report_url")
-    return fields
+    # 소재구성(광물비율).
+    if pt == "smelter":
+        blocking.append("materials.handled_any")      # 취급 금속 중 최소 1개(부분 허용)
+    elif pt in ("manufacturer", "recycler"):
+        recommended.append("materials.any")           # 최소 1개(권장, 비차단)
+    # trader → 소재구성 요구 없음
+
+    # 탄소집약도·에너지원·환경성적서 — 제조사만, 권장(저장 가드상 제조사만 upsert 가능).
+    if pt == "manufacturer":
+        recommended += [
+            "regulation.carbon_intensity",
+            "regulation.energy_source",
+            "documents.environmental_report_url",
+        ]
+    return blocking, recommended
 
 
 def _val_present(v) -> bool:
@@ -657,13 +651,24 @@ _COMPLETENESS_COLUMN = {
 }
 
 
-def _field_filled(field: str, snap: dict) -> bool:
+def _mineral_present(cm: dict) -> bool:
+    # 광물 키 아무거나 1종(흑연 포함). hazardous_substances는 광물 함량이 아니므로 제외.
+    return any(_val_present(v) for k, v in cm.items() if k != "hazardous_substances")
+
+
+def _field_filled(field: str, snap: dict, handled_metals: set = frozenset()) -> bool:
     cm = snap.get("core_minerals") or {}
     if field == "factories":
         return (snap.get("factory_count") or 0) > 0
     if field == "materials.any":
-        # 광물 키 아무거나 1종(흑연 포함). hazardous_substances는 광물 함량이 아니므로 제외.
-        return any(_val_present(v) for k, v in cm.items() if k != "hazardous_substances")
+        return _mineral_present(cm)
+    if field == "materials.handled_any":
+        # 취급 금속(공급망 도출) 중 최소 1개 입력이면 충족. 도출 실패(맵 미구축)면
+        #   '최소 1개 광물'로 폴백(순환 0/0=100% 방지).
+        metals = [m for m in _TRACKED_METALS if m in handled_metals]
+        if metals:
+            return any(_val_present(cm.get(m)) for m in metals)
+        return _mineral_present(cm)
     if field.startswith("materials."):
         return _val_present(cm.get(field.split(".", 1)[1]))
     if field == "regulation.self_reported_risk_level":
@@ -675,14 +680,22 @@ def _field_filled(field: str, snap: dict) -> bool:
 
 def _compute_completeness(snapshot: dict, handled_metals: set) -> dict:
     """snapshot(필드값) + handled_metals(제련소 공급망 금속) → 완성도 집계.
-    반환: {required, filled, rate, missing[]}. miner 등 비대상은 required=0 · rate=100."""
-    req = _required_fields(snapshot.get("provider_type"), handled_metals)
-    if not req:
-        return {"required": 0, "filled": 0, "rate": 100.0, "missing": []}
-    missing = [f for f in req if not _field_filled(f, snapshot)]
-    filled = len(req) - len(missing)
-    rate = round(filled * 100.0 / len(req), 2)
-    return {"required": len(req), "filled": filled, "rate": rate, "missing": missing}
+    완성도 표시(rate/missing)는 🔴필수+🟡권장 전체 기준(권장 티 안 냄). 제출 차단은
+    별도의 blocking_missing(🔴필수 미충족)로 판정한다.
+    반환: {required, filled, rate, missing[], blocking_missing[]}.
+    miner 등 비대상은 required=0 · rate=100 · blocking_missing=[]."""
+    blocking, recommended = _classify_fields(snapshot.get("provider_type"), handled_metals)
+    tracked = blocking + recommended
+    if not tracked:
+        return {"required": 0, "filled": 0, "rate": 100.0, "missing": [], "blocking_missing": []}
+    missing = [f for f in tracked if not _field_filled(f, snapshot, handled_metals)]
+    blocking_missing = [f for f in blocking if not _field_filled(f, snapshot, handled_metals)]
+    filled = len(tracked) - len(missing)
+    rate = round(filled * 100.0 / len(tracked), 2)
+    return {
+        "required": len(tracked), "filled": filled, "rate": rate,
+        "missing": missing, "blocking_missing": blocking_missing,
+    }
 
 
 async def _handled_metals(db: AsyncSession, supplier_id: UUID) -> set:
@@ -703,6 +716,17 @@ async def recompute_completeness(db: AsyncSession, supplier_id: UUID) -> None:
         required=result["required"], filled=result["filled"],
         rate=result["rate"], missing=result["missing"],
     )
+
+
+async def has_blocking_gaps(db: AsyncSession, supplier_id: UUID) -> bool:
+    """제출 게이트용 — 🔴필수(blocking) 필드 중 미충족이 하나라도 있으면 True.
+    🟡권장 미입력은 제출을 막지 않는다(완성도 표시에만 반영). 스냅샷 없으면(대상 아님) False."""
+    snap = await repository.get_completeness_inputs(db, supplier_id)
+    if snap is None:
+        return False
+    metals = await _handled_metals(db, supplier_id)
+    blocking, _ = _classify_fields(snap.get("provider_type"), metals)
+    return any(not _field_filled(f, snap, metals) for f in blocking)
 
 
 # ============================================================
@@ -754,13 +778,15 @@ async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict
             "missing_fields": [],
             "last_updated_at": None,
         }
-    # provider_type별 필수 필드 키(제련소는 공급망 도출 금속 반영).
+    # provider_type별 추적 필드 키(🔴필수+🟡권장 전체 — 프론트 섹션 총계·'해당 없음' 판정용).
+    #   제련소는 공급망 도출 금속을 반영. 권장 필드도 포함해 완성도 표시에서 티 나지 않게 한다.
     required: List[str] = []
     snap = await repository.get_completeness_inputs(db, supplier_id)
     if snap is not None:
-        required = _required_fields(
+        blocking, recommended = _classify_fields(
             snap.get("provider_type"), await _handled_metals(db, supplier_id)
         )
+        required = blocking + recommended
     return {"supplier_id": supplier_id, "required_fields": required, **comp}
 
 
