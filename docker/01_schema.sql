@@ -46,6 +46,19 @@ CREATE TABLE users (
     created_at     TIMESTAMPTZ DEFAULT now()
 );
 
+-- [테이블 역할] 옆 라인 정보 차단(기본값 FALSE) 및 3차수 이내 등 사용자별 세밀한 공급망 열람 제어 매트릭스.
+CREATE TABLE view_permissions (
+    permission_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id              UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    viewable_supplier_id UUID,
+    can_view_parent      BOOLEAN DEFAULT FALSE,
+    can_view_children    BOOLEAN DEFAULT FALSE,
+    can_view_siblings    BOOLEAN DEFAULT FALSE,
+    depth_limit          INT DEFAULT 1,
+    granted_by           UUID REFERENCES users(user_id),
+    granted_at           TIMESTAMPTZ DEFAULT now()
+);
+
 -- [테이블 역할 §0.8] 공통 파일 업로드 저장소. 첨부 화면(자료 제출·실사/시정 보고서·온보딩)이
 -- 공통으로 쓰는 POST/GET/DELETE /files 의 메타 대장. 실제 바이트는 S3, 여기엔 메타 + s3_key 만.
 CREATE TABLE files (
@@ -87,10 +100,9 @@ CREATE TABLE suppliers (
     country             VARCHAR(2),  -- 기본정보: 소재 국가(ISO 3166-1 alpha-2)
     address             TEXT,  -- 기본정보: 회사 주소(전체 주소 문자열). 공장 주소(supplier_factories.address)와 별개 — 회사 소재지
     business_reg_doc_url    VARCHAR(500),  -- 필요문서: 사업자등록증(기업정보 서류) 업로드 URL
-    business_reg_doc_name   VARCHAR(255),  -- 필요문서: 사업자등록증 원본 파일명(표시용) — s3 key와 별개로 사용자가 올린 이름 보존
     environmental_report_url VARCHAR(500),  -- 필요문서: 환경성적서(회원가입 시 수집) 업로드 URL
     self_assessment_doc_url VARCHAR(500),  -- 규제: 실사 자가진단 보고서 업로드 URL(내 기업 정보에서 제출·확인)
-    material_composition_doc_url VARCHAR(500),  -- 소재구성: 핵심광물 함량 추출용 PDF/이미지 업로드 URL
+    material_composition_doc_url VARCHAR(500),  -- 필요문서: 소재구성 문서(핵심광물 함량 근거) 업로드 URL
     is_unverified       BOOLEAN DEFAULT false,  -- 회원가입: 사업자등록증 미보유로 '미확인 상태' 등록(원청/상위가 검증)
     parent_supplier_id  UUID REFERENCES suppliers(supplier_id),
     established_year    INT,
@@ -356,7 +368,7 @@ CREATE TABLE products (
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- [테이블 역할] 동일 제품의 생산기간별 BOM 버전 이력.
+-- [테이블 역할] 동일 제품의 생산 Lot/배치 유통 기간별 BOM 버전 이력.
 -- [개명] effective_from/to(규제 발효일 성격) → production_from/to(제조·유통 기간 식별).
 --        설계 변경이 아닌 'Lot 추적' 목적임을 컬럼명으로 명확화.
 CREATE TABLE bom_versions (
@@ -422,12 +434,34 @@ CREATE TABLE bom_items (
     synced_at       TIMESTAMPTZ DEFAULT now()
 );
 
+-- [테이블 역할] 원청 자재 코드와 협력사 내부 고유 품번 간의 양방향 매핑 대장.
+CREATE TABLE part_code_mapping (
+    mapping_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    part_id             UUID REFERENCES parts(part_id) ON DELETE CASCADE,
+    supplier_id         UUID REFERENCES suppliers(supplier_id),
+    supplier_part_code  VARCHAR(50),
+    original_part_code  VARCHAR(50)
+);
+
+-- [테이블 역할] 공정 신뢰도 및 CSDDD 감사 추적용 공정 매뉴얼 매핑 테이블.
+CREATE TABLE manufacturing_process (
+    process_id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    part_id                   UUID REFERENCES parts(part_id) ON DELETE CASCADE,
+    sequence_no               INT,
+    process_name              VARCHAR(255),
+    process_description       TEXT,
+    is_outsourced             BOOLEAN DEFAULT FALSE,
+    outsourced_to_supplier_id UUID REFERENCES suppliers(supplier_id),
+    process_image_url         VARCHAR(500)
+);
+
+
 -- ============================================================
 -- 영역 8. 공급망 맵 (D 담당)
 -- ============================================================
 
 -- [테이블 역할] 공급망 맵 그 자체(헤더). 엣지(supply_chain_map)들을 묶는 1급 엔티티.
---   맵 1개 = map_id 1개 = bom_version(제품 BOM 버전) 1개. 완료/전송 상태를 여기서 관리.
+--   맵 1개 = map_id 1개 = bom_version(제품×Lot) 1개. 완료/전송 상태를 여기서 관리.
 CREATE TABLE supply_chain_maps (
     map_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     bom_version_id UUID REFERENCES bom_versions(bom_version_id),
@@ -452,8 +486,7 @@ CREATE TABLE supply_chain_map (
     hop_level          INT,  -- 차수 SSOT: 원청(parent NULL)=0 기준 경로 순번(+1 연속). (구 suppliers.tier 대체)
     supply_period_from DATE,
     supply_period_to   DATE,
-    core_minerals      JSONB,  -- 제품별 핵심광물 원소 질량(%) override. NULL이면 조회 시 child 협력사 suppliers.core_minerals로 폴백. 예: {"Li":7.1,"Ni":48.3,"Co":6.1,"Mn":5.6}
-
+    
     -- [결정 #2 / #9-여파4] 발견 및 정합성 컬럼 추가
     link_status        VARCHAR(30) DEFAULT 'supplychain_declared'
         CONSTRAINT chk_link_status CHECK (link_status IN ('supplychain_declared', 'supplychain_confirmed')),
@@ -525,9 +558,8 @@ CREATE TABLE batches (
 
     confidence_score NUMERIC(5,4),
 
-    -- 배치(컴플라이언스 평가 작업)의 데이터 출처 마크. 런타임 생성 배치는 제출 흐름 기원(SUBMISSION).
-    -- 시드/데모의 'MES 생산 로트' 예시는 INSERT에서 'MES'를 명시한다.
-    source_system   VARCHAR(100) DEFAULT 'SUBMISSION',
+    -- [결정 #1 정교화] 외부 원천시스템 연동 마크 주입 (생산 배치는 MES 동기화)
+    source_system   VARCHAR(100) DEFAULT 'MES',
     external_id     VARCHAR(255),
     synced_at       TIMESTAMPTZ DEFAULT now()
 );
@@ -571,6 +603,15 @@ CREATE TABLE compliance_results (
     confidence_score NUMERIC(5,4),
     reasoning_text   TEXT,
     created_at       TIMESTAMPTZ DEFAULT now()
+);
+
+-- [테이블 역할] 법률의 적용 대상 차수 및 업종 정의 매트릭스.
+CREATE TABLE regulation_applicability (
+    applicability_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    regulation_id            UUID REFERENCES regulations(regulation_id),
+    applicable_provider_type VARCHAR(30),
+    applicable_tier          INT,
+    severity                 VARCHAR(20) CONSTRAINT chk_app_severity CHECK (severity IN ('mandatory', 'recommended'))
 );
 
 -- [테이블 역할] 규제별 협력사 필수 제출 필드 명세. C2 gap 계산의 기준 데이터.
@@ -732,10 +773,6 @@ CREATE TABLE notifications (
     -- [멱등성] 같은 트리거(예: 동일 SLA 리마인드)가 중복 발송되지 않도록 하는 중복 차단 키.
     -- 예: 'sla_reminder:{request_id}:{date}'. UNIQUE로 중복 INSERT 차단.
     dedup_key         VARCHAR(255) UNIQUE,
-    -- [딥링크 target] 알림 클릭 시 이동할 "맵 + 협력사 노드" 좌표. 프론트 NotificationTarget과 1:1.
-    -- camelCase 키로 저장(GET /notifications가 raw passthrough): {productId, bomVersionId, mapId, focusSupplierId}.
-    -- 정보요청/초대는 그 회차에 새로 만든 맵(map_id)에 협력사를 묶으므로, 대상 맵을 특정하려면 여기에 담는다.
-    target            JSONB,
     created_at        TIMESTAMPTZ DEFAULT now()
 );
 
@@ -1035,6 +1072,80 @@ CREATE TABLE report_approval_steps (
 );
 
 -- ------------------------------------------------------------
+-- [은지-C] Watchlist (UFLPA/제재명단) + 소급 재검증
+-- ⚠️수정#2: matched_supplier_id 추가 — 등재 entity ↔ 우리 공급사 매칭(자동 소급 강등의 연결고리).
+--          텍스트 이름만으론 자동 대조가 약해 supplier FK 를 둠. 미매칭 시 NULL(텍스트 후보만).
+-- ------------------------------------------------------------
+CREATE TABLE watchlists (
+    watchlist_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    entity_name         VARCHAR(255) NOT NULL,
+    country             VARCHAR(2),
+    reason              TEXT,
+    matched_supplier_id UUID REFERENCES suppliers(supplier_id) ON DELETE SET NULL, -- ⚠️#2 우리 공급사 매칭(소급 강등 연결)
+    source              VARCHAR(30) DEFAULT 'UFLPA_ENTITY_LIST'
+        CONSTRAINT chk_watchlist_source CHECK (source IN ('UFLPA_ENTITY_LIST', 'SANCTION', 'FEOC', 'MANUAL')),
+    listed_at           TIMESTAMPTZ DEFAULT now(),
+    is_active           BOOLEAN DEFAULT TRUE,
+    created_at          TIMESTAMPTZ DEFAULT now()
+);
+
+-- 소급 재검증 이력 (출처9). trigger_source_id 는 watchlists/regulations 를 가리키는 polymorphic — FK 없음(의도).
+CREATE TABLE reverification_logs (
+    reverification_id     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    trigger_type          VARCHAR(30) NOT NULL
+        CONSTRAINT chk_reverify_trigger CHECK (trigger_type IN ('watchlist_update', 'regulation_amendment', 'manual')),
+    trigger_source_id     UUID,         -- ⚠️#3 polymorphic(watchlist_id 또는 regulation_id) → FK 없음(의도)
+    status                VARCHAR(20) DEFAULT 'running'
+        CONSTRAINT chk_reverify_status CHECK (status IN ('running', 'completed', 'failed')),
+    affected_batch_count  INT DEFAULT 0,
+    changed_verdict_count INT DEFAULT 0, -- 재검증 결과 판정이 달라진(위반 강등 등) 건수
+    started_at            TIMESTAMPTZ DEFAULT now(),
+    completed_at          TIMESTAMPTZ,
+    results_summary       JSONB         -- {batch_id: 'old -> new'} 요약
+);
+
+-- ------------------------------------------------------------
+-- [차윤-X] 외부 당국 시스템 제출 + 참조번호 (EUDR TRACES / IRA 30D / CBP)
+-- ------------------------------------------------------------
+CREATE TABLE authority_submissions (
+    submission_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    batch_id           UUID REFERENCES batches(batch_id) ON DELETE CASCADE,
+    product_id         UUID REFERENCES products(product_id) ON DELETE CASCADE,
+    authority_type     VARCHAR(30) NOT NULL
+        CONSTRAINT chk_auth_type CHECK (authority_type IN ('TRACES_NT', 'CBP_DETENTION')),
+    reference_number   VARCHAR(100), -- TRACES-NT 고유 참조번호 / IRS Safe Harbor 등록번호 등
+    status             VARCHAR(20) DEFAULT 'pending'
+        CONSTRAINT chk_auth_submission_status CHECK (status IN ('pending', 'submitted', 'approved', 'failed')),
+    payload            JSONB,        -- 당국 전송 원본 JSON 스냅샷
+    response_metadata  JSONB,        -- 당국 수신 응답값
+    submitted_at       TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ DEFAULT now()
+);
+
+-- [차윤-X] 대외 전송 로그 + 도달확인(Ack) (X-10 정밀 정합). recipient_id 는 customer/supplier/authority polymorphic — FK 없음(의도).
+CREATE TABLE transmission_logs (
+    transmission_id     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    batch_id            UUID REFERENCES batches(batch_id) ON DELETE SET NULL,
+    sender_id           UUID REFERENCES users(user_id), -- 최종 발송 주체(원청 담당자)
+    recipient_type      VARCHAR(20) NOT NULL
+        CONSTRAINT chk_recipient_type CHECK (recipient_type IN ('customer', 'supplier', 'authority')),
+    recipient_id        UUID,         -- polymorphic(customers/suppliers/당국) → FK 없음(의도)
+    recipient_email     VARCHAR(255) NOT NULL,
+    transmission_type   VARCHAR(30) NOT NULL
+        CONSTRAINT chk_trans_type CHECK (
+            transmission_type IN ('compliance_summary', 'rework_request', 'post_violation_notice', 'customs_response')
+        ),
+    status              VARCHAR(20) DEFAULT 'sent'
+        CONSTRAINT chk_trans_status CHECK (status IN ('sent', 'delivered', 'failed', 'acknowledged')),
+    payload_summary     TEXT,
+    attachment_urls     JSONB,        -- 동반 PDF/증거묶음 URL 배열
+    ack_token           VARCHAR(64) UNIQUE, -- 수신확인 링크 검증용 유니크 토큰
+    sent_at             TIMESTAMPTZ DEFAULT now(),
+    delivered_at        TIMESTAMPTZ,
+    acknowledged_at     TIMESTAMPTZ   -- Ack 고리 완성 시각
+);
+
+-- ------------------------------------------------------------
 -- [영수-D] CBP 억류 통지(Detention) + 반증 대응 케이스 (회사경계·당국 대응)
 -- ------------------------------------------------------------
 CREATE TABLE detention_cases (
@@ -1083,7 +1194,12 @@ CREATE TABLE audit_data_snapshots (
 -- TO-BE 확장 인덱스
 CREATE INDEX idx_reports_requester ON reports(requester_id);
 CREATE INDEX idx_report_steps_approver ON report_approval_steps(approver_id, status);
+CREATE INDEX idx_watchlists_entity ON watchlists(entity_name) WHERE is_active = TRUE;
+CREATE INDEX idx_watchlists_matched ON watchlists(matched_supplier_id) WHERE matched_supplier_id IS NOT NULL;
+CREATE INDEX idx_auth_submissions_batch ON authority_submissions(batch_id);
+CREATE INDEX idx_trans_logs_ack_token ON transmission_logs(ack_token) WHERE ack_token IS NOT NULL;
 CREATE INDEX idx_detention_cases_due ON detention_cases(due_date) WHERE status != 'released';
+CREATE INDEX idx_reverify_logs_status ON reverification_logs(status);
 CREATE INDEX idx_audit_snapshots_batch ON audit_data_snapshots(batch_id);
 
 -- ============================================================
@@ -1157,10 +1273,9 @@ JOIN (VALUES
     ('EU_BATTERY_ART7', 'factory_carbon_declarations',  'jsonb',   '["manufacturer"]',          TRUE),
     ('EU_BATTERY_ART7', 'carbon_footprint_methodology', 'text',    '["manufacturer"]',          FALSE),
 
-    -- [비활성화 2026-07] EU_BATTERY 재활용 함량 필수 필드 — 입력받는 값이 아니라 제외.
-    --   compliance.py judge_recycled_content 비활성화와 동기화. 입력 경로 생기면 복구.
-    -- ('EU_BATTERY',      'recycled_content_ratio',       'numeric', '["recycler","manufacturer"]', TRUE),
-    -- ('EU_BATTERY',      'recycling_certification',      'text',    '["recycler"]',              FALSE),
+    -- EU_BATTERY: 재활용 함량 필수 필드
+    ('EU_BATTERY',      'recycled_content_ratio',       'numeric', '["recycler","manufacturer"]', TRUE),
+    ('EU_BATTERY',      'recycling_certification',      'text',    '["recycler"]',              FALSE),
 
     -- EU_BATTERY_ART47: 공급망 실사 정책
     ('EU_BATTERY_ART47','due_diligence_policy_url',     'text',    '["manufacturer"]',          TRUE),
