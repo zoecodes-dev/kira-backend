@@ -301,31 +301,27 @@ class ValidationResult:
 
 
 # ============================================================
-# RecycledMaterialsSchema (B·C 공유 — 도메인 간 계약)
-#
-# supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
-# B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
-#
-# 사용법:
-#   저장(B): RecycledMaterialsSchema(co=18.0, ni=7.0).model_dump(exclude_none=True)
-#   검증(C): RecycledMaterialsSchema(**row.recycled_materials)
+# [비활성화 2026-07] RecycledMaterialsSchema — 재활용 함량 판정 제거에 따라 폐기.
+#   재활용 함량은 입력받는 값이 아니고(마스터폼·문서추출·전용 테이블 부재),
+#   supplier_recycler_details 테이블도 스키마에 존재하지 않던 dangling 계약이었음.
+#   compliance.py judge_recycled_content 비활성화와 동기화. 입력 경로가 생기면 복구할 것.
 # ============================================================
-class RecycledMaterialsSchema(BaseModel):
-    """
-    supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
-    key = 소문자 원소기호(co/ni/li/pb), value = 재활용 함량(%).
-    B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
-    """
-    co: Optional[float] = None   # 코발트 함량 %
-    ni: Optional[float] = None   # 니켈 함량 %
-    li: Optional[float] = None   # 리튬 함량 %
-    pb: Optional[float] = None   # 납 함량 %
-
-    @field_validator("co", "ni", "li", "pb")
-    @classmethod
-    def _pct_range(cls, v):
-        if v is not None and not (0 <= v <= 100):
-            raise ValueError("재활용 함량은 0~100% 범위여야 합니다")
-        return v
-
-    model_config = {"extra": "forbid"}   # 정의 안 된 key 저장 시 에러 → 오타·오용 즉시 발견
+# class RecycledMaterialsSchema(BaseModel):
+#     """
+#     supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
+#     key = 소문자 원소기호(co/ni/li/pb), value = 재활용 함량(%).
+#     B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
+#     """
+#     co: Optional[float] = None   # 코발트 함량 %
+#     ni: Optional[float] = None   # 니켈 함량 %
+#     li: Optional[float] = None   # 리튬 함량 %
+#     pb: Optional[float] = None   # 납 함량 %
+#
+#     @field_validator("co", "ni", "li", "pb")
+#     @classmethod
+#     def _pct_range(cls, v):
+#         if v is not None and not (0 <= v <= 100):
+#             raise ValueError("재활용 함량은 0~100% 범위여야 합니다")
+#         return v
+#
+#     model_config = {"extra": "forbid"}   # 정의 안 된 key 저장 시 에러 → 오타·오용 즉시 발견
