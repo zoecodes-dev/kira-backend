@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.auth import CurrentUser, get_current_user
 from backend.infrastructure.database import get_db
-from backend.infrastructure.security import create_access_token, verify_password
+from backend.infrastructure.security import (
+    create_access_token,
+    create_refresh_token,
+    verify_refresh_token,
+    verify_password,
+)
 from backend.domains.users.repository import UserRepository
 from backend.domains.users.service import UserService
 
@@ -16,6 +21,10 @@ router = APIRouter(tags=["Users"])
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 def _get_service(db: AsyncSession = Depends(get_db)) -> UserService:
@@ -29,6 +38,16 @@ def _supplier_id_for(user) -> str | None:
     """
     sid = getattr(user, "supplier_id", None)
     return str(sid) if sid else None
+
+
+def _access_claims(user, supplier_id: str | None) -> dict:
+    """액세스 토큰 payload — 로그인/리프레시가 동일하게 쓴다(테넌트 격리 §0.2)."""
+    return {
+        "sub": str(user.user_id),
+        "role": user.role,
+        "tenant_id": str(user.tenant_id) if user.tenant_id else None,
+        "supplier_id": supplier_id,
+    }
 
 
 @router.post("/auth/login")
@@ -56,16 +75,11 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             )
 
     supplier_id = _supplier_id_for(user)
-    token = create_access_token(
-        {
-            "sub": str(user.user_id),
-            "role": user.role,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else None,
-            "supplier_id": supplier_id,
-        }
-    )
+    token = create_access_token(_access_claims(user, supplier_id))
+    refresh_token = create_refresh_token({"sub": str(user.user_id)})
     return {
         "token": token,
+        "refresh_token": refresh_token,
         "role": user.role,
         "user_id": str(user.user_id),
         "tenant_id": str(user.tenant_id) if user.tenant_id else None,
@@ -75,6 +89,38 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         # '계정 존재 ⇒ 온보딩 완료'. (Phase2에서 미완료 단계 도입 시 여기서 분기)
         "onboarding_complete": True,
     }
+
+
+@router.post("/auth/refresh")
+async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """
+    §1.1b — 리프레시 토큰으로 새 액세스(+리프레시) 발급. 재로그인 없이 세션 연장.
+    무상태 JWT라 폐기 목록은 없고, 대신 사용자 상태(is_active·테넌트 구독)를 매번 재확인한다.
+    """
+    payload = verify_refresh_token(body.refresh_token)
+    sub = payload.get("sub") if payload else None
+    if not sub:
+        raise HTTPException(status_code=401, detail="유효하지 않은 리프레시 토큰입니다.")
+
+    repo = UserRepository(db)
+    try:
+        user = await repo.get_by_id(uuid.UUID(sub))
+    except (ValueError, TypeError):
+        user = None
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="유효하지 않은 세션입니다. 다시 로그인해 주세요.")
+
+    # 테넌트 구독 상태 재확인(로그인과 동일 기준 §0.2).
+    if user.tenant_id is not None:
+        tenant = await repo.get_tenant(user.tenant_id)
+        if tenant is not None and tenant.subscription_status != "active":
+            raise HTTPException(status_code=403, detail="구독이 비활성 상태인 테넌트입니다.")
+
+    supplier_id = _supplier_id_for(user)
+    token = create_access_token(_access_claims(user, supplier_id))
+    # 슬라이딩 세션 — 활동 중인 사용자가 14일 벽에 걸리지 않도록 리프레시도 재발급.
+    new_refresh = create_refresh_token({"sub": str(user.user_id)})
+    return {"token": token, "refresh_token": new_refresh}
 
 
 @router.get("/auth/me")
