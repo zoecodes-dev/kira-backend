@@ -452,7 +452,8 @@ CREATE TABLE supply_chain_map (
     hop_level          INT,  -- 차수 SSOT: 원청(parent NULL)=0 기준 경로 순번(+1 연속). (구 suppliers.tier 대체)
     supply_period_from DATE,
     supply_period_to   DATE,
-    
+    core_minerals      JSONB,  -- 제품별 핵심광물 원소 질량(%) override. NULL이면 조회 시 child 협력사 suppliers.core_minerals로 폴백. 예: {"Li":7.1,"Ni":48.3,"Co":6.1,"Mn":5.6}
+
     -- [결정 #2 / #9-여파4] 발견 및 정합성 컬럼 추가
     link_status        VARCHAR(30) DEFAULT 'supplychain_declared'
         CONSTRAINT chk_link_status CHECK (link_status IN ('supplychain_declared', 'supplychain_confirmed')),
@@ -731,6 +732,10 @@ CREATE TABLE notifications (
     -- [멱등성] 같은 트리거(예: 동일 SLA 리마인드)가 중복 발송되지 않도록 하는 중복 차단 키.
     -- 예: 'sla_reminder:{request_id}:{date}'. UNIQUE로 중복 INSERT 차단.
     dedup_key         VARCHAR(255) UNIQUE,
+    -- [딥링크 target] 알림 클릭 시 이동할 "맵 + 협력사 노드" 좌표. 프론트 NotificationTarget과 1:1.
+    -- camelCase 키로 저장(GET /notifications가 raw passthrough): {productId, bomVersionId, mapId, focusSupplierId}.
+    -- 정보요청/초대는 그 회차에 새로 만든 맵(map_id)에 협력사를 묶으므로, 대상 맵을 특정하려면 여기에 담는다.
+    target            JSONB,
     created_at        TIMESTAMPTZ DEFAULT now()
 );
 
@@ -1152,9 +1157,10 @@ JOIN (VALUES
     ('EU_BATTERY_ART7', 'factory_carbon_declarations',  'jsonb',   '["manufacturer"]',          TRUE),
     ('EU_BATTERY_ART7', 'carbon_footprint_methodology', 'text',    '["manufacturer"]',          FALSE),
 
-    -- EU_BATTERY: 재활용 함량 필수 필드
-    ('EU_BATTERY',      'recycled_content_ratio',       'numeric', '["recycler","manufacturer"]', TRUE),
-    ('EU_BATTERY',      'recycling_certification',      'text',    '["recycler"]',              FALSE),
+    -- [비활성화 2026-07] EU_BATTERY 재활용 함량 필수 필드 — 입력받는 값이 아니라 제외.
+    --   compliance.py judge_recycled_content 비활성화와 동기화. 입력 경로 생기면 복구.
+    -- ('EU_BATTERY',      'recycled_content_ratio',       'numeric', '["recycler","manufacturer"]', TRUE),
+    -- ('EU_BATTERY',      'recycling_certification',      'text',    '["recycler"]',              FALSE),
 
     -- EU_BATTERY_ART47: 공급망 실사 정책
     ('EU_BATTERY_ART47','due_diligence_policy_url',     'text',    '["manufacturer"]',          TRUE),

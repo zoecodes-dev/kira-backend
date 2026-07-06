@@ -66,6 +66,10 @@ async def _register_subscriptions() -> None:
     from backend.handlers.final_validation_notify import notify_final_validation_ready
     await subscribe("SubmissionApproved", notify_final_validation_ready)
 
+    # ── P4b: 협력사 자료 제출 시 원청에 '검토 요청' 알림 (맵+협력사 노드 딥링크) ──
+    from backend.handlers.submission_submitted_notify import notify_supplier_submission
+    await subscribe("SubmissionCompleted", notify_supplier_submission)
+
     # ── D→E: 공급망 맵 gap 트리거 → 협력사 자료요청 생성 ──
     #    supplychain 이 submission 을 직접 호출하던 것을 이벤트로 분리(규칙 #4).
     from backend.handlers.supplychain_gap_data_request import on_supply_chain_gap_detected

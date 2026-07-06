@@ -371,6 +371,70 @@ FROM supply_chain_maps h WHERE h.bom_version_id = scm.bom_version_id;
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
 ('51111111-0000-4000-8000-000000000002', 'f1111111-0000-4000-8000-000000000001', 100.00, 10000, 'ea');
 
+-- ============================================================
+-- 11-A. 공급망 맵 엣지 정정 + 제품별 핵심광물 (supply_chain_map.core_minerals override)
+-- ============================================================
+-- [설계] core_minerals 는 회사(suppliers)당 1값이 기본(fallback). 같은 회사라도 제품(BOM)마다
+--   산출물이 다를 수 있어 엣지(supply_chain_map)에 per-product override 를 둔다.
+--   조회 시 COALESCE(엣지값, child 회사값) → 엣지값을 비우면 회사값으로 폴백(드리프트 없음).
+--   여기서 채우는 건 (1) 회사값이 NULL인 최상위 노드, (2) 같은 회사가 제품별로 달라야 하는 노드뿐.
+
+-- (1) part_id 정정 — iX3 말단이 리튬광(호주리튬)인데 니켈 부품(REF-NI/MIN-NI)에 붙어 있던 불일치 수정.
+--   EQS 정상 리튬체인(한중제련 LIOH → 칠레리튬 MIN-LI)과 동일 패턴으로 정합.
+UPDATE supply_chain_map SET part_id = 'b1111111-0000-4000-8000-000000000005'  -- REF-NI → LIOH-REFINED
+  WHERE edge_id = '51111111-0000-4000-8000-000000000005';
+UPDATE supply_chain_map SET part_id = 'b1111111-0000-4000-8000-00000000000b'  -- MIN-NI → MIN-LI
+  WHERE edge_id = '51111111-0000-4000-8000-000000000006';
+
+-- (2) 엣지 전면 표준화 — core_minerals = 그 엣지에 흐르는 부품(part_id)의 핵심광물 원소 질량%(EU DPP 기준).
+--   순도(99%)/비율(Ni80) 혼용을 제거하고 '원소 함량'으로 통일. 회사값(suppliers)·마스터폼은 그대로 두고
+--   엣지만 override → 폼 드리프트 0. 같은 회사도 제품마다 다른 부품을 대면 값이 갈린다(예: 한중제련 LIOH).
+--   위반/Gray 서사 노드(Global Mining·Unverified Trader)는 데이터 결손이 서사이므로 NULL 유지(override 안 함).
+
+--  · NCM811 양극활물질 조성(PACK/Module/Cell/CAM 공통): Li7.1/Ni48.3/Co6.1/Mn5.6
+--    (팩/셀/모듈은 양극활물질 조성 기준으로 표기 — 팩 전체 질량 희석은 양극재 질량비가 데이터에 없어 이 데모 범위 밖)
+UPDATE supply_chain_map SET core_minerals = '{"Li":7.1,"Ni":48.3,"Co":6.1,"Mn":5.6}'::jsonb
+  WHERE edge_id IN (
+    '51111111-0000-4000-8000-000000000001',  -- iX3  hop0 KIRA     PACK
+    '51111111-0000-4000-8000-000000000002',  -- iX3  hop1 한양셀    Module
+    '51111111-0000-4000-8000-000000000003',  -- iX3  hop2 한양셀    Cell
+    '51111111-0000-4000-8000-000000000004',  -- iX3  hop3 동성      CAM
+    '52222222-0000-4000-8000-000000000001',  -- i4   hop0 KIRA     PACK
+    '52222222-0000-4000-8000-000000000002',  -- i4   hop1 한양셀    Module
+    '52222222-0000-4000-8000-000000000003',  -- i4   hop2 한양셀    Cell
+    '52222222-0000-4000-8000-000000000004',  -- i4   hop3 동성      CAM
+    '53111111-0000-4000-8000-000000000001',  -- GLC1 hop0 KIRA     PACK
+    '53111111-0000-4000-8000-000000000002',  -- GLC1 hop1 우진셀    Cell
+    '53222222-0000-4000-8000-000000000001',  -- GLC2 hop0 KIRA     PACK
+    '53222222-0000-4000-8000-000000000002',  -- GLC2 hop1 우진셀    Cell
+    '54444444-0000-4000-8000-000000000001',  -- EQS  hop0 KIRA     PACK
+    '54444444-0000-4000-8000-000000000002',  -- EQS  hop1 우진배터리 Cell
+    '54444444-0000-4000-8000-000000000003'   -- EQS  hop2 동성      CAM
+  );
+
+--  · NCM 전구체(PRE-NCM, 리튬화 전 혼합수산화물 → Li 없음): Ni50.8/Co6.4/Mn5.9
+UPDATE supply_chain_map SET core_minerals = '{"Ni":50.8,"Co":6.4,"Mn":5.9}'::jsonb
+  WHERE edge_id IN (
+    '53111111-0000-4000-8000-000000000003',  -- GLC1 hop2 청정전구체 PRE
+    '53222222-0000-4000-8000-000000000003'   -- GLC2 hop2 신장제련   PRE
+  );
+
+--  · 수산화리튬(LIOH-REFINED, LiOH·H2O): Li 16.5  (기존 99는 순도지 리튬 함량이 아니라 정정)
+UPDATE supply_chain_map SET core_minerals = '{"Li":16.5}'::jsonb
+  WHERE edge_id IN (
+    '51111111-0000-4000-8000-000000000005',  -- iX3 hop4 한중제련 LIOH
+    '54444444-0000-4000-8000-000000000004'   -- EQS hop3 한중제련 LIOH
+  );
+
+--  · 리튬 원광(MIN-LI, 스포듀민 정광 ~6% Li2O 환산): Li 2.8
+UPDATE supply_chain_map SET core_minerals = '{"Li":2.8}'::jsonb
+  WHERE edge_id IN (
+    '51111111-0000-4000-8000-000000000006',  -- iX3 hop5 호주리튬 MIN-LI
+    '54444444-0000-4000-8000-000000000005'   -- EQS hop4 칠레리튬 MIN-LI
+  );
+
+-- 서사상 NULL 유지(override 안 함): i4 hop4 Unverified Trader(52222222…005), GLC2 hop3 Global Mining(53222222…004).
+
 -- 공장별 탄소발자국 선언 (EU 배터리법 ART7)
 -- 기존 공급사 단위 carbon_intensity → 공장 단위 선언으로 이관.
 -- 대성정밀 화성공장(f4)은 의도적으로 미INSERT → ART7 선언 누락 → needs_human_review 트리거 유지.

@@ -492,7 +492,11 @@ class SupplyChainRepository:
             WITH RECURSIVE sc_tree AS (
                 SELECT
                     scm.child_supplier_id, s.provider_type,
-                    0 AS depth,
+                    -- [차수 SSOT] 표시 차수 = 엣지 hop_level(원청 0 기준 경로순번). 트리 재귀깊이
+                    --   대신 hop_level을 쓰는 이유: 겸업(한양셀 Module hop1 → Cell hop2)의 self-edge가
+                    --   아래 사이클 가드로 스킵돼, 재귀깊이로는 하위 노드가 1씩 당겨진다(예: 동성머티리얼
+                    --   실제 hop3인데 재귀깊이 2 → '2차' 오표시). hop_level은 seed 차수 SSOT라 정합.
+                    scm.hop_level AS depth,
                     -- 사이클 가드용 방문 경로. child_supplier_id는 suppliers INNER JOIN이라 NULL 없음.
                     ARRAY[scm.child_supplier_id] AS path,
                     scm.bom_version_id
@@ -506,7 +510,7 @@ class SupplyChainRepository:
 
                 SELECT
                     scm.child_supplier_id, s.provider_type,
-                    sct.depth + 1,
+                    scm.hop_level,
                     sct.path || scm.child_supplier_id,
                     scm.bom_version_id
                 FROM supply_chain_map scm
@@ -738,11 +742,14 @@ class SupplyChainRepository:
                 scm.verification_status,
                 scm.supply_period_from,
                 scm.supply_period_to,
-                scm.created_at
+                scm.created_at,
+                -- 제품별 핵심광물: 엣지 override 우선, 없으면 child 협력사 회사값으로 폴백
+                COALESCE(scm.core_minerals, cs.core_minerals) AS core_minerals
             FROM supply_chain_map scm
             JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
             JOIN products pr     ON pr.product_id = bv.product_id
-            LEFT JOIN parts p    ON p.part_id = scm.part_id
+            LEFT JOIN parts p     ON p.part_id = scm.part_id
+            LEFT JOIN suppliers cs ON cs.supplier_id = scm.child_supplier_id
             WHERE {where}
             ORDER BY p.tier_level NULLS LAST, scm.edge_id
         """)
