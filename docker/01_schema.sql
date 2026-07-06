@@ -493,7 +493,8 @@ CREATE TABLE supply_chain_map (
     discovered_via     UUID REFERENCES suppliers(supplier_id), -- 상위 협력사 대리 신고 시 FK
     source_system      VARCHAR(50) DEFAULT 'ERP' CONSTRAINT chk_map_source CHECK (source_system IN ('ERP', 'SUPPLIER_DECLARED')),
     verification_status VARCHAR(20) DEFAULT 'unverified' CONSTRAINT chk_map_verification CHECK (verification_status IN ('unverified', 'verified')),
-    
+    core_minerals      JSONB,  -- 제품별 핵심광물 override. NULL이면 child 협력사(suppliers.core_minerals)로 폴백
+
     created_at         TIMESTAMPTZ DEFAULT now()
 );
 
@@ -773,6 +774,7 @@ CREATE TABLE notifications (
     -- [멱등성] 같은 트리거(예: 동일 SLA 리마인드)가 중복 발송되지 않도록 하는 중복 차단 키.
     -- 예: 'sla_reminder:{request_id}:{date}'. UNIQUE로 중복 INSERT 차단.
     dedup_key         VARCHAR(255) UNIQUE,
+    target            JSONB,  -- 프론트 딥링크용 맵+협력사 좌표 (없으면 notification_type 기반 기본 딥링크로 폴백)
     created_at        TIMESTAMPTZ DEFAULT now()
 );
 
