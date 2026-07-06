@@ -670,7 +670,7 @@ CREATE TABLE submission_documents (
             'carbon_footprint_declaration', 'recycled_content_report', 'mining_permit',
             'mineral_production_report', 'safety_health_report', 'environmental_impact_assessment',
             'smelter_identification', 'rmap_certificate', 'cmrt_declaration',
-            'cbam_declaration', 'uflpa_documentation', 'other'
+            'cbam_declaration', 'uflpa_documentation', 'material_composition', 'other'
         )),
     file_hash     VARCHAR(64), -- SHA-256, document_integrity_rule(서류-폼 불일치) 대조용
     uploaded_by   UUID REFERENCES users(user_id),

@@ -13,8 +13,9 @@ infrastructure/acl.py  (담당: 팀원 E / 공통)
   협력사: supply_chain_map 직접 연결 노드(self + parent + children)만 허용.
 
 [user → supplier_id 매핑]
-  users.tenant_id == suppliers.tenant_id 를 통해 매핑한다.
-  tenant당 협력사가 여러 개인 경우 LIMIT 1 (대표 협력사).
+  users.supplier_id 컬럼을 직접 사용한다.
+  (기존 tenant_id 조인 방식은 tenant 하나에 협력사가 여러 개 걸리는 경우
+   LIMIT 1이 임의의 협력사를 골라버리는 버그가 있었음 — users.supplier_id로 대체)
 """
 from uuid import UUID
 
@@ -33,15 +34,15 @@ _EXEMPT_ROLES = {"admin", "owner_esg", "owner_purchasing"}
 async def get_supplier_id_for_user(user_id: UUID, db: AsyncSession) -> UUID | None:
     """user_id에 연결된 협력사 supplier_id를 반환한다. 없으면 None.
 
-    users.tenant_id == suppliers.tenant_id 조인으로 매핑.
+    users.supplier_id 컬럼을 직접 사용한다.
+    (기존 tenant_id 조인 방식은 tenant 하나에 협력사가 여러 개 걸리는 경우
+     LIMIT 1이 임의의 협력사를 골라버리는 버그가 있었음 — users.supplier_id로 대체)
     """
     row = (await db.execute(
         text("""
-            SELECT s.supplier_id
-            FROM suppliers s
-            JOIN users u ON s.tenant_id = u.tenant_id
-            WHERE u.user_id = :uid
-            LIMIT 1
+            SELECT supplier_id
+            FROM users
+            WHERE user_id = :uid
         """),
         {"uid": user_id},
     )).one_or_none()

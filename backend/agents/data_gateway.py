@@ -49,6 +49,7 @@ _DOC_CATEGORY_ENUM = frozenset({
     "cmrt_declaration",
     "cbam_declaration",
     "uflpa_documentation",
+    "material_composition",
     "other",
 })
 _DOC_CATEGORY_PROMPT = " | ".join(sorted(_DOC_CATEGORY_ENUM - {"other"})) + " | other"
