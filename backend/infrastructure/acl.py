@@ -13,8 +13,9 @@ infrastructure/acl.py  (담당: 팀원 E / 공통)
   협력사: supply_chain_map 직접 연결 노드(self + parent + children)만 허용.
 
 [user → supplier_id 매핑]
-  users.tenant_id == suppliers.tenant_id 를 통해 매핑한다.
-  tenant당 협력사가 여러 개인 경우 LIMIT 1 (대표 협력사).
+  users.supplier_id 컬럼을 직접 사용한다.
+  (기존 tenant_id 조인 방식은 tenant 하나에 협력사가 여러 개 걸리는 경우
+   LIMIT 1이 임의의 협력사를 골라버리는 버그가 있었음 — users.supplier_id로 대체)
 """
 from uuid import UUID
 

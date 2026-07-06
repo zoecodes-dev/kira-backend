@@ -57,6 +57,11 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     # 자사 소재국과 다를 수 있음)이라 별도 키로 둔다. ISO 코드 정규화는 이번 범위 밖.
     "origin_country":      ("company", "str", "원산지 국가(ISO 3166-1 alpha-2 또는 국가명)"),
 
+    # UFLPA(miner/trader 필수) — 전용 detail 테이블이 없어 suppliers.country(소재 국가)를
+    # 재사용한다. "country"(회사 소재지)와는 의미가 다른 별개 개념(특히 trader는 원산지가
+    # 자사 소재국과 다를 수 있음)이라 별도 키로 둔다. ISO 코드 정규화는 이번 범위 밖.
+    "origin_country":      ("company", "str", "원산지 국가(ISO 3166-1 alpha-2 또는 국가명)"),
+
     # 섹션 1 — 탄소발자국 (supplier_manufacturer_details)
     "manufacturing_process": ("manufacturing", "str",   "제조 공정 설명"),
     "energy_source":         ("manufacturing", "str",   "에너지원"),
@@ -66,6 +71,7 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
 
     # [W6 정리] 재활용(recycling)·원산지(origin)·지분FEOC(ownership) 섹션은 master-form에서
     # 제거됨(연관 테이블 삭제) → 저장 위치가 없는 필드는 AI 추출 대상에서도 제외한다.
+    # (원산지는 위 origin_country로 suppliers.country를 재사용해 예외적으로 추출한다.)
 }
 
 
