@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; -- uuid_generate_v4() 기본키 생�
 -- 영역 1. 테넌트 / 사용자 / 권한 (A 담당)
 -- ============================================================
 
--- [테이블 역할] 멀티테넌트 SaaS의 최상위 조직 단위. 원청사(OEM) 1개가 1개의 tenant로 기능.
+-- [테이블 역할] 멀티테넌트 SaaS의 최상위 조직 단위. 원청사(prime) 1개가 1개의 tenant로 기능.
 CREATE TABLE tenants (
     tenant_id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_name        VARCHAR(255) NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE users (
     is_active      BOOLEAN DEFAULT TRUE,
     last_login_at  TIMESTAMPTZ,
     manager_id     UUID REFERENCES users(user_id) ON DELETE SET NULL, -- [다단계 결재] 상급자 자기참조 (결재선 자동 구성)
-    supplier_id    UUID,  -- [협력사 본인 식별 §0.5] 협력사 계정이 대표하는 supplier. 로그인 supplier_id 클레임/포털 스코프 소스. OEM 계정은 NULL.
+    supplier_id    UUID,  -- [협력사 본인 식별 §0.5] 협력사 계정이 대표하는 supplier. 로그인 supplier_id 클레임/포털 스코프 소스. 원청(prime) 계정은 NULL.
     created_at     TIMESTAMPTZ DEFAULT now()
 );
 
@@ -104,6 +104,7 @@ CREATE TABLE suppliers (
     environmental_report_url VARCHAR(500),  -- 필요문서: 환경성적서(회원가입 시 수집) 업로드 URL
     self_assessment_doc_url VARCHAR(500),  -- 규제: 실사 자가진단 보고서 업로드 URL(내 기업 정보에서 제출·확인)
     material_composition_doc_url VARCHAR(500),  -- 필요문서: 소재구성 문서(핵심광물 함량 근거) 업로드 URL
+    carbon_footprint_doc_url VARCHAR(500),  -- 필요문서: 탄소발자국 신고서(탄소집약도/에너지원 근거) 업로드 URL
     is_unverified       BOOLEAN DEFAULT false,  -- 회원가입: 사업자등록증 미보유로 '미확인 상태' 등록(원청/상위가 검증)
     parent_supplier_id  UUID REFERENCES suppliers(supplier_id),
     established_year    INT,
@@ -146,6 +147,9 @@ CREATE TABLE supplier_factories (
     hidden_regulations    JSONB,
     supply_ratio_percent  NUMERIC(5,2),
     supply_quantity       VARCHAR(100),
+    -- 공장별 소재 구성(핵심광물 함량, suppliers.core_minerals와 동일 셰이프) — 광산(mining)은 사이트마다
+    -- 채굴 광물이 달라 회사 단위가 아니라 공장 단위로 관리한다.
+    core_minerals         JSONB,
     -- 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분해 factory_manager_* 로 명명
     factory_manager_name  VARCHAR(100),   -- 공장 담당자 이름
     factory_manager_role  VARCHAR(100),   -- 직책
@@ -688,6 +692,9 @@ CREATE TABLE data_request_log (
     request_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     requester_user_id   UUID REFERENCES users(user_id),
     target_supplier_id  UUID REFERENCES suppliers(supplier_id),
+    -- [map별 독립 제출] 이 자료요청/제출이 어느 공급망 맵(=제품 BOM 버전)에 대한 것인지.
+    --   같은 협력사가 여러 제품(맵)에 속하면 맵별로 별개 요청·제출·검토상태가 된다. NULL=회사 단위(레거시/맵무관).
+    bom_version_id      UUID REFERENCES bom_versions(bom_version_id),
     requested_data_type VARCHAR(100),
     requested_at        TIMESTAMPTZ DEFAULT now(),
     due_date            TIMESTAMPTZ,

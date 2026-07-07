@@ -34,6 +34,9 @@ async def on_supply_chain_gap_detected(payload: dict) -> None:
     # publish(default=str) 로 문자열화된 값 → 도메인 타입으로 복원.
     due_raw = payload.get("due_date")
     due_date = datetime.fromisoformat(due_raw) if due_raw else None
+    # [map별 독립 제출] gap이 검출된 공급망 맵(BOM). 없으면 회사 단위 요청(레거시).
+    bom_raw = payload.get("bom_version_id")
+    bom_version_id = UUID(str(bom_raw)) if bom_raw else None
 
     async with AsyncSessionLocal() as db:
         # create_and_request_submission 이 자체 커밋 + SubmissionRequested 발행까지 수행한다.
@@ -44,6 +47,7 @@ async def on_supply_chain_gap_detected(payload: dict) -> None:
             requested_data_type=requested_data_type,
             due_date=due_date,
             actor_id=UUID(str(actor_id)),
+            bom_version_id=bom_version_id,
         )
 
     logger.info(

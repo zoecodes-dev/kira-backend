@@ -43,6 +43,8 @@ class DataRequestLog(Base):
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4) # 요청 고유 ID (UUID)
     requester_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True) # 요청을 발송한 원청사 담당자 ID
     target_supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id"), nullable=True) # 데이터를 제출해야 하는 협력사 ID
+    # [map별 독립 제출] 이 요청/제출이 속한 공급망 맵(=제품 BOM 버전). NULL=회사 단위(레거시/맵무관).
+    bom_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("bom_versions.bom_version_id"), nullable=True)
     requested_data_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 요청하는 ESG 데이터 종류 (schema.sql VARCHAR(100) 일치)
     requested_at: Mapped[Optional[datetime]] = mapped_column(                               # 요청서 발송 시각 (자동 입력되는 표준 UTC 시간)
         DateTime(timezone=True), server_default=func.now(), nullable=True
@@ -199,6 +201,7 @@ class DataRequestCreateRequest(BaseModel):
     # requester_user_id/actor_id 미제공 시 라우터가 토큰의 현재 사용자로 채운다.
     requester_user_id: Optional[uuid.UUID] = None
     target_supplier_id: uuid.UUID
+    bom_version_id: Optional[uuid.UUID] = None  # [map별 독립 제출] 이 요청이 속한 공급망 맵(제품 BOM). None=회사 단위
     requested_data_type: str
     due_date: Optional[datetime] = None
     actor_id: Optional[uuid.UUID] = None
@@ -212,6 +215,7 @@ class DataRequestResponse(BaseModel):
     request_id: uuid.UUID
     requester_user_id: Optional[uuid.UUID] = None
     target_supplier_id: Optional[uuid.UUID] = None
+    bom_version_id: Optional[uuid.UUID] = None  # [map별 독립 제출] 이 요청이 속한 공급망 맵(제품 BOM)
     requested_data_type: Optional[str] = None
     requested_at: Optional[datetime] = None
     due_date: Optional[datetime] = None

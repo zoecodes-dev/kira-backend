@@ -341,6 +341,7 @@ async def get_factories(db: AsyncSession, supplier_id: UUID) -> List[dict]:
             SupplierFactory.destination_detail,
             SupplierFactory.supply_ratio_percent,
             SupplierFactory.supply_quantity,
+            SupplierFactory.core_minerals,
             SupplierFactory.factory_manager_name,
             SupplierFactory.factory_manager_role,
             SupplierFactory.factory_manager_phone,
@@ -422,7 +423,20 @@ async def get_completeness_inputs(db: AsyncSession, supplier_id: UUID) -> Option
                md.carbon_intensity, md.energy_source,
                rp.self_reported_risk_level,
                (SELECT count(*) FROM supplier_factories f
-                 WHERE f.supplier_id = s.supplier_id AND f.is_active) AS factory_count
+                 WHERE f.supplier_id = s.supplier_id AND f.is_active) AS factory_count,
+               -- 광산 전용 — 공장(사이트) 단위 원산지·소재구성(§factories.mine_*). 회사 컬럼이
+               --   아니라 mining-role 공장마다 다를 수 있어 목록으로 모아 서비스에서 판정한다.
+               (SELECT json_agg(json_build_object('country', f.country, 'core_minerals', f.core_minerals))
+                 FROM supplier_factories f
+                 WHERE f.supplier_id = s.supplier_id AND f.is_active AND f.factory_role = 'mining'
+               ) AS mining_factories,
+               -- 전 유형 공통 — 소재구성(핵심광물)이 이제 회사 단위가 아니라 공장(사이트) 단위라
+               --   역할 제한 없이 이 협력사의 활성 공장 전체를 모아 서비스에서 판정한다
+               --   (materials.any/materials.handled_any).
+               (SELECT json_agg(json_build_object('core_minerals', f.core_minerals))
+                 FROM supplier_factories f
+                 WHERE f.supplier_id = s.supplier_id AND f.is_active
+               ) AS factories_minerals
         FROM suppliers s
         LEFT JOIN supplier_manufacturer_details md ON md.supplier_id = s.supplier_id
         LEFT JOIN supplier_risk_profiles rp ON rp.supplier_id = s.supplier_id
@@ -433,13 +447,28 @@ async def get_completeness_inputs(db: AsyncSession, supplier_id: UUID) -> Option
     if row is None:
         return None
     data = dict(row)
+    import json
+
     cm = data.get("core_minerals")
     if isinstance(cm, str):  # raw text() JSONB는 str로 옴 → dict 파싱
-        import json
         try:
             data["core_minerals"] = json.loads(cm)
         except Exception:
             data["core_minerals"] = {}
+    mf = data.get("mining_factories")
+    if isinstance(mf, str):
+        try:
+            mf = json.loads(mf)
+        except Exception:
+            mf = []
+    data["mining_factories"] = mf or []
+    fm = data.get("factories_minerals")
+    if isinstance(fm, str):
+        try:
+            fm = json.loads(fm)
+        except Exception:
+            fm = []
+    data["factories_minerals"] = fm or []
     return data
 
 
@@ -559,6 +588,7 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
                pr.product_name,
                c.customer_name,
                scm.hop_level,
+               sr.factory_id,
                COALESCE(scm.core_minerals, s.core_minerals) AS core_minerals
         FROM supply_chain_map scm
         JOIN parts p ON p.part_id = scm.part_id
@@ -566,6 +596,9 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
         LEFT JOIN products pr      ON pr.product_id = bv.product_id
         LEFT JOIN customers c      ON c.customer_id = pr.customer_id
         LEFT JOIN suppliers s      ON s.supplier_id = scm.child_supplier_id
+        -- [맵별 탭] 이 협력사가 이 맵(엣지)에서 대는 공장 — supply_ratio(엣지→공장 분할)로 매핑.
+        --   프론트가 map 탭에서 '그 맵에 속한 공장'만 필터할 수 있게 factory_id 동봉.
+        LEFT JOIN supply_ratio sr  ON sr.edge_id = scm.edge_id
         WHERE scm.child_supplier_id = :sid
         ORDER BY c.customer_name NULLS LAST, pr.model_name NULLS LAST,
                  scm.bom_version_id, p.tier_level NULLS LAST, p.part_code
@@ -659,6 +692,7 @@ async def write_master_form_factories(
             applicable_regulations=f.applicable_regulations,
             supply_ratio_percent=f.supply_ratio_percent,
             supply_quantity=f.supply_quantity,
+            core_minerals=f.core_minerals,
             factory_manager_name=f.factory_manager_name,
             factory_manager_role=f.factory_manager_role,
             factory_manager_phone=f.factory_manager_phone,
@@ -698,18 +732,35 @@ async def write_master_form_factories(
                 .values(is_active=False)
             )
 
+    # 광산(mining) 사이트에 국가가 들어오면, 협력사 자신의 country가 아직 비어 있을 때 1회
+    #   백필한다 — supplychain 도메인의 origin_country 판정(has_origin_country)이
+    #   suppliers.country를 보므로, 공장 단위로만 입력되고 회사 컬럼이 계속 NULL이면
+    #   general-review 완성도와 공급망 갭 판정이 서로 다른 값을 보게 되는 불일치를 막는다.
+    mining_country = next((f.country for f in factories if f.factory_role == "mining" and f.country), None)
+    if mining_country:
+        supplier_country = (
+            await db.execute(select(Supplier.country).where(Supplier.supplier_id == supplier_id))
+        ).scalar_one_or_none()
+        if not supplier_country:
+            await db.execute(
+                update(Supplier).where(Supplier.supplier_id == supplier_id).values(country=mining_country)
+            )
+
     await db.flush()
     return factory_ids
 
 
 # ── 섹션 0: PIC (supplier_contacts replace-all) ───────────────────────────
 async def write_master_form_contacts(
-    db: AsyncSession, supplier_id: UUID, contacts: List[MasterFormContact]
+    db: AsyncSession, supplier_id: UUID, contacts: List[MasterFormContact], factory_ids: List[UUID]
 ) -> None:
-    """섹션 0 담당자 — supplier_contacts replace-all."""
+    """섹션 0 담당자 — supplier_contacts replace-all. factory_index(폼 factories 리스트
+    순서, §_factory_id_at)로 담당자를 특정 공장에 연결한다 — None/범위 밖이면 factory_id=None
+    (특정 공장에 속하지 않는 회사 공통 담당자)."""
     await db.execute(delete(SupplierContact).where(SupplierContact.supplier_id == supplier_id))
     for c in contacts:
-        db.add(SupplierContact(supplier_id=supplier_id, **c.model_dump()))
+        values = c.model_dump(exclude={"factory_index"})
+        db.add(SupplierContact(supplier_id=supplier_id, factory_id=_factory_id_at(c.factory_index, factory_ids), **values))
     await db.flush()
 
 

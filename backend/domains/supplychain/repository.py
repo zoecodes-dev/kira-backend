@@ -441,6 +441,32 @@ class SupplyChainRepository:
         })
         return bool(result.scalar())
 
+    async def is_ancestor(self, ancestor_id: str, descendant_id: str) -> bool:
+        """ancestor_id가 descendant_id의 상위(어느 차수든)인지 — supplier 도메인이 '연결된
+        상위 협력사의 대행 입력' 권한(제련소가 하위 광산 공장정보 입력)을 판정할 때 재사용한다.
+        would_create_cycle과 같은 하향 탐색 패턴(사이클 없는 DAG 가정)."""
+        query = text("""
+            WITH RECURSIVE descendants AS (
+                SELECT child_supplier_id
+                FROM supply_chain_map
+                WHERE parent_supplier_id = :ancestor_id
+
+                UNION ALL
+
+                SELECT scm.child_supplier_id
+                FROM supply_chain_map scm
+                JOIN descendants d ON scm.parent_supplier_id = d.child_supplier_id
+            )
+            SELECT EXISTS (
+                SELECT 1 FROM descendants WHERE child_supplier_id = :descendant_id
+            ) AS is_descendant;
+        """)
+        result = await self.session.execute(query, {
+            "ancestor_id": ancestor_id,
+            "descendant_id": descendant_id,
+        })
+        return bool(result.scalar())
+
     @trace_tool("supply_ratio_sum")
     async def get_ratio_sum_for_map(self, map_id: str) -> float:
         """해당 map_id에 등록된 supply_ratio.ratio_percentage 합. 100 초과 검증용."""
@@ -478,17 +504,34 @@ class SupplyChainRepository:
         return [dict(row._mapping) for row in result]
 
     @trace_tool("supply_chain_gaps_query")
-    async def get_supplier_field_data(self, product_id: str) -> List[Dict[str, Any]]:
+    async def get_supplier_field_data(
+        self, product_id: str, bom_version_id: str | None = None
+    ) -> List[Dict[str, Any]]:
         """
-        C2 gap 계산용: 제품 공급망 내 모든 고유 협력사와 각 규제 필수 필드의 보유 여부를 조회.
+        C2 gap 계산용: 제품 공급망 내 모든 (협력사, 등장 차수) 조합과 각 규제 필수 필드의 보유 여부를 조회.
+
+        bom_version_id 지정 시 그 맵(엣지) 안으로만 트리를 한정한다(미지정이면 이 제품의
+        전체 bom_version 통틀어 조회 — 기존 동작 유지).
+
+        [주의] 같은 협력사가 이 범위 안에서 서로 다른 hop_level에 여러 번 등장할 수 있다
+          (예: 겸업/이중소싱으로 1차이자 2차). 예전엔 회사당 최소 depth 하나로만 합쳐서
+          반환했으나, 그러면 그 협력사가 유일하게 채우던 더 깊은 차수가 완성도 집계에서
+          통째로 사라진다('1,2차가 같은 회사면 2차가 빠짐' 버그). 완성도는 회사 단위가 아니라
+          '그 차수의 관계'가 채워졌는지를 보는 것이므로, 등장하는 (협력사, depth) 조합마다
+          행을 하나씩 반환한다 — 프론트 depthStats가 차수별로 정확히 집계하도록.
 
         반환 컬럼:
-          supplier_id, provider_type, depth (트리 최소 depth)
+          supplier_id, provider_type, depth (등장한 hop_level — 같은 supplier_id가 여러 행일 수 있음)
           has_carbon_intensity          : manufacturer_details.carbon_intensity 존재 여부
           has_factory_carbon_decl       : factory_carbon_declarations 행 존재 여부
           has_mine_coordinates          : miner_details.mine_coordinates 존재 여부
         """
-        query = text("""
+        bom_filter = "AND scm.bom_version_id = :bom_version_id" if bom_version_id else ""
+        params: Dict[str, Any] = {"product_id": product_id}
+        if bom_version_id:
+            params["bom_version_id"] = bom_version_id
+
+        query = text(f"""
             WITH RECURSIVE sc_tree AS (
                 SELECT
                     scm.child_supplier_id, s.provider_type,
@@ -505,6 +548,7 @@ class SupplyChainRepository:
                 JOIN suppliers s ON s.supplier_id = scm.child_supplier_id
                 WHERE bv.product_id = :product_id
                   AND scm.parent_supplier_id IS NULL
+                  {bom_filter}
 
                 UNION ALL
 
@@ -523,12 +567,11 @@ class SupplyChainRepository:
                 WHERE scm.child_supplier_id <> ALL(sct.path)
             ),
             unique_suppliers AS (
-                SELECT DISTINCT ON (child_supplier_id)
-                    child_supplier_id AS supplier_id,
-                    provider_type,
-                    MIN(depth) OVER (PARTITION BY child_supplier_id) AS depth
+                -- [FIX] 예전엔 회사당 MIN(depth) 하나로 합쳐서, 같은 회사가 여러 차수에 걸치면
+                --   더 깊은 차수가 통째로 사라졌다. 이제 (협력사, depth) 조합별로 한 행씩 유지한다
+                --   (같은 depth로 여러 경로에서 도달해도 DISTINCT로 중복 한 번만).
+                SELECT DISTINCT child_supplier_id AS supplier_id, provider_type, depth
                 FROM sc_tree
-                ORDER BY child_supplier_id, depth
             ),
             root_suppliers AS (
                 SELECT DISTINCT child_supplier_id
@@ -565,7 +608,7 @@ class SupplyChainRepository:
             LEFT JOIN supplier_miner_details smind       ON smind.supplier_id = us.supplier_id
             ORDER BY us.depth, us.provider_type;
         """)
-        result = await self.session.execute(query, {"product_id": product_id})
+        result = await self.session.execute(query, params)
         return [dict(row._mapping) for row in result]
 
     @trace_tool("xinjiang_proximity_check")

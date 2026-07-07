@@ -38,11 +38,15 @@ async def upload_bytes(key: str, data: bytes, content_type: str | None = None) -
 
 
 async def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
-    """키에 대한 임시 다운로드 URL(get_object presigned, 기본 1시간)."""
+    """키에 대한 임시 다운로드 URL(get_object presigned, 기본 1시간).
+    key가 's3://bucket/...' URI 형식으로 들어오면(시드데이터·구 레코드 등) 버킷명을 뺀
+    순수 키만 취한다 — 그대로 Key에 넘기면 실제 버킷엔 없는 키라 NoSuchKey가 난다."""
+    clean_key = key.split("/", 3)[-1] if key.startswith("s3://") else key
+
     def _gen() -> str:
         return _s3_client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": key},
+            Params={"Bucket": S3_BUCKET, "Key": clean_key},
             ExpiresIn=expires_in,
         )
     return await asyncio.to_thread(_gen)

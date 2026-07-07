@@ -35,6 +35,7 @@ from backend.domains.supplier.models import (
 from backend.events.types import (
     RiskProfileUpdatedEvent,
     SupplierInvitedEvent,
+    SupplierStatusChangedEvent,
     SupplierDocumentUploadedEvent,
 )
 from backend.infrastructure import geocode
@@ -112,7 +113,7 @@ async def create_supplier_and_invite(
     # 1-d) 하위 PIC(담당자 3명) 저장 — stub 과 같은 트랜잭션. 다음 화면 재표기용
     #      (supplier_contacts). 초대만 되고 아직 가입 전이어도 정보는 남는다.
     if contacts:
-        await repository.write_master_form_contacts(db, supplier.supplier_id, contacts)
+        await repository.write_master_form_contacts(db, supplier.supplier_id, contacts, [])
 
     # 2) 커밋 — 영속화 확정 (repository는 flush만, 커밋은 service 책임)
     await db.commit()
@@ -144,8 +145,35 @@ async def supplier_in_tenant(
     return await repository.supplier_in_tenant(db, supplier_id, tenant_id)
 
 
+class MasterFormOnBehalfError(Exception):
+    """다른 협력사(예: 제련소)가 광산의 마스터폼을 대행 제출하려는데 권한/범위 조건을
+    충족하지 못했을 때. router가 403으로 매핑."""
+
+
+async def _assert_on_behalf_edit_allowed(
+    db: AsyncSession, caller_supplier_id: UUID, target: Supplier
+) -> None:
+    """제련소 등 상위 협력사가 하위 광산의 마스터폼을 '대신' 제출할 때의 권한 게이트.
+
+    광산은 시스템상 자기 계정으로도 편집 불가(입력 주체 아님)라, 연결된 상위 협력사가
+    공장(사이트) 정보만 대신 입력할 수 있게 한다(§_classify_fields 'factories.mine_*').
+    범위 제한(company/contacts/manufacturing/self_reported_risk_level 불가)은 여기서
+    payload를 검증하지 않고 submit_master_form이 해당 섹션의 write를 아예 호출하지 않는
+    방식으로 구조적으로 보장한다 — 프론트가 무엇을 보내든 영향을 줄 수 없다.
+    """
+    if target.provider_type != "miner":
+        raise MasterFormOnBehalfError("대행 입력은 광산 협력사에만 허용됩니다.")
+    # 동기 조회 read(CLAUDE.md 아키텍처 규칙 4-①) — 대행 입력 권한 판정은 이벤트로 대체
+    # 불가능한 실시간 조회이며, supplychain 도메인의 공급망 연결 여부를 확인해야 한다.
+    from backend.domains.supplychain.repository import SupplyChainRepository
+
+    connected = await SupplyChainRepository(db).is_ancestor(str(caller_supplier_id), str(target.supplier_id))
+    if not connected:
+        raise MasterFormOnBehalfError("공급망으로 연결된 협력사만 대행 입력할 수 있습니다.")
+
+
 async def submit_master_form(
-    db: AsyncSession, supplier_id: UUID, form: MasterFormRequest
+    db: AsyncSession, supplier_id: UUID, form: MasterFormRequest, caller_supplier_id: Optional[UUID] = None
 ) -> Optional[dict]:
     """
     마스터폼(표준화된 단일 입력양식) 제출 진입점 — POST /suppliers/{id}/master-form. (§4)
@@ -158,17 +186,28 @@ async def submit_master_form(
       0 회사·공장·PIC      B (repository.write_master_form_*)
       1 탄소발자국         B (manufacturer_details + factory_carbon_declarations)
 
+    caller_supplier_id가 path의 supplier_id와 다르면(제련소가 광산을 대행 제출) 대행
+    권한 게이트(_assert_on_behalf_edit_allowed)를 통과해야 하고(위반 시
+    MasterFormOnBehalfError → router 403), 통과하더라도 공장(factories) 섹션만 저장한다
+    — company/contacts/manufacturing/self_reported_risk_level은 프론트가 무엇을 보내든
+    무시한다(대행 입력 범위를 구조적으로 제한, payload 검증이 아니라 write 자체를 스킵).
+
     반환: 저장된 섹션 키 목록을 담은 dict. 없는 supplier_id면 None(→ router 404).
     """
     # 존재 확인 — 없는 supplier_id로 분배 저장(FK 위반 직전까지 진행) 방지.
-    if await repository.get_supplier_by_id(db, supplier_id) is None:
+    target = await repository.get_supplier_by_id(db, supplier_id)
+    if target is None:
         return None
+    on_behalf = caller_supplier_id is not None and caller_supplier_id != supplier_id
+    if on_behalf:
+        await _assert_on_behalf_edit_allowed(db, caller_supplier_id, target)
 
     sections_saved: List[str] = []
     try:
         # ── 섹션 0: 회사·공장·PIC (B) — 공장 먼저 생성해 factory_ids 확보 ──────
-        await repository.write_master_form_company(db, supplier_id, form.company)
-        sections_saved.append("company")
+        if not on_behalf:
+            await repository.write_master_form_company(db, supplier_id, form.company)
+            sections_saved.append("company")
 
         # ── 지오코딩: 좌표가 없는 공장은 주소(region)로 좌표를 채운다 ──────────
         #   - 프론트가 좌표를 직접 보냈으면(coordinates != None) 그대로 존중.
@@ -185,23 +224,24 @@ async def submit_master_form(
         if form.factories:
             sections_saved.append("factories")
 
-        await repository.write_master_form_contacts(db, supplier_id, form.contacts)
-        if form.contacts:
-            sections_saved.append("contacts")
+        if not on_behalf:
+            await repository.write_master_form_contacts(db, supplier_id, form.contacts, factory_ids)
+            if form.contacts:
+                sections_saved.append("contacts")
 
-        # ── 섹션 1: 탄소발자국 (B) — 탄소선언이 factory_ids를 FK로 참조 ────────
-        if form.manufacturing is not None:
-            await repository.write_master_form_manufacturing(
-                db, supplier_id, factory_ids, form.manufacturing
-            )
-            sections_saved.append("manufacturing")
+            # ── 섹션 1: 탄소발자국 (B) — 탄소선언이 factory_ids를 FK로 참조 ────────
+            if form.manufacturing is not None:
+                await repository.write_master_form_manufacturing(
+                    db, supplier_id, factory_ids, form.manufacturing
+                )
+                sections_saved.append("manufacturing")
 
-        # ── 규제: 실사 자가진단 결과 → supplier_risk_profiles.self_reported_risk_level ──
-        if form.self_reported_risk_level is not None:
-            await repository.set_self_reported_risk_level(
-                db, supplier_id, form.self_reported_risk_level
-            )
-            sections_saved.append("self_assessment")
+            # ── 규제: 실사 자가진단 결과 → supplier_risk_profiles.self_reported_risk_level ──
+            if form.self_reported_risk_level is not None:
+                await repository.set_self_reported_risk_level(
+                    db, supplier_id, form.self_reported_risk_level
+                )
+                sections_saved.append("self_assessment")
 
         # ── 단일 커밋 (atomic) — 여기 도달해야만 영속화 ───────────────────────
         await db.commit()
@@ -264,8 +304,8 @@ async def get_master_form_prefill(db: AsyncSession, supplier_id: UUID) -> Option
     }
 
 
-# 원청(OEM, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
-_OEM_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
+# 원청(prime, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
+_PRIME_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
 
 # provider_type → 채워야 할 CTI relationship 속성명 매핑
 _CTI_ATTR_BY_TYPE = {
@@ -351,6 +391,7 @@ async def update_supplier_detail(
         "environmental_report_url": "environmental_report",
         "self_assessment_doc_url": "self_assessment",
         "material_composition_doc_url": "material_composition",
+        "carbon_footprint_doc_url": "carbon_footprint",
     }
     prev_doc_urls = {col: getattr(supplier, col, None) for col in doc_url_kinds}
     # 입력 양식 영속화 — 테이블별로 분배(보낸 필드만).
@@ -447,7 +488,7 @@ async def get_supplier_detail(
         return None
 
     expected_attr = _CTI_ATTR_BY_TYPE.get(supplier.provider_type)
-    if supplier_id != _OEM_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
+    if supplier_id != _PRIME_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
         print(
             f"[CTI 점검] supplier {supplier_id} type={supplier.provider_type} "
             f"이지만 {expected_attr} 미적재 (자료 미수집 가능)"
@@ -621,9 +662,13 @@ def part_code_to_metal(part_code: Optional[str]) -> Optional[str]:
 #   · smelter               : 취급 금속 중 '최소 1개'면 소재구성 충족 — 🔴필수(전 금속 강제 아님)
 #   · manufacturer/recycler : 광물 '최소 1개' — 🟡권장(비차단)
 #   · trader                : 소재구성 없음, 공장은 🟡권장
-#   · miner                 : 입력 주체 아님 → 전부 ⚪ (required=0, rate=100)
+#   · miner                 : 광산 자신은 항상 읽기전용(자기 계정으로도 편집 불가)이지만 회사명·
+#     업종 외에 "원산지 국가"·"소재 구성"은 필요하다. 광산은 사이트(공장)마다 채굴 광물·소재국가가
+#     다를 수 있어 회사 단위 필드(country/core_minerals)가 아니라 공장 단위로 판정 —
+#     연결된 상위 협력사(제련소 등)가 그 광산의 "공장 정보"를 대행 입력하면 충족된다
+#     (§submit_master_form 대행 입력 권한 참고). 사업자등록번호 등 나머지는 요구하지 않는다.
 # 필드 키 네임스페이스는 프론트 섹션과 일치: 'company.*' · 'materials.*' · 'factories'
-#   · 'regulation.*' · 'documents.*'.
+#   · 'factories.mine_country' · 'factories.mine_composition' · 'regulation.*' · 'documents.*'.
 
 # 모든 판정대상 공통 🔴필수(회사·자가진단). ※ 사업자등록증은 필수 아님(사용자 지시).
 _COMMON_BLOCKING = (
@@ -637,10 +682,13 @@ _COMMON_BLOCKING = (
 
 def _classify_fields(provider_type: Optional[str], handled_metals: set) -> tuple:
     """provider_type(+제련소는 공급망 도출 금속)로 (🔴blocking, 🟡recommended) 필드 키를 만든다.
-    miner면 ([], []) — 입력 주체 아님."""
+    miner는 공통 블로킹셋 대신 회사명·업종 + 공장 단위 원산지·소재구성만 요구한다."""
     pt = provider_type or ""
     if pt == "miner":
-        return [], []
+        return [
+            "company.company_name", "company.provider_type",
+            "factories.mine_country", "factories.mine_composition",
+        ], []
 
     blocking = list(_COMMON_BLOCKING)
     recommended: list = []
@@ -695,15 +743,24 @@ def _field_filled(field: str, snap: dict, handled_metals: set = frozenset()) -> 
     cm = snap.get("core_minerals") or {}
     if field == "factories":
         return (snap.get("factory_count") or 0) > 0
+    if field == "factories.mine_country":
+        # 광산 공장(사이트) 중 하나라도 원산지 국가가 있으면 충족(제련소 대행 입력 포함).
+        return any(_val_present(mf.get("country")) for mf in snap.get("mining_factories") or [])
+    if field == "factories.mine_composition":
+        # 광산 공장(사이트) 중 하나라도 소재 구성(핵심광물 함량)이 1종 이상 있으면 충족.
+        return any(_mineral_present(mf.get("core_minerals") or {}) for mf in snap.get("mining_factories") or [])
     if field == "materials.any":
-        return _mineral_present(cm)
+        # 소재구성은 회사 단위가 아니라 공장(사이트) 단위 — 활성 공장 중 하나라도
+        # 핵심광물 함량이 1종 이상 있으면 충족(§factories_minerals, 광산의 factories.mine_composition과 동일 패턴).
+        return any(_mineral_present(f.get("core_minerals") or {}) for f in snap.get("factories_minerals") or [])
     if field == "materials.handled_any":
-        # 취급 금속(공급망 도출) 중 최소 1개 입력이면 충족. 도출 실패(맵 미구축)면
-        #   '최소 1개 광물'로 폴백(순환 0/0=100% 방지).
+        # 취급 금속(공급망 도출) 중 최소 1개가 어느 공장에든 입력돼 있으면 충족. 도출 실패(맵
+        #   미구축)면 '공장 중 하나라도 최소 1종 광물'로 폴백(순환 0/0=100% 방지).
         metals = [m for m in _TRACKED_METALS if m in handled_metals]
+        factories = snap.get("factories_minerals") or []
         if metals:
-            return any(_val_present(cm.get(m)) for m in metals)
-        return _mineral_present(cm)
+            return any(_val_present((f.get("core_minerals") or {}).get(m)) for f in factories for m in metals)
+        return any(_mineral_present(f.get("core_minerals") or {}) for f in factories)
     if field.startswith("materials."):
         return _val_present(cm.get(field.split(".", 1)[1]))
     if field == "regulation.self_reported_risk_level":
@@ -958,6 +1015,7 @@ async def submit_onboarding(
     supplier = await repository.get_supplier_by_id(db, supplier_id)
     if supplier is None:
         return None
+    from_status = supplier.status
 
     users = UserRepository(db)
     # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
@@ -1001,7 +1059,7 @@ async def submit_onboarding(
 
         # 4) PIC — supplier_contacts replace-all(대표 1명 is_primary).
         await repository.write_master_form_contacts(
-            db, supplier_id, _build_onboarding_contacts(body)
+            db, supplier_id, _build_onboarding_contacts(body), []
         )
 
         # 5) 동의 전이 — supplier_onboarding.consent_status='consent_agreed'.
@@ -1016,7 +1074,7 @@ async def submit_onboarding(
             db, supplier_id, "supplier_review", reason="온보딩 제출 — 원청 승인 대기"
         )
 
-        # 7) 활성 계정 생성 — tenant_id=초대한 OEM, role=supplier_ceo(결정 #3).
+        # 7) 활성 계정 생성 — tenant_id=초대한 원청, role=supplier_ceo(결정 #3).
         primary = next((c for c in body.contacts if c.is_primary), None)
         if primary is None and body.contacts:
             primary = body.contacts[0]
@@ -1058,7 +1116,7 @@ async def submit_onboarding(
             ))
             await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
                 MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
-            ])
+            ], [])
             await recompute_completeness(db, sub_supplier.supplier_id)
             # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
             # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
@@ -1096,6 +1154,13 @@ async def submit_onboarding(
             inviter_supplier_id=supplier_id,
         )
         await publish("SupplierInvited", dataclasses.asdict(event))
+
+    # 9-b) 이 협력사(모든 차수 공통) 자신의 온보딩 제출 — 원청에 STEP4 수신확인 알림
+    #   (onboarding_review_notify.py가 to_status=='supplier_review'일 때만 처리).
+    status_event = SupplierStatusChangedEvent(
+        supplier_id=supplier_id, from_status=from_status, to_status="supplier_review",
+    )
+    await publish("SupplierStatusChanged", dataclasses.asdict(status_event))
 
     return {
         "supplier_id": supplier_id,

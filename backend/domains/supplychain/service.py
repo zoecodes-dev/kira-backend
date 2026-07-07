@@ -166,9 +166,12 @@ class SupplyChainService:
             "updated_edges": updated,
         }
 
-    async def get_gaps(self, product_id: str) -> Dict[str, Any]:
+    async def get_gaps(self, product_id: str, bom_version_id: str | None = None) -> Dict[str, Any]:
         """
         C2 맵 gap 계산: 제품 공급망 노드별로 규제 필수 필드 중 미보유 항목 목록 반환.
+
+        bom_version_id 지정 시 그 맵으로 한정 — 프론트가 보는 특정 공급망 맵(활성 BOM 버전)의
+        차수 게이트(hop_level 기준)와 완성도 집계 기준을 일치시킨다.
 
         흐름:
           1. repository에서 공급망 협력사 + 필드 보유 현황 조회
@@ -192,7 +195,7 @@ class SupplyChainService:
             # geo_risk_flags: 지오 감사에서 실시간 계산 — 항상 보유로 간주
         }
 
-        supplier_rows = await self.repository.get_supplier_field_data(product_id)
+        supplier_rows = await self.repository.get_supplier_field_data(product_id, bom_version_id)
         if not supplier_rows:
             return {"product_id": product_id, "nodes": []}
 
@@ -229,7 +232,9 @@ class SupplyChainService:
 
             # 제3자 정보제공 동의서 — 규제 필수 필드 목록엔 없지만 데이터 계약 성립의 전제조건.
             # 원청(is_root_anchor) 자신은 동의 대상이 아니므로 제외. '요청됨'만으론 미완료로 집계.
-            if not row.get("is_root_anchor", False) and not row.get("has_consent_agreed"):
+            # 광산(miner)도 입력 주체가 아니라(제련소가 원산지·광물을 대신 제공) 동의서 대상이 아니다 —
+            # 안 그러면 나머지 항목이 전부 '해당 없음'인 광산도 이 항목 하나 때문에 gap_count=1로 잡힌다.
+            if provider_type != "miner" and not row.get("is_root_anchor", False) and not row.get("has_consent_agreed"):
                 missing.append({
                     "field_name":      "consent_agreement",
                     "field_label":     "제3자 정보제공 동의서",
@@ -256,6 +261,7 @@ class SupplyChainService:
         actor_id: UUID,
         due_date: Optional[datetime] = None,
         supplier_ids: Optional[List[UUID]] = None,
+        bom_version_id: Optional[UUID] = None,   # [map별 독립 제출] 지정 시 그 맵(BOM)으로 gap 한정 + 요청에 실림
     ) -> List[Dict[str, Any]]:
         """
         C3 맵 gap→자료요청 트리거(이벤트 방식). gap 있는 노드별로 SupplyChainGapDetected
@@ -271,9 +277,16 @@ class SupplyChainService:
         발행 순서 주의: 이 도메인은 여기서 DB write 를 하지 않는다(순수 read→publish).
           따라서 커밋 없이 발행해도 롤백 불일치가 없다(규칙 #3의 대상 아님).
         """
-        gaps = await self.get_gaps(product_id=str(product_id))
+        gaps = await self.get_gaps(
+            product_id=str(product_id),
+            bom_version_id=str(bom_version_id) if bom_version_id else None,
+        )
         nodes = gaps.get("nodes", [])
         target_ids = {str(s) for s in supplier_ids} if supplier_ids else None
+
+        # get_gaps는 같은 협력사가 여러 차수에 걸치면 (협력사, depth)별로 행을 하나씩 반환한다.
+        # 자료요청 트리거는 회사 단위 행동이라 중복 발행하지 않도록 supplier_id로 한 번만 처리.
+        seen_supplier_ids: set[str] = set()
 
         accepted: List[Dict[str, Any]] = []
         for node in nodes:
@@ -281,10 +294,14 @@ class SupplyChainService:
                 continue
             if target_ids and node["supplier_id"] not in target_ids:
                 continue
+            if node["supplier_id"] in seen_supplier_ids:
+                continue
+            seen_supplier_ids.add(node["supplier_id"])
 
             requested_data_type = ",".join(f["field_name"] for f in node["missing_fields"])
             event = SupplyChainGapDetectedEvent(
                 product_id=product_id,
+                bom_version_id=bom_version_id,
                 supplier_id=node["supplier_id"],
                 requested_data_type=requested_data_type,
                 requester_user_id=requester_user_id,
@@ -372,16 +389,31 @@ class SupplyChainService:
           ready_for_final = 미보유 필드 0 + 비율검증 통과 + 협력사 1개 이상
         엑셀(고객사 제출용) 다운로드 전, 이 판정이 True여야 완결된 맵으로 본다.
         """
-        gaps = await self.get_gaps(product_id)
+        gaps = await self.get_gaps(product_id, bom_version_id)
         validation = await self.repository.get_supply_chain_validation(
             product_id, tenant_id, bom_version_id
         )
 
         # 루트 앵커(원청/Tier0)는 협력사 집계에서 제외 — 실제 공급사만 본다.
-        supplier_nodes = [n for n in gaps.get("nodes", []) if not n.get("is_root_anchor")]
+        all_supplier_nodes = [n for n in gaps.get("nodes", []) if not n.get("is_root_anchor")]
+        # max_tier(차수 게이트 참고용)는 등장한 모든 depth 중 최댓값이라 중복 제거 전 리스트로 계산.
+        max_tier = max((n.get("depth", 0) for n in all_supplier_nodes), default=0)
+
+        # [FIX] get_gaps는 이제 같은 협력사가 여러 차수(hop_level)에 걸치면 (협력사, depth)
+        #   조합마다 행을 하나씩 반환한다(차수별 완성도 집계용). 하지만 여기(요약 롤업)는
+        #   "회사 몇 곳·건수 몇 건"이라 회사 단위 집계가 맞다 — 안 그러면 겸업 회사 하나가
+        #   supplier_count/gap 건수에 두 번 잡히고, gaps_by_supplier로 자료요청을 두 번 보낸다.
+        seen_supplier_ids: set[str] = set()
+        supplier_nodes: List[Dict[str, Any]] = []
+        for n in all_supplier_nodes:
+            sid = n["supplier_id"]
+            if sid in seen_supplier_ids:
+                continue
+            seen_supplier_ids.add(sid)
+            supplier_nodes.append(n)
+
         nodes_with_gaps = [n for n in supplier_nodes if n.get("gap_count", 0) > 0]
         total_gap = sum(n.get("gap_count", 0) for n in supplier_nodes)
-        max_tier = max((n.get("depth", 0) for n in supplier_nodes), default=0)
         ratio_valid = bool(validation.get("all_valid"))
         ready = total_gap == 0 and ratio_valid and len(supplier_nodes) > 0
 
@@ -405,6 +437,46 @@ class SupplyChainService:
                 for n in nodes_with_gaps
             ],
         }
+
+    async def get_evaluation_report(
+        self,
+        product_id: str,
+        tenant_id: str,
+        bom_version_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """공급망 맵 '평가 리포트'(종합 판정 문구) 조회 — 조회 전용.
+
+        판정 문구의 SSOT는 배치 파이프라인 종합판정(agents/final_judgment.py →
+        batch_final_judgment). 배치는 bom_version_id로 이 맵과 연결되므로, 프론트가
+        가진 product_id(+bom_version_id)로 그 맵에 걸린 최신 배치 판정을 끌어와 노출한다.
+
+        [도메인 격리 예외 — CLAUDE.md 규칙4] 판정은 batches 도메인 소유 데이터이고
+        이벤트로 대체 불가한 '동기 조회 read'라, batches repository의 read 함수를
+        직접 호출한다(write/커밋 없음). 세션은 이 서비스의 repository 세션을 공유한다.
+        """
+        from backend.domains.batches.repository import get_final_judgment_by_bom_version
+
+        judgment = await get_final_judgment_by_bom_version(
+            self.repository.session,
+            product_id=product_id,
+            tenant_id=tenant_id,
+            bom_version_id=bom_version_id,
+        )
+        base = {
+            "product_id": product_id,
+            "bom_version_id": bom_version_id,
+            "available": judgment is not None,
+            "batch_id": None,
+            "overall_verdict": None,
+            "executive_summary": None,
+            "key_risks": [],
+            "recommended_action": None,
+            "confidence": None,
+            "created_at": None,
+        }
+        if judgment is not None:
+            base.update(judgment)
+        return base
 
     async def export_supply_chain_xlsx(
         self,
