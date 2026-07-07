@@ -104,6 +104,7 @@ CREATE TABLE suppliers (
     environmental_report_url VARCHAR(500),  -- 필요문서: 환경성적서(회원가입 시 수집) 업로드 URL
     self_assessment_doc_url VARCHAR(500),  -- 규제: 실사 자가진단 보고서 업로드 URL(내 기업 정보에서 제출·확인)
     material_composition_doc_url VARCHAR(500),  -- 필요문서: 소재구성 문서(핵심광물 함량 근거) 업로드 URL
+    carbon_footprint_doc_url VARCHAR(500),  -- 필요문서: 탄소발자국 신고서(탄소집약도/에너지원 근거) 업로드 URL
     is_unverified       BOOLEAN DEFAULT false,  -- 회원가입: 사업자등록증 미보유로 '미확인 상태' 등록(원청/상위가 검증)
     parent_supplier_id  UUID REFERENCES suppliers(supplier_id),
     established_year    INT,
