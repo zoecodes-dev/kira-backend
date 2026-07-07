@@ -115,6 +115,7 @@ class SupplierFactory(Base):
     hidden_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)
     supply_ratio_percent: Mapped[Optional[float]] = mapped_column(NUMERIC(5, 2))
     supply_quantity: Mapped[Optional[str]] = mapped_column(String(100))
+    core_minerals: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장(사이트)별 소재 구성
     # 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분: factory_manager_*
     factory_manager_name: Mapped[Optional[str]] = mapped_column(String(100))
     factory_manager_role: Mapped[Optional[str]] = mapped_column(String(100))
@@ -407,6 +408,7 @@ class FactoryDTO(BaseModel):
     destination_detail: Optional[str] = None
     supply_ratio_percent: Optional[float] = None
     supply_quantity: Optional[str] = None
+    core_minerals: Optional[dict] = None
     factory_manager_name: Optional[str] = None
     factory_manager_role: Optional[str] = None
     factory_manager_phone: Optional[str] = None
@@ -590,6 +592,7 @@ class MasterFormFactory(BaseModel):
     applicable_regulations: Optional[list] = None
     supply_ratio_percent: Optional[float] = None
     supply_quantity: Optional[str] = None
+    core_minerals: Optional[dict] = None  # 공장(사이트)별 소재 구성 — 광산은 사이트마다 채굴 광물이 다름
     # 공장 담당자(공장 단위) — 이름/직책/연락처/메일
     factory_manager_name: Optional[str] = None
     factory_manager_role: Optional[str] = None
@@ -608,6 +611,9 @@ class MasterFormContact(BaseModel):
     mobile: Optional[str] = None
     is_primary: bool = False
     language: Optional[str] = None
+    # 이 담당자가 속한 공장 — 폼 안 factories 리스트 순서(같은 요청에서 신규 공장도 즉시 연결
+    # 가능). None이면 특정 공장에 속하지 않는 회사 공통 담당자(§MasterFormFactoryCarbon.factory_index와 동일 패턴).
+    factory_index: Optional[int] = None
 
 
 # ----- 섹션 1: 탄소발자국 (supplier_manufacturer_details / factory_carbon_declarations) -----

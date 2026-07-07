@@ -441,6 +441,32 @@ class SupplyChainRepository:
         })
         return bool(result.scalar())
 
+    async def is_ancestor(self, ancestor_id: str, descendant_id: str) -> bool:
+        """ancestor_id가 descendant_id의 상위(어느 차수든)인지 — supplier 도메인이 '연결된
+        상위 협력사의 대행 입력' 권한(제련소가 하위 광산 공장정보 입력)을 판정할 때 재사용한다.
+        would_create_cycle과 같은 하향 탐색 패턴(사이클 없는 DAG 가정)."""
+        query = text("""
+            WITH RECURSIVE descendants AS (
+                SELECT child_supplier_id
+                FROM supply_chain_map
+                WHERE parent_supplier_id = :ancestor_id
+
+                UNION ALL
+
+                SELECT scm.child_supplier_id
+                FROM supply_chain_map scm
+                JOIN descendants d ON scm.parent_supplier_id = d.child_supplier_id
+            )
+            SELECT EXISTS (
+                SELECT 1 FROM descendants WHERE child_supplier_id = :descendant_id
+            ) AS is_descendant;
+        """)
+        result = await self.session.execute(query, {
+            "ancestor_id": ancestor_id,
+            "descendant_id": descendant_id,
+        })
+        return bool(result.scalar())
+
     @trace_tool("supply_ratio_sum")
     async def get_ratio_sum_for_map(self, map_id: str) -> float:
         """해당 map_id에 등록된 supply_ratio.ratio_percentage 합. 100 초과 검증용."""
