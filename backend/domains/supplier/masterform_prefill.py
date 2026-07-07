@@ -1,5 +1,5 @@
 """
-domains/supplier/masterform_prefill.py  (담당: 팀원 B · 은진)
+domains/supplier/masterform_prefill.py  (담당: 팀원 B · 은진 / KIRA W5 AP)
 
 마스터폼 'AI 자동 채움(prefill)'의 도메인 지식 SSOT.
 
@@ -17,6 +17,14 @@ AP(AI 파싱 강화)의 목표: 협력사가 양식을 직접 못 채워도, 보
 스코프: '한 문서에서 단일값으로 신뢰성 있게 뽑히는' 스칼라 필드만 자동 채움 대상이다.
 다건/구조화 섹션(공장 목록·연락처·탄소 선언 다건)은 AI 단일 추출로 안전하게 못
 채우므로 협력사가 직접 입력한다.
+[W6] master-form에서 제거된 섹션(재활용·지분FEOC, 연관 테이블 삭제)의 필드는
+저장 위치가 없으므로 카탈로그에서도 제외했다. 현재 자동 채움 대상은 company·
+manufacturing 스칼라뿐이다.
+[UFLPA] origin_country는 예외적으로 company 섹션에 추가한다 — 전용 저장 테이블은
+W6에서 삭제됐지만, regulation_required_fields가 miner/trader에 요구하는 필드라
+suppliers.country(소재 국가)를 재사용해 추출만이라도 가능하게 한다. 승격
+(promote_extraction_to_details)은 company 섹션 필드라 자동 제외 대상이며 이번
+스코프에도 포함하지 않는다 — 상세는 FIELD_CATALOG 내 주석 참고.
 """
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,29 +42,38 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     # 섹션 0 — 회사 (suppliers)
     "company_name":        ("company", "str", "회사 정식 상호"),
     "company_name_en":     ("company", "str", "영문 상호"),
+    "ceo_name":            ("company", "str", "대표자명"),
     "business_reg_no":     ("company", "str", "사업자등록번호"),
+    "corporate_reg_no":    ("company", "str", "법인등록번호"),
     "duns_number":         ("company", "str", "DUNS 번호"),
+    "tax_number":          ("company", "str", "납세자번호(VAT 등)"),
+    "website":             ("company", "str", "웹사이트"),
+    "established_year":    ("company", "int", "설립연도"),
+    "employee_count":      ("company", "int", "임직원 수"),
     "provider_type":       ("company", "str", "공급자 유형(manufacturer/recycler/trader/miner)"),
 
-    # 핵심광물 함량(%) — suppliers.core_minerals JSONB 저장 대상
-    "li_content":          ("company", "float", "리튬(Li) 함량(%)"),
-    "co_content":          ("company", "float", "코발트(Co) 함량(%)"),
-    "ni_content":          ("company", "float", "니켈(Ni) 함량(%)"),
-    "mn_content":          ("company", "float", "망간(Mn) 함량(%)"),
-    "natural_graphite_content": ("company", "float", "천연흑연 함량(%)"),
-    "artificial_graphite_content": ("company", "float", "인조흑연 함량(%)"),
+    # UFLPA(miner/trader 필수) — 전용 detail 테이블이 없어 suppliers.country(소재 국가)를
+    # 재사용한다. "country"(회사 소재지)와는 의미가 다른 별개 개념(특히 trader는 원산지가
+    # 자사 소재국과 다를 수 있음)이라 별도 키로 둔다. ISO 코드 정규화는 이번 범위 밖.
+    "origin_country":      ("company", "str", "원산지 국가(ISO 3166-1 alpha-2 또는 국가명)"),
 
-    # 실사 자가진단 결과 — supplier_risk_profiles.self_reported_risk_level 저장 대상
-    "self_reported_risk_level": ("company", "str", "실사 자가진단 결과(low/medium/high/critical 중 하나로 명시된 경우만 추출)"),
+    # UFLPA(miner/trader 필수) — 전용 detail 테이블이 없어 suppliers.country(소재 국가)를
+    # 재사용한다. "country"(회사 소재지)와는 의미가 다른 별개 개념(특히 trader는 원산지가
+    # 자사 소재국과 다를 수 있음)이라 별도 키로 둔다. ISO 코드 정규화는 이번 범위 밖.
+    "origin_country":      ("company", "str", "원산지 국가(ISO 3166-1 alpha-2 또는 국가명)"),
 
     # 섹션 1 — 탄소발자국 (supplier_manufacturer_details)
+    "manufacturing_process": ("manufacturing", "str",   "제조 공정 설명"),
     "energy_source":         ("manufacturing", "str",   "에너지원"),
+    "capacity":              ("manufacturing", "str",   "생산 능력"),
     "carbon_intensity":      ("manufacturing", "float", "탄소집약도(kgCO2eq/kg)"),
     "verification_status":   ("manufacturing", "str",   "제3자 검증 여부(예: third-party verified / self-declared / not verified) — 명시된 경우만 추출, 미명시 시 unparsed_fields에 포함"),
 
-    # 재활용(recycling)·원산지(origin)·지분FEOC(ownership) 섹션은 master-form에서
+    # [W6 정리] 재활용(recycling)·원산지(origin)·지분FEOC(ownership) 섹션은 master-form에서
     # 제거됨(연관 테이블 삭제) → 저장 위치가 없는 필드는 AI 추출 대상에서도 제외한다.
+    # (원산지는 위 origin_country로 suppliers.country를 재사용해 예외적으로 추출한다.)
 }
+
 
 def catalog_prompt_lines() -> str:
     """

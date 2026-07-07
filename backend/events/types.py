@@ -10,8 +10,7 @@ payload는 JSON 직렬화 가능해야 하며, event_bus.publish(event_name, pay
 출처:
 - spec 7장 본문/표: Product, Supplier, Submission, Verification, Risk,
   GeoRiskDetected, ComplianceCompleted, HITL
-- backend_md_additions I·E-1절: RiskProfileUpdated, FactoryRegulationChanged,
-  SubmissionStatusChanged
+- backend_md_additions I·E-1절: RiskProfileUpdated, SubmissionStatusChanged
 - 폴더·큐·도메인·state·이벤트 전부 verification으로 통일 (events/types.py 기준).
 """
 from dataclasses import dataclass, field
@@ -40,14 +39,6 @@ class SupplierInvitedEvent:
     #   수신: D(supplychain)가 supply_chain_map.discovered_via 에 기록 → pool 구축.
     inviter_supplier_id: Optional[UUID] = None
     event_name: str = "SupplierInvited"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class SupplierConnectedEvent:
-    supplier_id: Optional[UUID] = None
-    tier: Optional[int] = None
-    event_name: str = "SupplierConnected"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
@@ -87,19 +78,6 @@ class SupplierDocumentUploadedEvent:
     file_name: Optional[str] = None
     doc_kind: Optional[str] = None
     event_name: str = "SupplierDocumentUploaded"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class FactoryRegulationChangedEvent:
-    """
-    공장의 applicable_regulations 컬럼 수정 시 발행. (backend_md_additions I절)
-    발행: B → 수신: C(Compliance)
-    """
-    factory_id: Optional[UUID] = None
-    supplier_id: Optional[UUID] = None
-    applicable_regulations: list = field(default_factory=list)
-    event_name: str = "FactoryRegulationChanged"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
@@ -232,6 +210,7 @@ class RiskEscalatedEvent:
 @dataclass
 class RiskResolvedEvent:
     batch_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None  # 리스크 프로필은 supplier당 1개 — 어느 협력사 리스크가 닫혔는지 (감사)
     resolved_by: Optional[UUID] = None
     event_name: str = "RiskResolved"
     occurred_at: datetime = field(default_factory=_now_utc)
@@ -261,25 +240,6 @@ class HITLRequestedEvent:
 
 
 @dataclass
-class HITLAssignedEvent:
-    review_id: Optional[UUID] = None
-    batch_id: Optional[UUID] = None
-    reviewer_id: Optional[UUID] = None
-    event_name: str = "HITLAssigned"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class HITLApprovedEvent:
-    review_id: Optional[UUID] = None
-    batch_id: Optional[UUID] = None
-    reviewer_id: Optional[UUID] = None
-    note: Optional[str] = None
-    event_name: str = "HITLApproved"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
 class HITLRejectedEvent:
     review_id: Optional[UUID] = None
     batch_id: Optional[UUID] = None
@@ -301,31 +261,27 @@ class ValidationResult:
 
 
 # ============================================================
-# RecycledMaterialsSchema (B·C 공유 — 도메인 간 계약)
-#
-# supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
-# B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
-#
-# 사용법:
-#   저장(B): RecycledMaterialsSchema(co=18.0, ni=7.0).model_dump(exclude_none=True)
-#   검증(C): RecycledMaterialsSchema(**row.recycled_materials)
+# [비활성화 2026-07] RecycledMaterialsSchema — 재활용 함량 판정 제거에 따라 폐기.
+#   재활용 함량은 입력받는 값이 아니고(마스터폼·문서추출·전용 테이블 부재),
+#   supplier_recycler_details 테이블도 스키마에 존재하지 않던 dangling 계약이었음.
+#   compliance.py judge_recycled_content 비활성화와 동기화. 입력 경로가 생기면 복구할 것.
 # ============================================================
-class RecycledMaterialsSchema(BaseModel):
-    """
-    supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
-    key = 소문자 원소기호(co/ni/li/pb), value = 재활용 함량(%).
-    B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
-    """
-    co: Optional[float] = None   # 코발트 함량 %
-    ni: Optional[float] = None   # 니켈 함량 %
-    li: Optional[float] = None   # 리튬 함량 %
-    pb: Optional[float] = None   # 납 함량 %
-
-    @field_validator("co", "ni", "li", "pb")
-    @classmethod
-    def _pct_range(cls, v):
-        if v is not None and not (0 <= v <= 100):
-            raise ValueError("재활용 함량은 0~100% 범위여야 합니다")
-        return v
-
-    model_config = {"extra": "forbid"}   # 정의 안 된 key 저장 시 에러 → 오타·오용 즉시 발견
+# class RecycledMaterialsSchema(BaseModel):
+#     """
+#     supplier_recycler_details.recycled_materials JSONB 의 공식 구조.
+#     key = 소문자 원소기호(co/ni/li/pb), value = 재활용 함량(%).
+#     B(저장)·C(검증)가 동일 클래스를 공유해 key 불일치를 구조적으로 차단한다.
+#     """
+#     co: Optional[float] = None   # 코발트 함량 %
+#     ni: Optional[float] = None   # 니켈 함량 %
+#     li: Optional[float] = None   # 리튬 함량 %
+#     pb: Optional[float] = None   # 납 함량 %
+#
+#     @field_validator("co", "ni", "li", "pb")
+#     @classmethod
+#     def _pct_range(cls, v):
+#         if v is not None and not (0 <= v <= 100):
+#             raise ValueError("재활용 함량은 0~100% 범위여야 합니다")
+#         return v
+#
+#     model_config = {"extra": "forbid"}   # 정의 안 된 key 저장 시 에러 → 오타·오용 즉시 발견

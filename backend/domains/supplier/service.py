@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domains.supplier import repository
@@ -42,6 +43,7 @@ from backend.infrastructure.trace import trace_node
 # AP: 추출결과 read는 E 제공(submission repository), 마스터폼 prefill 변환은 B(supplier)
 #   masterform_prefill. 둘 다 무거운 LLM 스택을 끌어오지 않는 가벼운 호출이다.
 from backend.domains.submission import repository as submission_repo
+from backend.domains.submission.models import DataRequestLog
 from backend.domains.supplier import masterform_prefill
 # [회원가입 — 결정 #4] 온보딩 제출은 "제출→즉시 로그인 / 중복 즉시 409"라 이벤트가 아니라
 #   동기 처리한다. 도메인 격리는 users repository '재사용 + 단일 커밋'으로 지킨다(새 계정
@@ -53,7 +55,7 @@ from backend.infrastructure.security import get_password_hash
 #   '재사용 + 온보딩 단일 커밋'으로 처리(새 트랜잭션·커밋을 열지 않는다).
 import hashlib
 from backend.domains.data_consent import repository as consent_repo
-from backend.domains.data_consent.models import ConsentUpdateBody
+from backend.domains.data_consent.models import ConsentCreateBody, ConsentUpdateBody
 
 # ── 정책 상수 ───────────────────────────────────────────────
 # 협력사 온보딩 SLA. PROJECT_CORE: 14일 미응답 → Reminder, 21일 → Escalation.
@@ -111,10 +113,6 @@ async def create_supplier_and_invite(
     #      (supplier_contacts). 초대만 되고 아직 가입 전이어도 정보는 남는다.
     if contacts:
         await repository.write_master_form_contacts(db, supplier.supplier_id, contacts)
-
-    # 1-e) 완성도 행 초기 시드 — 초대 직후부터 provider_type별 완성도 조회가 가능하도록.
-    #      (autoflush로 위 risk_profile/onboarding row가 먼저 반영된 뒤 계산된다.)
-    await recompute_completeness(db, supplier.supplier_id)
 
     # 2) 커밋 — 영속화 확정 (repository는 flush만, 커밋은 service 책임)
     await db.commit()
@@ -205,9 +203,6 @@ async def submit_master_form(
             )
             sections_saved.append("self_assessment")
 
-        # ── 완성도 재계산(같은 트랜잭션) — 방금 flush된 회사·소재·공장·규제를 반영 ──
-        await recompute_completeness(db, supplier_id)
-
         # ── 단일 커밋 (atomic) — 여기 도달해야만 영속화 ───────────────────────
         await db.commit()
     except Exception:
@@ -269,8 +264,8 @@ async def get_master_form_prefill(db: AsyncSession, supplier_id: UUID) -> Option
     }
 
 
-# 원청(tier0) 노드 — Kira 자기 자신. manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
-_PRIME_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
+# 원청(OEM, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
+_OEM_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
 
 # provider_type → 채워야 할 CTI relationship 속성명 매핑
 _CTI_ATTR_BY_TYPE = {
@@ -380,8 +375,6 @@ async def update_supplier_detail(
         await repository.upsert_manufacturer_fields(db, supplier_id, manuf)
     if self_risk is not None:          # 실사 자가진단 → risk_profiles
         await repository.set_self_reported_risk_level(db, supplier_id, self_risk)
-    # 완성도 재계산(같은 트랜잭션) — 방금 갱신한 필드 반영.
-    await recompute_completeness(db, supplier_id)
     await db.commit()
 
     # ── 커밋 성공 후 발행 (PROJECT_CORE 5-2) ──────────────────────────────
@@ -454,7 +447,7 @@ async def get_supplier_detail(
         return None
 
     expected_attr = _CTI_ATTR_BY_TYPE.get(supplier.provider_type)
-    if supplier_id != _PRIME_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
+    if supplier_id != _OEM_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
         print(
             f"[CTI 점검] supplier {supplier_id} type={supplier.provider_type} "
             f"이지만 {expected_attr} 미적재 (자료 미수집 가능)"
@@ -517,6 +510,11 @@ async def upsert_risk_score(
     score = max(0, min(100, score))   # 0~100 클램프
     new_level = _score_to_risk_level(score)
 
+    # 변경 전 값 캡처 (append-only 감사 이력의 from_*)
+    prior = await repository.get_risk_profile_by_supplier(db, supplier_id)
+    from_score = prior.overall_risk_score if prior else None
+    from_level = prior.risk_level if prior else None
+
     profile = await repository.upsert_risk_profile(
         db,
         supplier_id=supplier_id,
@@ -525,6 +523,19 @@ async def upsert_risk_score(
         last_risk_review_at=datetime.now(timezone.utc),
     )
     await repository.update_supplier_risk_level(db, supplier_id, new_level)
+
+    # 리스크 변경 감사 이력 — supplier_risk_profiles 는 단일행 덮어쓰기라 별도 append-only 기록.
+    #   같은 트랜잭션에서 커밋되어 프로필 변경과 원자적으로 남는다. (자동 산정 → changed_by NULL)
+    if from_score != score or from_level != new_level:
+        await db.execute(
+            text("""
+                INSERT INTO risk_score_history
+                    (supplier_id, from_score, to_score, from_level, to_level, reason, changed_by)
+                VALUES (:sid, :fs, :ts, :fl, :tl, :reason, NULL)
+            """),
+            {"sid": str(supplier_id), "fs": from_score, "ts": score,
+             "fl": from_level, "tl": new_level, "reason": "검증 완료 리스크 점수 반영"},
+        )
 
     await db.commit()
     await db.refresh(profile)
@@ -542,6 +553,30 @@ async def upsert_risk_score(
 async def get_risk_profile(supplier_id: UUID, db: AsyncSession) -> SupplierRiskProfile | None:
     """supplier_risk_profiles 단건 조회 (하위 3개 JOIN은 W4 종합 스코어링에서 확장)."""
     return await repository.get_risk_profile_by_supplier(db, supplier_id)
+
+
+# ============================================================
+# BE-3: 7탭 모달 조회 (기존 테이블 SELECT 전용)
+#   존재하지 않는 협력사면 None을 반환 → router가 404로 매핑.
+# ============================================================
+async def get_factories(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
+    """사업장 탭 — 공장/광산 목록(좌표 lat/lng 포함)."""
+    if await repository.get_supplier_by_id(db, supplier_id) is None:
+        return None
+    return {
+        "supplier_id": supplier_id,
+        "factories": await repository.get_factories(db, supplier_id),
+    }
+
+
+async def get_contacts(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
+    """담당자 연락처 탭 — supplier_contacts 목록(대표 우선)."""
+    if await repository.get_supplier_by_id(db, supplier_id) is None:
+        return None
+    return {
+        "supplier_id": supplier_id,
+        "contacts": await repository.get_contacts(db, supplier_id),
+    }
 
 
 # ============================================================
@@ -729,64 +764,41 @@ async def has_blocking_gaps(db: AsyncSession, supplier_id: UUID) -> bool:
     return any(not _field_filled(f, snap, metals) for f in blocking)
 
 
-# ============================================================
-# BE-3: 7탭 모달 조회 (기존 테이블 SELECT 전용)
-#   존재하지 않는 협력사면 None을 반환 → router가 404로 매핑.
-# ============================================================
-async def get_factories(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """사업장 탭 — 공장 목록(좌표 lat/lng 포함).
-    제련소가 입력한 공장 = 곧 광산이므로, 광산 페이지는 자기 공장 대신 '정보관리 주체'인 상위
-    제련소가 입력한 supplier_factories 를 그대로 읽어 보여준다(광산은 입력 주체 아님).
-    상위 제련소 링크가 없으면 광산 자기 공장(대개 없음)을 그대로 반환."""
-    supplier = await repository.get_supplier_by_id(db, supplier_id)
-    if supplier is None:
-        return None
-    source_id = supplier_id
-    if supplier.provider_type == "miner":
-        smelter_id = await repository.get_managing_smelter_id(db, supplier_id)
-        if smelter_id is not None:
-            source_id = smelter_id
-    factories = await repository.get_factories(db, source_id)
-    return {"supplier_id": supplier_id, "factories": factories}
-
-
-async def get_contacts(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """담당자 연락처 탭 — supplier_contacts 목록(대표 우선)."""
-    if await repository.get_supplier_by_id(db, supplier_id) is None:
-        return None
-    return {
-        "supplier_id": supplier_id,
-        "contacts": await repository.get_contacts(db, supplier_id),
-    }
-
-
 async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """입력 완성도 — data_completeness_status 단건 + provider_type별 필수 필드 키.
-    협력사 없으면 None, 집계 전이면 빈 기본값으로 안전 반환.
-
-    저장된 counts/rate/missing(제출 게이트 SSOT)은 그대로 읽고, required_fields는 현재
-    데이터로 계산해 함께 반환한다(프론트가 섹션별 총계·'해당 없음'을 정확히 그리도록).
-    저장 경로가 매 변경 시 recompute하므로 저장값과 현재 계산은 일치한다."""
+    """입력 완성도 — data_completeness_status 단건. 협력사 없으면 None,
+    집계 전이면 빈 기본값으로 안전 반환."""
     if await repository.get_supplier_by_id(db, supplier_id) is None:
         return None
     comp = await repository.get_completeness(db, supplier_id)
-    if comp is None:
-        comp = {
-            "required_field_count": None,
-            "filled_field_count": None,
-            "completion_rate": None,
-            "missing_fields": [],
-            "last_updated_at": None,
-        }
     # provider_type별 추적 필드 키(🔴필수+🟡권장 전체 — 프론트 섹션 총계·'해당 없음' 판정용).
     #   제련소는 공급망 도출 금속을 반영. 권장 필드도 포함해 완성도 표시에서 티 나지 않게 한다.
     required: List[str] = []
     snap = await repository.get_completeness_inputs(db, supplier_id)
+    handled = await _handled_metals(db, supplier_id) if snap is not None else set()
     if snap is not None:
-        blocking, recommended = _classify_fields(
-            snap.get("provider_type"), await _handled_metals(db, supplier_id)
-        )
+        blocking, recommended = _classify_fields(snap.get("provider_type"), handled)
         required = blocking + recommended
+    if comp is None:
+        # 저장된 집계가 없으면(시드/최초 집계 전) 현재 스냅샷으로 즉시 계산해 반환한다.
+        #   특히 광산(miner)은 required=0 → required_field_count=0(≠null)이라야 프론트가
+        #   백엔드 SSOT 경로로 '해당 없음'을 그린다(폴백 경로의 오탐 '미입력' 방지).
+        if snap is not None:
+            r = _compute_completeness(snap, handled)
+            comp = {
+                "required_field_count": r["required"],
+                "filled_field_count": r["filled"],
+                "completion_rate": r["rate"],
+                "missing_fields": r["missing"],
+                "last_updated_at": None,
+            }
+        else:
+            comp = {
+                "required_field_count": None,
+                "filled_field_count": None,
+                "completion_rate": None,
+                "missing_fields": [],
+                "last_updated_at": None,
+            }
     return {"supplier_id": supplier_id, "required_fields": required, **comp}
 
 
@@ -947,16 +959,13 @@ async def submit_onboarding(
     if supplier is None:
         return None
 
-    # account 없음(1차) = MES 계정을 이미 보유 → 신규 계정 생성 안 함. 아래 재제출/이메일
-    # 중복 가드는 '신규 계정 생성' 을 막는 것이므로 계정 제출(n차)일 때만 검사한다.
     users = UserRepository(db)
-    if body.account is not None:
-        # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
-        if await users.get_active_by_supplier_id(supplier_id) is not None:
-            raise OnboardingConflictError("이미 가입이 완료된 협력사입니다.")
-        # 2) 이메일 중복 — users.email UNIQUE 선검사 → 409.
-        if await users.get_by_email(body.account.email) is not None:
-            raise OnboardingConflictError("이미 사용 중인 이메일입니다.")
+    # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
+    if await users.get_active_by_supplier_id(supplier_id) is not None:
+        raise OnboardingConflictError("이미 가입이 완료된 협력사입니다.")
+    # 2) 이메일 중복 — users.email UNIQUE 선검사 → 409.
+    if await users.get_by_email(body.account.email) is not None:
+        raise OnboardingConflictError("이미 사용 중인 이메일입니다.")
 
     try:
         # 3) 회사정보 — suppliers 갱신(보낸 것만; country 는 ISO2 정규화).
@@ -969,16 +978,8 @@ async def submit_onboarding(
         iso = _normalize_country_to_iso2(body.company.country)
         if iso:
             company_fields["country"] = iso
-        # 회사 소재지는 공장(headquarters)에도 보존하지만(코어 원칙), prefill/표시 편의를 위해
-        # suppliers.address 컬럼(회사 소재지)에도 함께 저장한다.
-        if body.company.address:
-            company_fields["address"] = body.company.address
         if body.business_reg_doc is not None:
             company_fields["business_reg_doc_url"] = body.business_reg_doc.s3_key
-            # 사용자가 올린 원본 파일명 보존(표시용) — 없으면 s3 key 끝부분으로 폴백.
-            company_fields["business_reg_doc_name"] = (
-                body.business_reg_doc.file_name or body.business_reg_doc.s3_key.rsplit("/", 1)[-1]
-            )
         if body.environmental_report is not None:
             company_fields["environmental_report_url"] = body.environmental_report.s3_key
         # None 은 제거(빈값으로 덮어쓰지 않음). is_unverified=False 는 bool 이라 보존.
@@ -1003,36 +1004,82 @@ async def submit_onboarding(
             db, supplier_id, _build_onboarding_contacts(body)
         )
 
-        # 5) 동의 전이 — supplier_onboarding.consent_status='consent_agreed'(입력 게이트).
+        # 5) 동의 전이 — supplier_onboarding.consent_status='consent_agreed'.
         signed_at = datetime.now(timezone.utc)
         await repository.mark_consent_agreed(db, supplier_id, signed_at)
-
-        # 5-b) 제3자 정보제공 동의서(데이터 계약) 동의 기록 — 대기중 계약을 'agreed'로 전이.
-        #   온보딩에서 원문을 확인·체크한 근거를 리치 감사기록(서명자·agreement_hash·agreed_at)으로
-        #   남긴다. 같은 트랜잭션(커밋 없음)이라 접근 권한이 생기기 전에 동의 이력이 먼저 확정된다.
+        # 제3자 정보제공 동의서(data_consent)를 'agreed'로 — 서명자·서명방식·해시 등 감사추적 기록(플래그와 별개).
         if body.consent_agreed:
             await _record_consent_agreement(db, supplier_id, body, signed_at)
 
-        # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기).
-        await repository.set_supplier_status(db, supplier_id, "supplier_review")
+        # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기). (감사 이력 자동 기록)
+        await repository.set_supplier_status(
+            db, supplier_id, "supplier_review", reason="온보딩 제출 — 원청 승인 대기"
+        )
 
-        # 7) 활성 계정 생성 — tenant_id=초대한 원청, role=supplier_ceo(결정 #3).
-        #    1차(account=None)는 MES 계정을 이미 보유하므로 계정 생성을 건너뛴다.
-        if body.account is not None:
-            primary = next((c for c in body.contacts if c.is_primary), None)
-            if primary is None and body.contacts:
-                primary = body.contacts[0]
-            await users.create_user(
-                email=body.account.email,
-                password_hash=get_password_hash(body.account.password),
-                role="supplier_ceo",
-                supplier_id=supplier_id,
-                tenant_id=supplier.tenant_id,
-                name=primary.name if primary else None,
+        # 7) 활성 계정 생성 — tenant_id=초대한 OEM, role=supplier_ceo(결정 #3).
+        primary = next((c for c in body.contacts if c.is_primary), None)
+        if primary is None and body.contacts:
+            primary = body.contacts[0]
+        await users.create_user(
+            email=body.account.email,
+            password_hash=get_password_hash(body.account.password),
+            role="supplier_ceo",
+            supplier_id=supplier_id,
+            tenant_id=supplier.tenant_id,
+            name=primary.name if primary else None,
+        )
+
+        # 7-c) [FIX] 하위협력사 캐스케이드 초대(STEP3) — 예전엔 프론트 로컬 state로만 남고
+        #   어디에도 저장되지 않았다(PM 확인 후 정식 연결). 무토큰 공개 submit 트랜잭션
+        #   안에서 create_supplier_and_invite 와 동일한 절차(협력사+리스크프로필+온보딩행+
+        #   PIC+완성도)를 그대로 반복하되, 커밋은 이 트랜잭션 한 번으로 묶는다.
+        invited_sub_suppliers: list[dict] = []
+        for sub in body.sub_suppliers:
+            sub_supplier = await repository.create_supplier(db, {
+                "company_name": sub.company_name,
+                "provider_type": "manufacturer",  # STEP3 화면엔 유형 선택이 없어 기본값(원청이 추후 조정 가능)
+                "tenant_id": supplier.tenant_id,
+                "status": "supplier_pending",
+            })
+            db.add(SupplierRiskProfile(
+                supplier_id=sub_supplier.supplier_id,
+                overall_risk_score=0,
+                risk_level="low",
+                is_high_risk_flag=False,
+            ))
+            sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
+            db.add(SupplierOnboarding(
+                supplier_id=sub_supplier.supplier_id,
+                consent_status="consent_pending",
+                agreement_status="pending",
+                last_invited_at=datetime.now(timezone.utc),
+                sla_due_date=sub_sla_due,
+                reminder_count=0,
+            ))
+            await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
+                MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
+            ])
+            await recompute_completeness(db, sub_supplier.supplier_id)
+            # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
+            # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
+            await consent_repo.create(
+                db, tenant_id=supplier.tenant_id, requested_by=None,
+                body=ConsentCreateBody(
+                    supplier_id=sub_supplier.supplier_id,
+                    data_scope=["company", "contacts", "factories", "carbon_epd", "origin"],
+                    purpose="EU_BATTERY",
+                    third_party_sharing=True,
+                    valid_from=datetime.now(timezone.utc).date(),
+                    form_version="v1.0",
+                ),
             )
-
-        # 7-b) 완성도 재계산(같은 트랜잭션) — 온보딩으로 채운 회사·공장·문서 반영.
-        await recompute_completeness(db, supplier_id)
+            await submission_repo.create_data_request(db, DataRequestLog(
+                target_supplier_id=sub_supplier.supplier_id,
+                requested_data_type="general_info",
+            ))
+            invited_sub_suppliers.append({
+                "supplier_id": sub_supplier.supplier_id, "email": sub.email, "sla_due_date": sub_sla_due,
+            })
 
         # 8) 단일 커밋(atomic) — 여기 도달해야만 전체 영속화.
         await db.commit()
@@ -1041,6 +1088,14 @@ async def submit_onboarding(
     except Exception:
         await db.rollback()
         raise
+
+    # 9) 커밋 성공 후에만 이벤트 발행(G1과 동일 규칙) — 하위협력사마다 SupplierInvited.
+    for inv in invited_sub_suppliers:
+        event = SupplierInvitedEvent(
+            supplier_id=inv["supplier_id"], email=inv["email"], sla_due_date=inv["sla_due_date"],
+            inviter_supplier_id=supplier_id,
+        )
+        await publish("SupplierInvited", dataclasses.asdict(event))
 
     return {
         "supplier_id": supplier_id,

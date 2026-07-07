@@ -280,8 +280,38 @@ async def mark_consent_agreed(db: AsyncSession, supplier_id: UUID, signed_at) ->
     await db.flush()
 
 
-async def set_supplier_status(db: AsyncSession, supplier_id: UUID, status: str) -> None:
-    """suppliers.status 전이(회원가입 제출 → 'supplier_review'). flush까지만(커밋은 service)."""
+async def set_supplier_status(
+    db: AsyncSession,
+    supplier_id: UUID,
+    status: str,
+    actor_id: UUID | None = None,
+    reason: str | None = None,
+) -> None:
+    """suppliers.status 전이 + supplier_status_history 감사 기록. flush까지만(커밋은 service).
+
+    suppliers.status 는 현재값만 보유하므로, 전이 시 이전상태(from)를 읽어 이력을 남긴다.
+    실제 상태가 바뀔 때만 기록(동일값 재지정은 스킵).
+    """
+    current = (await db.execute(
+        select(Supplier.status).where(Supplier.supplier_id == supplier_id)
+    )).scalar_one_or_none()
+
+    if current != status:
+        await db.execute(
+            text("""
+                INSERT INTO supplier_status_history
+                    (supplier_id, from_status, to_status, actor_id, reason)
+                VALUES (:sid, :from_s, :to_s, :actor, :reason)
+            """),
+            {
+                "sid": str(supplier_id),
+                "from_s": current,
+                "to_s": status,
+                "actor": str(actor_id) if actor_id else None,
+                "reason": reason,
+            },
+        )
+
     await db.execute(
         update(Supplier).where(Supplier.supplier_id == supplier_id).values(status=status)
     )
@@ -516,15 +546,29 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
     # [공급원 변경 자진신고 배선] bom_version_id 동봉 — 협력사 포털이 declare_source_change
     # 실호출에 쓸 (bom_version, part) 컨텍스트를 여기서 제공한다. 한 부품이 여러 BOM 버전에
     # 걸치면 (part, bom_version)별로 행이 분리된다. version_number는 드롭다운 표시용.
+    # [맵별 탭] product 컨텍스트(고객사·차종·BOM버전)·hop·core_minerals 동봉 —
+    # 협력사 페이지가 이 협력사가 속한 맵(=bom_version)별로 탭을 나누고, 탭마다 달라지는
+    # '대는 부품·차수·소재구성(광물)'을 이 한 번의 호출로 렌더한다.
+    # core_minerals 는 엣지 override 우선, 없으면 협력사 회사값 폴백(COALESCE).
     stmt = text(
         """
         SELECT DISTINCT p.part_id, p.part_code, p.part_name, p.tier_level, p.material_type,
-               scm.bom_version_id, bv.version_number AS bom_version_number
+               scm.bom_version_id, bv.version_number AS bom_version_number,
+               bv.product_id,
+               pr.model_name,
+               pr.product_name,
+               c.customer_name,
+               scm.hop_level,
+               COALESCE(scm.core_minerals, s.core_minerals) AS core_minerals
         FROM supply_chain_map scm
         JOIN parts p ON p.part_id = scm.part_id
         LEFT JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+        LEFT JOIN products pr      ON pr.product_id = bv.product_id
+        LEFT JOIN customers c      ON c.customer_id = pr.customer_id
+        LEFT JOIN suppliers s      ON s.supplier_id = scm.child_supplier_id
         WHERE scm.child_supplier_id = :sid
-        ORDER BY p.tier_level NULLS LAST, p.part_code
+        ORDER BY c.customer_name NULLS LAST, pr.model_name NULLS LAST,
+                 scm.bom_version_id, p.tier_level NULLS LAST, p.part_code
         """
     )
     rows = (await db.execute(stmt, {"sid": str(supplier_id)})).mappings().all()

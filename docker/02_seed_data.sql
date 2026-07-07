@@ -371,6 +371,70 @@ FROM supply_chain_maps h WHERE h.bom_version_id = scm.bom_version_id;
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
 ('51111111-0000-4000-8000-000000000002', 'f1111111-0000-4000-8000-000000000001', 100.00, 10000, 'ea');
 
+-- ============================================================
+-- 11-A. 공급망 맵 엣지 정정 + 제품별 핵심광물 (supply_chain_map.core_minerals override)
+-- ============================================================
+-- [설계] core_minerals 는 회사(suppliers)당 1값이 기본(fallback). 같은 회사라도 제품(BOM)마다
+--   산출물이 다를 수 있어 엣지(supply_chain_map)에 per-product override 를 둔다.
+--   조회 시 COALESCE(엣지값, child 회사값) → 엣지값을 비우면 회사값으로 폴백(드리프트 없음).
+--   여기서 채우는 건 (1) 회사값이 NULL인 최상위 노드, (2) 같은 회사가 제품별로 달라야 하는 노드뿐.
+
+-- (1) part_id 정정 — iX3 말단이 리튬광(호주리튬)인데 니켈 부품(REF-NI/MIN-NI)에 붙어 있던 불일치 수정.
+--   EQS 정상 리튬체인(한중제련 LIOH → 칠레리튬 MIN-LI)과 동일 패턴으로 정합.
+UPDATE supply_chain_map SET part_id = 'b1111111-0000-4000-8000-000000000005'  -- REF-NI → LIOH-REFINED
+  WHERE edge_id = '51111111-0000-4000-8000-000000000005';
+UPDATE supply_chain_map SET part_id = 'b1111111-0000-4000-8000-00000000000b'  -- MIN-NI → MIN-LI
+  WHERE edge_id = '51111111-0000-4000-8000-000000000006';
+
+-- (2) 엣지 전면 표준화 — core_minerals = 그 엣지에 흐르는 부품(part_id)의 핵심광물 원소 질량%(EU DPP 기준).
+--   순도(99%)/비율(Ni80) 혼용을 제거하고 '원소 함량'으로 통일. 회사값(suppliers)·마스터폼은 그대로 두고
+--   엣지만 override → 폼 드리프트 0. 같은 회사도 제품마다 다른 부품을 대면 값이 갈린다(예: 한중제련 LIOH).
+--   위반/Gray 서사 노드(Global Mining·Unverified Trader)는 데이터 결손이 서사이므로 NULL 유지(override 안 함).
+
+--  · NCM811 양극활물질 조성(PACK/Module/Cell/CAM 공통): Li7.1/Ni48.3/Co6.1/Mn5.6
+--    (팩/셀/모듈은 양극활물질 조성 기준으로 표기 — 팩 전체 질량 희석은 양극재 질량비가 데이터에 없어 이 데모 범위 밖)
+UPDATE supply_chain_map SET core_minerals = '{"Li":7.1,"Ni":48.3,"Co":6.1,"Mn":5.6}'::jsonb
+  WHERE edge_id IN (
+    '51111111-0000-4000-8000-000000000001',  -- iX3  hop0 KIRA     PACK
+    '51111111-0000-4000-8000-000000000002',  -- iX3  hop1 한양셀    Module
+    '51111111-0000-4000-8000-000000000003',  -- iX3  hop2 한양셀    Cell
+    '51111111-0000-4000-8000-000000000004',  -- iX3  hop3 동성      CAM
+    '52222222-0000-4000-8000-000000000001',  -- i4   hop0 KIRA     PACK
+    '52222222-0000-4000-8000-000000000002',  -- i4   hop1 한양셀    Module
+    '52222222-0000-4000-8000-000000000003',  -- i4   hop2 한양셀    Cell
+    '52222222-0000-4000-8000-000000000004',  -- i4   hop3 동성      CAM
+    '53111111-0000-4000-8000-000000000001',  -- GLC1 hop0 KIRA     PACK
+    '53111111-0000-4000-8000-000000000002',  -- GLC1 hop1 우진셀    Cell
+    '53222222-0000-4000-8000-000000000001',  -- GLC2 hop0 KIRA     PACK
+    '53222222-0000-4000-8000-000000000002',  -- GLC2 hop1 우진셀    Cell
+    '54444444-0000-4000-8000-000000000001',  -- EQS  hop0 KIRA     PACK
+    '54444444-0000-4000-8000-000000000002',  -- EQS  hop1 우진배터리 Cell
+    '54444444-0000-4000-8000-000000000003'   -- EQS  hop2 동성      CAM
+  );
+
+--  · NCM 전구체(PRE-NCM, 리튬화 전 혼합수산화물 → Li 없음): Ni50.8/Co6.4/Mn5.9
+UPDATE supply_chain_map SET core_minerals = '{"Ni":50.8,"Co":6.4,"Mn":5.9}'::jsonb
+  WHERE edge_id IN (
+    '53111111-0000-4000-8000-000000000003',  -- GLC1 hop2 청정전구체 PRE
+    '53222222-0000-4000-8000-000000000003'   -- GLC2 hop2 신장제련   PRE
+  );
+
+--  · 수산화리튬(LIOH-REFINED, LiOH·H2O): Li 16.5  (기존 99는 순도지 리튬 함량이 아니라 정정)
+UPDATE supply_chain_map SET core_minerals = '{"Li":16.5}'::jsonb
+  WHERE edge_id IN (
+    '51111111-0000-4000-8000-000000000005',  -- iX3 hop4 한중제련 LIOH
+    '54444444-0000-4000-8000-000000000004'   -- EQS hop3 한중제련 LIOH
+  );
+
+--  · 리튬 원광(MIN-LI, 스포듀민 정광 ~6% Li2O 환산): Li 2.8
+UPDATE supply_chain_map SET core_minerals = '{"Li":2.8}'::jsonb
+  WHERE edge_id IN (
+    '51111111-0000-4000-8000-000000000006',  -- iX3 hop5 호주리튬 MIN-LI
+    '54444444-0000-4000-8000-000000000005'   -- EQS hop4 칠레리튬 MIN-LI
+  );
+
+-- 서사상 NULL 유지(override 안 함): i4 hop4 Unverified Trader(52222222…005), GLC2 hop3 Global Mining(53222222…004).
+
 -- 공장별 탄소발자국 선언 (EU 배터리법 ART7)
 -- 기존 공급사 단위 carbon_intensity → 공장 단위 선언으로 이관.
 -- 대성정밀 화성공장(f4)은 의도적으로 미INSERT → ART7 선언 누락 → needs_human_review 트리거 유지.
@@ -1008,15 +1072,22 @@ INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quan
 --     Sad 시나리오(위반 판정)의 서사 그 자체 — 채우면 오히려 시나리오가 깨짐.
 --   · Unverified Precursor Trading(abababab): Gray 시나리오의 "미확인 트레이더".
 --     원산지·서류 불명이 이름 그대로의 의미 — 공장·서류 미보유가 정상.
---   · 한양셀 core_minerals: 이전 세션에서 마스터폼으로 직접 수정한 값 — 덮어쓰지 않음.
+--   · 한양셀 core_minerals: fresh-seed에서 빈칸이던 것 → 19-1에서 peer 셀과 동일 NCM811로 채움(아래).
 -- ============================================================
 
 -- 19-1. 기준정보 백필 (사업자등록번호/주소/서류 URL)
 UPDATE suppliers SET business_reg_no = '101-86-40001', address = '경상북도 포항시 남구 오천읍 포항산단로 55',
+  -- [fresh-seed] 최상위 셀(한양셀) 회사 기본값 채움 — 마스터폼 미입력 상태에서 소재구성이 빈칸이던 문제 정정.
+  --   다른 셀(우진셀·우진배터리)과 동일 NCM811 조성. 제품별 상이값은 supply_chain_map 엣지 override가 담당.
+  core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb,
   business_reg_doc_url = 's3://kira-docs/suppliers/a1111111/biz_reg.pdf',
   environmental_report_url = 's3://kira-docs/suppliers/a1111111/env_report.pdf',
   self_assessment_doc_url = 's3://kira-docs/suppliers/a1111111/self_assess.pdf'
 WHERE supplier_id = 'a1111111-1111-4000-8000-000000000001';
+
+-- [fresh-seed] 원청(KIRA, 완제품 팩) 회사값 채움 — 고객사 데이터 다운로드(DPP/엑셀)에 완제품 핵심광물로 들어감.
+UPDATE suppliers SET core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb
+WHERE supplier_id = 'a0000000-0000-4000-8000-000000000000';
 
 UPDATE suppliers SET business_reg_no = '102-86-40002', address = '울산광역시 울주군 온산읍 산업로 700',
   core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb,
@@ -1056,12 +1127,12 @@ UPDATE suppliers SET business_reg_no = '106-86-40006', address = '경상남도 �
 WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a';
 
 UPDATE suppliers SET business_reg_no = 'CL-RUT-770511', address = 'Antofagasta Region, Salar de Atacama Industrial Zone, Chile',
-  core_minerals = '{"Li":99.6}'::jsonb,
+  core_minerals = '{"Li":2.8}'::jsonb,   -- 원광 Li 함량(순도 99 아님). 광산 회사값=원광등급, supply_chain_map 엣지값(Li 2.8)과 일치.
   business_reg_doc_url = 's3://kira-docs/suppliers/a9999999/biz_reg.pdf'
 WHERE supplier_id = 'a9999999-9999-4000-8000-000000000009';
 
 UPDATE suppliers SET business_reg_no = 'AU-ABN-51824753556', address = 'Western Australia, Greenbushes Mining District, Australia',
-  core_minerals = '{"Li":99.8}'::jsonb,
+  core_minerals = '{"Li":2.8}'::jsonb,   -- 원광 Li 함량(스포듀민 정광 ~6% Li2O 환산). 순도 99 아님 — 엣지값과 일치.
   business_reg_doc_url = 's3://kira-docs/suppliers/a3333333/biz_reg.pdf'
 WHERE supplier_id = 'a3333333-3333-4000-8000-000000000003';
 
@@ -2167,3 +2238,325 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) V
 ('da777777-0000-4000-8000-000000000003', '7d000000-0000-4000-8000-000000000003', 40.00, 16800, 'kg'),
 ('da888888-0000-4000-8000-000000000004', '7d000000-0000-4000-8000-000000000004', 40.00,  8000, 'kg'),
 ('da999999-0000-4000-8000-000000000005', '7d000000-0000-4000-8000-000000000005', 40.00, 16800, 'kg');
+
+
+-- ============================================================
+-- 27. 광산/사업장 데이터 정합 (PM 지적) — 전부 멱등(idempotent), append 전용
+--   ① 사업장 원산지 주소(supplier_factories.address) 백필: 좌표·region만 있고 텍스트 주소가
+--      전부 NULL이라 '위치(원산지)' 표시가 공란이던 것 보완. 국내='region, 대한민국', 해외='region, Country'.
+--      (상세 지번은 데모 범위 밖 — Geo audit SSOT는 location 좌표. 회사주소 suppliers.address와 별개.)
+--   ② 광산(mining) 사업장 '공장 담당자' 제거: 광산은 자체 입력 주체가 아니라 제련소(직상위)가
+--      원산지·광물을 대신 제공하는 구조 → 광산 사업장에 factory_manager가 붙는 건 모델상 부정합.
+--   (리튬 광산 회사값 core_minerals 99.x→2.8 정정은 위 섹션 19-1 원본 라인에서 인라인 수정함.)
+-- ============================================================
+
+-- ① 원산지 주소 백필 (address가 비어있는 전체 사업장)
+UPDATE supplier_factories
+SET address = region || ', ' || CASE country
+    WHEN 'KR' THEN '대한민국'
+    WHEN 'CN' THEN 'China'
+    WHEN 'ID' THEN 'Indonesia'
+    WHEN 'AU' THEN 'Australia'
+    WHEN 'CL' THEN 'Chile'
+    WHEN 'ZM' THEN 'Zambia'
+    WHEN 'BR' THEN 'Brazil'
+    WHEN 'MZ' THEN 'Mozambique'
+    ELSE country
+  END
+WHERE address IS NULL AND region IS NOT NULL;
+
+-- ② 광산 사업장 공장 담당자 제거 (입력 주체 아님 — 제련소가 대신 제공)
+UPDATE supplier_factories
+SET factory_manager_name  = NULL,
+    factory_manager_role  = NULL,
+    factory_manager_phone = NULL,
+    factory_manager_email = NULL
+WHERE factory_role = 'mining';
+
+-- ③ 광산 완성도 행 시드: 광산은 입력 주체가 아니라 required=0 → 100%('해당 없음'). 저장 행이
+--    없으면 프론트가 폴백 경로로 regulation/documents를 오탐 '미입력'으로 표시하므로, 명시적으로
+--    required=0 행을 넣어 '해당 없음'으로 렌더되게 한다. (백엔드 get_completeness도 행 없을 때
+--    즉시계산하도록 보강했으나, 그 배포 전에도 재시드만으로 맞게 뜨도록 데이터로도 보장.)
+--    (entity_type,entity_id) 유니크 제약이 없어 NOT EXISTS로 멱등 처리.
+INSERT INTO data_completeness_status
+  (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields)
+SELECT 'supplier', s.supplier_id, 0, 0, 100.00, '[]'::jsonb
+FROM suppliers s
+WHERE s.provider_type = 'miner'
+  AND NOT EXISTS (
+    SELECT 1 FROM data_completeness_status d
+    WHERE d.entity_type = 'supplier' AND d.entity_id = s.supplier_id
+  );
+
+
+-- ============================================================
+-- 28. iX3(e1111111) 풀트리 레퍼런스 — Cell 밑을 양극+음극 전 갈래로 완성 (PM 요청)
+--   기존 iX3는 리튬 단일 말단(CAM→한중제련 LiOH→호주리튬)만 있었다. 이 제품 하나를 표준
+--   레퍼런스로 삼아 부품트리(parts) 구조 그대로 supplier 체인을 펼친다. 기존 엣지는 건드리지
+--   않고 아래 가지만 append(멱등: 엣지 PK / supplier PK / NOT EXISTS).
+--     · 양극: CAM(동성) →(신규)→ 전구체(동신) → REF-NI/CO/MN(제련) → Ni/Co/Mn 광산
+--       (리튬 가지 CAM→LiOH→Li광산은 기존 유지 — CAM의 두 입력 = 전구체 + LiOH)
+--     · 음극: Cell(한양셀) → ANO(한빛음극재) → 구형화(Qingdao) → 천연흑연광(Balama)
+--   망간(Mn) 제련·광산 노드는 미존재라 신설. 나머지(전구체·Ni/Co 제련·광산·흑연체인)는 재사용.
+--   엣지 core_minerals = 그 엣지에 흐르는 부품의 원소 질량%(제련=정제염 함량, 광산=원광 등급).
+-- ============================================================
+
+-- 28-1. 신규 망간(Mn) 제련소 + 광산 (기존에 Mn 노드 부재 — 트리 완성용)
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'Zhao Lei CEO', 'smelter', '{"Mn":32.5}'::jsonb, 'CN', 'Hunan, Xiangtan Manganese Industrial Zone, China', 's3://kira-docs/suppliers/64666666/biz_reg.pdf', NULL, 74, 'supplier_verified', 'low'),
+('65666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'Pieter Botha CEO', 'miner', '{"Mn":38.0}'::jsonb, 'ZA', 'Northern Cape, Kalahari Manganese Field, South Africa', 's3://kira-docs/suppliers/65666666/biz_reg.pdf', NULL, 60, 'supplier_verified', 'low')
+ON CONFLICT (supplier_id) DO NOTHING;
+UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id = '64666666-0000-4000-8000-000000000006';
+
+-- 신규 사업장 (address 인라인 — 섹션 27 백필은 이 뒤 신설분을 못 잡으므로 직접 채움)
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, address, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
+('74666666-0000-4000-8000-000000000006', '64666666-0000-4000-8000-000000000006', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'Xiangtan, Hunan, China', 'CN', 'Hunan', ST_SetSRID(ST_MakePoint(112.944, 27.829), 4326), 'processing', 'BOTH', '["CRMA","CBAM"]'::jsonb, 100.00),
+('75666666-0000-4000-8000-000000000006', '65666666-0000-4000-8000-000000000006', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'Hotazel, Northern Cape, South Africa', 'ZA', 'Northern Cape', ST_SetSRID(ST_MakePoint(22.960, -27.220), 4326), 'mining', 'BOTH', '["CRMA","EUDR"]'::jsonb, 100.00)
+ON CONFLICT (factory_id) DO NOTHING;
+
+INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from)
+SELECT '65666666-0000-4000-8000-000000000006', 'Kalahari Manganese Mine', 'open_pit', 55000.00, ST_SetSRID(ST_MakePoint(22.960, -27.220), 4326), '2015-01-01'
+WHERE NOT EXISTS (SELECT 1 FROM supplier_miner_details WHERE supplier_id = '65666666-0000-4000-8000-000000000006');
+
+-- Mn 광산 완성도 행(입력 주체 아님 → required=0/100%). 섹션 27 ③은 이 신설 광산을 못 잡으므로 여기서.
+INSERT INTO data_completeness_status (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields)
+SELECT 'supplier', '65666666-0000-4000-8000-000000000006', 0, 0, 100.00, '[]'::jsonb
+WHERE NOT EXISTS (SELECT 1 FROM data_completeness_status d WHERE d.entity_type='supplier' AND d.entity_id='65666666-0000-4000-8000-000000000006');
+
+-- 28-2. iX3 트리 엣지 append (양극 전구체 가지 + 음극 흑연 가지)
+INSERT INTO supply_chain_map (edge_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+-- [양극] CAM(동성) → 전구체(동신) → Ni/Co/Mn 제련 → 광산
+('5b111111-0000-4000-8000-000000000001', 'e1111111-0000-4000-8000-000000000001', 'a2222222-2222-4000-8000-000000000002', '63111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000004', 4, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000002', 'e1111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '64333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000011', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000003', 'e1111111-0000-4000-8000-000000000001', '64333333-0000-4000-8000-000000000003', '65333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000008', 6, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000004', 'e1111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '64444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000012', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000005', 'e1111111-0000-4000-8000-000000000001', '64444444-0000-4000-8000-000000000004', '65444444-0000-4000-8000-000000000004', 'b1111111-0000-4000-8000-000000000009', 6, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000006', 'e1111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '64666666-0000-4000-8000-000000000006', 'b1111111-0000-4000-8000-000000000013', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000007', 'e1111111-0000-4000-8000-000000000001', '64666666-0000-4000-8000-000000000006', '65666666-0000-4000-8000-000000000006', 'b1111111-0000-4000-8000-00000000000a', 6, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+-- [음극] Cell(한양셀) → ANO(한빛음극재) → 구형화(Qingdao) → 천연흑연광(Balama)
+('5b111111-0000-4000-8000-000000000008', 'e1111111-0000-4000-8000-000000000001', 'a1111111-1111-4000-8000-000000000001', '66111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000007', 3, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-000000000009', 'e1111111-0000-4000-8000-000000000001', '66111111-0000-4000-8000-000000000001', '66222222-0000-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000014', 4, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31'),
+('5b111111-0000-4000-8000-00000000000a', 'e1111111-0000-4000-8000-000000000001', '66222222-0000-4000-8000-000000000002', '66333333-0000-4000-8000-000000000003', 'b1111111-0000-4000-8000-000000000015', 5, 'supplychain_confirmed', 'SUPPLIER_DECLARED', 'verified', '2025-01-01', '2025-12-31')
+ON CONFLICT (edge_id) DO NOTHING;
+
+-- 28-3. 엣지 core_minerals(원소 질량%) — 부품별
+UPDATE supply_chain_map SET core_minerals = '{"Ni":50.8,"Co":6.4,"Mn":5.9}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000001'; -- PRE-NCM(전구체 수산화물)
+UPDATE supply_chain_map SET core_minerals = '{"Ni":22.3}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000002'; -- REF-NI(황산니켈)
+UPDATE supply_chain_map SET core_minerals = '{"Ni":1.8}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-000000000003'; -- MIN-NI(니켈 라테라이트 원광)
+UPDATE supply_chain_map SET core_minerals = '{"Co":20.9}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000004'; -- REF-CO(황산코발트)
+UPDATE supply_chain_map SET core_minerals = '{"Co":2.5}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-000000000005'; -- MIN-CO(코발트 원광)
+UPDATE supply_chain_map SET core_minerals = '{"Mn":32.5}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000006'; -- REF-MN(황산망간)
+UPDATE supply_chain_map SET core_minerals = '{"Mn":38.0}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000007'; -- MIN-MN(망간 원광)
+UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":95.0}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-000000000008'; -- ANO-GRAPHITE(음극활물질)
+UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":99.95}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000009'; -- PROC-GRAPHITE(구형화 정제)
+UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":10.0}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-00000000000a'; -- MIN-GRAPHITE(천연흑연 원광)
+
+-- 28-4. 동의서/자료요청 백필 재실행(섹션 27과 동일 로직) — 섹션 28에서 새로 추가된 협력사/엣지
+--   (Xiangtan Mn Refinery 등)는 섹션 27의 백필보다 파일에서 뒤에 있어 그때는 안 잡혔다.
+--   같은 NOT EXISTS 가드라 이미 이력 있는 협력사는 건드리지 않고(멱등), 이번에 새로
+--   verified/편입된 협력사만 채운다.
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, returned_at, agreed_at,
+   signer_name, signer_title, signer_email, signature_method, form_version, form_data, agreement_hash)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'agreed',
+  now() - interval '21 days', now() - interval '14 days', now() - interval '13 days',
+  c.name, c.role, c.email, 'email_form', 'v1.0',
+  jsonb_build_object('data_subject', s.company_name, 'sub_supplier_consent', true, 'retention_years', 7),
+  substr(md5(s.supplier_id::text), 1, 12)
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id
+  AND scm.hop_level > 0 AND scm.verification_status = 'verified'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+LEFT JOIN supplier_contacts c ON c.supplier_id = s.supplier_id AND c.is_primary
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, form_version)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'requested',
+  now() - interval '3 days', 'v1.0'
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id AND scm.hop_level > 0
+JOIN supply_chain_maps h ON h.bom_version_id = scm.bom_version_id AND h.status = 'completed'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM supply_chain_map v
+                  WHERE v.child_supplier_id = s.supplier_id AND v.verification_status = 'verified')
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+-- 28-5. 승격 — 섹션 28 이전에 이미 'requested'로 백필된 협력사(예: Zambia Copper & Cobalt
+--   Refinery)가 섹션 28에서 새로 verified 엣지를 얻은 경우, 위 두 INSERT는 NOT EXISTS 가드 때문에
+--   건드리지 않는다. verified 엣지가 실제로 있는데 동의서는 여전히 'requested'로 멈춰있는
+--   협력사만 골라 'agreed'로 승격한다(동의서 상태가 실제 엣지 상태를 반영하도록).
+UPDATE data_provision_consents dc SET
+  status = 'agreed',
+  returned_at = COALESCE(dc.returned_at, now() - interval '14 days'),
+  agreed_at   = COALESCE(dc.agreed_at, now() - interval '13 days')
+WHERE dc.status = 'requested'
+  AND EXISTS (
+    SELECT 1 FROM supply_chain_map v
+    WHERE v.child_supplier_id = dc.supplier_id AND v.verification_status = 'verified'
+  );
+
+INSERT INTO data_request_log
+  (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date,
+   response_status, submission_status)
+SELECT
+  NULL, dc.supplier_id, 'general_info', dc.requested_at, dc.requested_at + interval '14 days',
+  CASE WHEN dc.status = 'agreed' THEN 'response_responded' ELSE 'response_pending' END,
+  CASE WHEN dc.status = 'agreed' THEN 'submission_approved' ELSE 'submission_requested' END
+FROM data_provision_consents dc
+WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id = dc.supplier_id);
+
+-- 28-5 승격과 짝 — 이미 있던 data_request_log 행도 'agreed' 승격에 맞춰 같이 갱신.
+UPDATE data_request_log dr SET
+  response_status = 'response_responded',
+  submission_status = 'submission_approved'
+FROM data_provision_consents dc
+WHERE dr.target_supplier_id = dc.supplier_id
+  AND dc.status = 'agreed'
+  AND dr.response_status <> 'response_responded';
+
+
+-- ============================================================
+-- 29. PM테스트협력사01~10 전용 테스트 Ingest 번들
+-- ============================================================
+-- 목적: PM테스트협력사01~10(기존 ID 그대로)을 1차 협력사로 정식 연결한 전용 테스트
+--   제품+BOM+공급망 맵을 새로 만든다. 제품명은 다른 제품과 겹쳐도 무방(요청 확인됨),
+--   BOM 버전명만 다른 제품과 안 헷갈리게 TEST- 접두어로 구분한다.
+
+-- 29-1. 신규 부품 2개(루트 Pack + 1차 공통 부품)
+INSERT INTO parts (part_id, part_code, part_name, tier_level, parent_part_id, material_type, source_system, external_id) VALUES
+('bf000000-0000-4000-8000-000000000001', 'PM-TEST-PACK', 'PM Test Pack',      0, NULL, 'assembly', 'MANUAL_TEST', 'PM-TEST-PART-PACK'),
+('bf000000-0000-4000-8000-000000000002', 'PM-TEST-COMP', 'PM Test Component', 1, 'bf000000-0000-4000-8000-000000000001', 'component', 'MANUAL_TEST', 'PM-TEST-PART-COMP')
+ON CONFLICT (part_id) DO NOTHING;
+
+-- 29-2. 신규 제품
+INSERT INTO products (product_id, product_code, product_name, manufacturer_id, tenant_id, customer_id, model_name, amperage_ah, type, source_system, external_id) VALUES
+('bf100000-0000-4000-8000-000000000001', 'PM-TEST-BATT-01', 'PM테스트 배터리팩', 'a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0000000-0000-4000-8000-0000000000b4', 'PM Test', 100.00, 'battery_pack', 'MANUAL_TEST', 'PM-TEST-PRODUCT')
+ON CONFLICT (product_id) DO NOTHING;
+
+-- 29-3. BOM 버전
+INSERT INTO bom_versions (bom_version_id, product_id, version_number, production_from, production_to, status, source_system, external_id) VALUES
+('bf200000-0000-4000-8000-000000000001', 'bf100000-0000-4000-8000-000000000001', 'TEST-v1.0', '2026-07-06', '2027-07-06', 'active', 'MANUAL_TEST', 'PM-TEST-BOM')
+ON CONFLICT (bom_version_id) DO NOTHING;
+
+-- 29-4. BOM 항목(루트 Pack 100% + 1차 공통부품 100%)
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000001', 1, 'ea', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-PACK'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000002', 10, 'ea', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-COMP');
+
+-- 29-5. 공급망 맵 헤더(building — PM님이 STEP2부터 진행하는 시나리오)
+INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status) VALUES
+('bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', 'bf100000-0000-4000-8000-000000000001', 'building')
+ON CONFLICT (bom_version_id) DO NOTHING;
+
+-- 29-6. hop0 앵커(원청 KIRA)
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+('bf400000-0000-4000-8000-000000000000', 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', NULL, 'a0000000-0000-4000-8000-000000000000', 'bf000000-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2026-07-06', '2027-07-06');
+
+-- 29-7. hop1 — PM테스트협력사01~10, 전부 원청(KIRA) 직속 1차로 연결
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to)
+SELECT uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001',
+       'a0000000-0000-4000-8000-000000000000', s.supplier_id, 'bf000000-0000-4000-8000-000000000002', 1,
+       'supplychain_declared', 'ERP', 'unverified', '2026-07-06', '2027-07-06'
+FROM suppliers s
+WHERE s.company_name LIKE 'PM테스트협력사%'
+  AND NOT EXISTS (
+    SELECT 1 FROM supply_chain_map scm
+    WHERE scm.bom_version_id = 'bf200000-0000-4000-8000-000000000001' AND scm.child_supplier_id = s.supplier_id
+  );
+
+
+-- ============================================================
+-- 30. PM테스트 번들 — 유형별 현실적 Tier 재배치
+-- ============================================================
+-- 문제: 29번에서 10곳을 전부 Tier1(원청 직속)로 뭉쳐 연결해서, 광산이 1차 협력사로
+--   뜨는 등 도메인상 말이 안 되는 구조였다. 제조사(1~3차)→유통(3차, 트레이딩)→
+--   제련소(4차)→광산(5차) 순서의 2개 평행 체인으로 재배치한다.
+
+-- 30-1. 기존 Tier1 연결 전부 제거(29번에서 만든 것)
+DELETE FROM supply_chain_map
+WHERE bom_version_id = 'bf200000-0000-4000-8000-000000000001' AND hop_level > 0;
+
+-- 30-2. 티어별 부품 추가(2~5차) — 1차 부품(PM Test Component)은 29번 것 재사용
+INSERT INTO parts (part_id, part_code, part_name, tier_level, parent_part_id, material_type, source_system, external_id) VALUES
+('bf000000-0000-4000-8000-000000000003', 'PM-TEST-CAM',  'PM Test CAM',          2, 'bf000000-0000-4000-8000-000000000002', 'active_material', 'MANUAL_TEST', 'PM-TEST-PART-CAM'),
+('bf000000-0000-4000-8000-000000000004', 'PM-TEST-DIST', 'PM Test Distribution', 3, 'bf000000-0000-4000-8000-000000000003', 'trading',         'MANUAL_TEST', 'PM-TEST-PART-DIST'),
+('bf000000-0000-4000-8000-000000000005', 'PM-TEST-REF',  'PM Test Refined Material', 4, 'bf000000-0000-4000-8000-000000000004', 'refined_metal', 'MANUAL_TEST', 'PM-TEST-PART-REF'),
+('bf000000-0000-4000-8000-000000000006', 'PM-TEST-ORE',  'PM Test Ore',          5, 'bf000000-0000-4000-8000-000000000005', 'mineral',         'MANUAL_TEST', 'PM-TEST-PART-ORE')
+ON CONFLICT (part_id) DO NOTHING;
+
+-- 30-3. BOM 항목 추가(신규 부품 4개)
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000003', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-CAM'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000004', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-DIST'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000005', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-REF'),
+('bf200000-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000006', 10, 'kg', 100.00, 'KR', 'MANUAL_TEST', 'PM-TEST-BI-ORE')
+ON CONFLICT DO NOTHING;
+
+-- 30-4. 체인 A: 01(제조사,1차) → 02(제조사,2차) → 09(유통,3차) → 07(제련소,4차) → 05(광산,5차)
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', '71000001-0000-4000-8000-000000000001', 'bf000000-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000001-0000-4000-8000-000000000001', '71000002-0000-4000-8000-000000000002', 'bf000000-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000002-0000-4000-8000-000000000002', '71000009-0000-4000-8000-000000000009', 'bf000000-0000-4000-8000-000000000004', 3, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000009-0000-4000-8000-000000000009', '71000007-0000-4000-8000-000000000007', 'bf000000-0000-4000-8000-000000000005', 4, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000007-0000-4000-8000-000000000007', '71000005-0000-4000-8000-000000000005', 'bf000000-0000-4000-8000-000000000006', 5, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06');
+
+-- 30-5. 체인 B: 04(제조사,1차) → 03(제조사,2차) → 10(유통,3차) → 08(제련소,4차) → 06(광산,5차)
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', '71000004-0000-4000-8000-000000000004', 'bf000000-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000004-0000-4000-8000-000000000004', '71000003-0000-4000-8000-000000000003', 'bf000000-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000003-0000-4000-8000-000000000003', '7100000a-0000-4000-8000-00000000000a', 'bf000000-0000-4000-8000-000000000004', 3, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '7100000a-0000-4000-8000-00000000000a', '71000008-0000-4000-8000-000000000008', 'bf000000-0000-4000-8000-000000000005', 4, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06'),
+(uuid_generate_v4(), 'bf300000-0000-4000-8000-000000000001', 'bf200000-0000-4000-8000-000000000001', '71000008-0000-4000-8000-000000000008', '71000006-0000-4000-8000-000000000006', 'bf000000-0000-4000-8000-000000000006', 5, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2026-07-06', '2027-07-06');
+
+
+-- ============================================================
+-- 31. PM테스트협력사01~10 — MES 연동 기본정보 채우기
+-- ============================================================
+-- 문제: "1차협력사 정보는 MES에서 연동" 되는 기본 데이터(회사명/사업자등록번호/
+--   주소/담당자 연락처)까지 전부 비워서 만들었었다. 이 기본정보는 원래 MES에서
+--   이미 넘어와 있어야 하는 값이라 채워두고, 소재/공장/규제/문서(협력사가 직접
+--   입력해야 하는 부분)만 비워둔 채로 유지한다.
+
+UPDATE suppliers SET business_reg_no = '111-86-71001', country = 'KR', address = '경기도 화성시 동탄산단로 101' WHERE supplier_id = '71000001-0000-4000-8000-000000000001';
+UPDATE suppliers SET business_reg_no = '111-86-71002', country = 'KR', address = '경기도 화성시 동탄산단로 102' WHERE supplier_id = '71000002-0000-4000-8000-000000000002';
+UPDATE suppliers SET business_reg_no = '111-86-71003', country = 'KR', address = '충청남도 아산시 배방읍 산단로 103' WHERE supplier_id = '71000003-0000-4000-8000-000000000003';
+UPDATE suppliers SET business_reg_no = '111-86-71004', country = 'KR', address = '충청남도 아산시 배방읍 산단로 104' WHERE supplier_id = '71000004-0000-4000-8000-000000000004';
+UPDATE suppliers SET business_reg_no = '111-86-71005', country = 'AU', address = 'Pilbara Mining District, Western Australia' WHERE supplier_id = '71000005-0000-4000-8000-000000000005';
+UPDATE suppliers SET business_reg_no = '111-86-71006', country = 'ID', address = 'Sulawesi Tengah Mining Zone, Indonesia' WHERE supplier_id = '71000006-0000-4000-8000-000000000006';
+UPDATE suppliers SET business_reg_no = '111-86-71007', country = 'KR', address = '울산광역시 남구 산업로 107' WHERE supplier_id = '71000007-0000-4000-8000-000000000007';
+UPDATE suppliers SET business_reg_no = '111-86-71008', country = 'KR', address = '경상북도 포항시 남구 산단로 108' WHERE supplier_id = '71000008-0000-4000-8000-000000000008';
+UPDATE suppliers SET business_reg_no = '111-86-71009', country = 'KR', address = '서울특별시 강남구 테헤란로 109' WHERE supplier_id = '71000009-0000-4000-8000-000000000009';
+UPDATE suppliers SET business_reg_no = '111-86-71010', country = 'SG', address = '10 Marina Boulevard, Singapore' WHERE supplier_id = '7100000a-0000-4000-8000-00000000000a';
+
+-- 대표 PIC 1명씩(MES 연동 담당자 정보) — factory_id는 아직 공장 미등록이라 NULL.
+INSERT INTO supplier_contacts (supplier_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('71000001-0000-4000-8000-000000000001', '김민준', 'Kim MJ', 'ESG 담당자', 'ESG팀',   'mj.kim@pmtest01.demo',   '+82-31-711-0001', TRUE, 'ko'),
+('71000002-0000-4000-8000-000000000002', '이서연', 'Lee SY', 'ESG 담당자', 'ESG팀',   'sy.lee@pmtest02.demo',   '+82-31-711-0002', TRUE, 'ko'),
+('71000003-0000-4000-8000-000000000003', '박도윤', 'Park DY', 'ESG 담당자', 'ESG팀',  'dy.park@pmtest03.demo',  '+82-41-711-0003', TRUE, 'ko'),
+('71000004-0000-4000-8000-000000000004', '최지우', 'Choi JW', 'ESG 담당자', 'ESG팀',  'jw.choi@pmtest04.demo',  '+82-41-711-0004', TRUE, 'ko'),
+('71000005-0000-4000-8000-000000000005', 'James Carter', 'James Carter', 'Compliance Manager', 'Operations', 'j.carter@pmtest05.demo', '+61-8-711-0005', TRUE, 'en'),
+('71000006-0000-4000-8000-000000000006', 'Budi Santoso', 'Budi Santoso', 'Mine Manager', 'Operations', 'budi@pmtest06.demo', '+62-21-711-0006', TRUE, 'en'),
+('71000007-0000-4000-8000-000000000007', '정하은', 'Jung HE', 'ESG 담당자', 'ESG팀',  'he.jung@pmtest07.demo',  '+82-52-711-0007', TRUE, 'ko'),
+('71000008-0000-4000-8000-000000000008', '한지호', 'Han JH', 'ESG 담당자', 'ESG팀',  'jh.han@pmtest08.demo',   '+82-54-711-0008', TRUE, 'ko'),
+('71000009-0000-4000-8000-000000000009', '오세훈', 'Oh SH', '구매 담당자', '구매팀',  'sh.oh@pmtest09.demo',    '+82-2-711-0009',  TRUE, 'ko'),
+('7100000a-0000-4000-8000-00000000000a', 'Grace Lim', 'Grace Lim', 'Trading Manager', 'Trading', 'grace.lim@pmtest10.demo', '+65-711-0010', TRUE, 'en')
+ON CONFLICT DO NOTHING;

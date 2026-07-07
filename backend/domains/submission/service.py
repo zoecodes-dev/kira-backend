@@ -18,13 +18,14 @@ from backend.infrastructure.trace import trace_node, trace_tool
 logger = logging.getLogger(__name__)
 from backend.domains.submission.models import DataRequestLog, SubmissionStatus
 from backend.domains.submission.repository import (
-    create_data_request, 
-    get_data_request, 
+    create_data_request,
+    get_data_request,
     list_data_requests,
     get_missing_counts,
     get_completeness_by_supplier,
     get_timeline_by_supplier,
     list_extractions_for_review,
+    confirm_extraction_result,
 )
 
 
@@ -70,6 +71,16 @@ async def list_ai_extractions(db: AsyncSession, tenant_id) -> list[dict]:
             "hitl_reason": r.get("hitl_reason"),
         })
     return out
+
+
+async def confirm_extraction(db: AsyncSession, document_id: uuid.UUID, tenant_id) -> Optional[dict]:
+    """AI 추출결과 협력사 검토 확정 — 커밋 일원화(service)."""
+    row = await confirm_extraction_result(db, document_id, tenant_id)
+    if row is not None:
+        await db.commit()
+    return row
+
+
 from backend.domains.submission.state_machine import transition_submission
 from backend.domains.submission.models import DataCompletenessStatus, SubmissionStatusHistory
 from backend.events.types import (

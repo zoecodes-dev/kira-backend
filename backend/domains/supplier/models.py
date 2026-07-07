@@ -61,7 +61,7 @@ class Supplier(Base):
     business_reg_doc_name: Mapped[Optional[str]] = mapped_column(String(255))  # 사업자등록증 원본 파일명(표시용)
     environmental_report_url: Mapped[Optional[str]] = mapped_column(String(500))  # 환경성적서(회원가입 수집) 업로드 URL
     self_assessment_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 실사 자가진단 보고서 업로드 URL
-    material_composition_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 소재구성 문서(핵심광물 함량) 업로드 URL
+    material_composition_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 소재구성 문서 업로드 URL
     is_unverified: Mapped[bool] = mapped_column(Boolean, default=False)  # 회원가입: 사업자등록증 미보유 '미확인 등록'
     parent_supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id")
@@ -337,7 +337,7 @@ class SupplierDetailUpdateRequest(BaseModel):
     business_reg_doc_url: Optional[str] = None       # 사업자등록증
     environmental_report_url: Optional[str] = None   # 환경성적서
     self_assessment_doc_url: Optional[str] = None     # 실사 자가진단 보고서
-    material_composition_doc_url: Optional[str] = None  # 소재구성 문서(핵심광물 함량)
+    material_composition_doc_url: Optional[str] = None  # 소재구성 문서
 
 
 # ----- CTI 상세 응답 DTO (목요일: provider type별 상세 노출) -----
@@ -381,7 +381,7 @@ class SupplierDetailResponse(BaseModel):
     business_reg_doc_url: Optional[str] = None  # 사업자등록증 업로드 URL(확인용)
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL(확인용)
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL(확인용)
-    material_composition_doc_url: Optional[str] = None  # 소재구성 문서(핵심광물 함량) 업로드 URL(확인용)
+    material_composition_doc_url: Optional[str] = None  # 소재구성 문서 업로드 URL(확인용)
     status: str
     risk_level: str
     manufacturer_detail: Optional[ManufacturerDetailDTO] = None
@@ -445,13 +445,11 @@ class SupplierContactsResponse(BaseModel):
 # 입력 완성도 — data_completeness_status(entity_type='supplier').
 class SupplierCompletenessResponse(BaseModel):
     supplier_id: uuid.UUID
+    required_fields: list[str] = []  # provider_type별 '필수 필드 키' 전체(프론트 섹션 총계·'해당 없음' 판정용). 광산 등 비대상은 빈 목록.
     required_field_count: Optional[int] = None
     filled_field_count: Optional[int] = None
     completion_rate: Optional[float] = None
     missing_fields: list[str] = []
-    # provider_type별 '필수 필드 키' 전체 목록(프론트 섹션별 총계·'해당 없음' 판정용).
-    #   missing_fields ⊆ required_fields. 광산 등 비대상은 빈 목록.
-    required_fields: list[str] = []
     last_updated_at: Optional[datetime] = None
 
 
@@ -485,6 +483,13 @@ class SuppliedItemDTO(BaseModel):
     # [공급원 변경 자진신고] declare_source_change 실호출용 BOM 컨텍스트.
     bom_version_id: Optional[uuid.UUID] = None
     bom_version_number: Optional[str] = None
+    # [맵별 탭] 협력사 페이지 맵(=bom_version)별 탭 구성용 product 컨텍스트 + 맵별 상이 데이터.
+    product_id: Optional[uuid.UUID] = None
+    model_name: Optional[str] = None       # 차종 (예: iX3 50) — 탭 라벨
+    product_name: Optional[str] = None
+    customer_name: Optional[str] = None    # 고객사 (예: BMW) — 탭 라벨
+    hop_level: Optional[int] = None        # 이 맵에서 협력사 차수
+    core_minerals: Optional[dict] = None   # 이 맵(엣지)의 핵심광물 함량 %; 없으면 회사값 폴백
     model_config = {"from_attributes": True}
 
 
@@ -560,7 +565,7 @@ class MasterFormCompany(BaseModel):
     business_reg_doc_url: Optional[str] = None  # 사업자등록증 업로드 URL
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL
-    material_composition_doc_url: Optional[str] = None  # 소재구성 문서(핵심광물 함량) 업로드 URL
+    material_composition_doc_url: Optional[str] = None  # 소재구성 문서 업로드 URL
     established_year: Optional[int] = None
     employee_count: Optional[int] = None
 
@@ -750,17 +755,26 @@ class OnboardingContact(BaseModel):
     department: Optional[str] = None
 
 
+class SubSupplierInvite(BaseModel):
+    """온보딩 STEP3(하위협력사 담당자 등록) 입력 1건 — 캐스케이드 초대용.
+    무토큰 공개 submit 트랜잭션 안에서 그대로 신규 협력사 생성 + 동의요청까지 처리한다
+    (기존엔 프론트 로컬 state로만 남고 어디에도 저장 안 되던 것을 PM 확인 후 정식 연결)."""
+    company_name: str
+    name: str
+    email: str
+    phone: Optional[str] = None
+
+
 class OnboardingSubmitRequest(BaseModel):
-    """공개 submit 요청 — §6 계약. consent_agreed 는 entry 동의 게이트 통과 표식.
-    account 는 선택 — 1차 협력사는 MES 기반 계정을 이미 보유하므로 null(신규 계정 생성 안 함).
-    account 가 있으면(n차) 제출 즉시 활성 계정을 생성한다."""
-    account: Optional[OnboardingAccount] = None
+    """공개 submit 요청 — §6 계약. consent_agreed 는 entry 동의 게이트 통과 표식."""
+    account: OnboardingAccount
     company: OnboardingCompany
     business_reg_doc: Optional[OnboardingDoc] = None
     environmental_report: Optional[OnboardingDoc] = None   # 환경성적서(회원가입 수집) — AI 확인은 로그인 후 자료입력에서
     unverified: bool = False
     consent_agreed: bool = False
     contacts: list[OnboardingContact] = []
+    sub_suppliers: list[SubSupplierInvite] = []  # STEP3 — 말단이 아니면 하위협력사 캐스케이드 초대
 
 
 class OnboardingSubmitResponse(BaseModel):

@@ -121,6 +121,8 @@ class Notification(Base):
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     dedup_key: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
+    # 딥링크 target(맵+협력사 노드 좌표) — 프론트 NotificationTarget과 1:1. camelCase 키로 저장.
+    target: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 
 
