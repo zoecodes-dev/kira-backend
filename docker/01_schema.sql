@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; -- uuid_generate_v4() 기본키 생�
 -- 영역 1. 테넌트 / 사용자 / 권한 (A 담당)
 -- ============================================================
 
--- [테이블 역할] 멀티테넌트 SaaS의 최상위 조직 단위. 원청사(OEM) 1개가 1개의 tenant로 기능.
+-- [테이블 역할] 멀티테넌트 SaaS의 최상위 조직 단위. 원청사(prime) 1개가 1개의 tenant로 기능.
 CREATE TABLE tenants (
     tenant_id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_name        VARCHAR(255) NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE users (
     is_active      BOOLEAN DEFAULT TRUE,
     last_login_at  TIMESTAMPTZ,
     manager_id     UUID REFERENCES users(user_id) ON DELETE SET NULL, -- [다단계 결재] 상급자 자기참조 (결재선 자동 구성)
-    supplier_id    UUID,  -- [협력사 본인 식별 §0.5] 협력사 계정이 대표하는 supplier. 로그인 supplier_id 클레임/포털 스코프 소스. OEM 계정은 NULL.
+    supplier_id    UUID,  -- [협력사 본인 식별 §0.5] 협력사 계정이 대표하는 supplier. 로그인 supplier_id 클레임/포털 스코프 소스. 원청(prime) 계정은 NULL.
     created_at     TIMESTAMPTZ DEFAULT now()
 );
 

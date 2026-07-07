@@ -429,7 +429,14 @@ async def get_completeness_inputs(db: AsyncSession, supplier_id: UUID) -> Option
                (SELECT json_agg(json_build_object('country', f.country, 'core_minerals', f.core_minerals))
                  FROM supplier_factories f
                  WHERE f.supplier_id = s.supplier_id AND f.is_active AND f.factory_role = 'mining'
-               ) AS mining_factories
+               ) AS mining_factories,
+               -- 전 유형 공통 — 소재구성(핵심광물)이 이제 회사 단위가 아니라 공장(사이트) 단위라
+               --   역할 제한 없이 이 협력사의 활성 공장 전체를 모아 서비스에서 판정한다
+               --   (materials.any/materials.handled_any).
+               (SELECT json_agg(json_build_object('core_minerals', f.core_minerals))
+                 FROM supplier_factories f
+                 WHERE f.supplier_id = s.supplier_id AND f.is_active
+               ) AS factories_minerals
         FROM suppliers s
         LEFT JOIN supplier_manufacturer_details md ON md.supplier_id = s.supplier_id
         LEFT JOIN supplier_risk_profiles rp ON rp.supplier_id = s.supplier_id
@@ -455,6 +462,13 @@ async def get_completeness_inputs(db: AsyncSession, supplier_id: UUID) -> Option
         except Exception:
             mf = []
     data["mining_factories"] = mf or []
+    fm = data.get("factories_minerals")
+    if isinstance(fm, str):
+        try:
+            fm = json.loads(fm)
+        except Exception:
+            fm = []
+    data["factories_minerals"] = fm or []
     return data
 
 
