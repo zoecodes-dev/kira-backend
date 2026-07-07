@@ -69,6 +69,10 @@ async def _register_subscriptions() -> None:
     from backend.handlers.submission_submitted_notify import notify_supplier_submission
     await subscribe("SubmissionCompleted", notify_supplier_submission)
 
+    # ── E: 협력사 온보딩(제3자 동의서) 제출 시 원청에 STEP4 수신확인 알림 ──
+    from backend.handlers.onboarding_review_notify import notify_onboarding_review_needed
+    await subscribe("SupplierStatusChanged", notify_onboarding_review_needed)
+
     # ── D→E: 공급망 맵 gap 트리거 → 협력사 자료요청 생성 ──
     #    supplychain 이 submission 을 직접 호출하던 것을 이벤트로 분리(규칙 #4).
     from backend.handlers.supplychain_gap_data_request import on_supply_chain_gap_detected
