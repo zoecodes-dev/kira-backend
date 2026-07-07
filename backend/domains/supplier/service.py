@@ -748,14 +748,17 @@ def _field_filled(field: str, snap: dict, handled_metals: set = frozenset()) -> 
         # 광산 공장(사이트) 중 하나라도 소재 구성(핵심광물 함량)이 1종 이상 있으면 충족.
         return any(_mineral_present(mf.get("core_minerals") or {}) for mf in snap.get("mining_factories") or [])
     if field == "materials.any":
-        return _mineral_present(cm)
+        # 소재구성은 회사 단위가 아니라 공장(사이트) 단위 — 활성 공장 중 하나라도
+        # 핵심광물 함량이 1종 이상 있으면 충족(§factories_minerals, 광산의 factories.mine_composition과 동일 패턴).
+        return any(_mineral_present(f.get("core_minerals") or {}) for f in snap.get("factories_minerals") or [])
     if field == "materials.handled_any":
-        # 취급 금속(공급망 도출) 중 최소 1개 입력이면 충족. 도출 실패(맵 미구축)면
-        #   '최소 1개 광물'로 폴백(순환 0/0=100% 방지).
+        # 취급 금속(공급망 도출) 중 최소 1개가 어느 공장에든 입력돼 있으면 충족. 도출 실패(맵
+        #   미구축)면 '공장 중 하나라도 최소 1종 광물'로 폴백(순환 0/0=100% 방지).
         metals = [m for m in _TRACKED_METALS if m in handled_metals]
+        factories = snap.get("factories_minerals") or []
         if metals:
-            return any(_val_present(cm.get(m)) for m in metals)
-        return _mineral_present(cm)
+            return any(_val_present((f.get("core_minerals") or {}).get(m)) for f in factories for m in metals)
+        return any(_mineral_present(f.get("core_minerals") or {}) for f in factories)
     if field.startswith("materials."):
         return _val_present(cm.get(field.split(".", 1)[1]))
     if field == "regulation.self_reported_risk_level":
