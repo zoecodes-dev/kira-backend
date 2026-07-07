@@ -280,8 +280,38 @@ async def mark_consent_agreed(db: AsyncSession, supplier_id: UUID, signed_at) ->
     await db.flush()
 
 
-async def set_supplier_status(db: AsyncSession, supplier_id: UUID, status: str) -> None:
-    """suppliers.status 전이(회원가입 제출 → 'supplier_review'). flush까지만(커밋은 service)."""
+async def set_supplier_status(
+    db: AsyncSession,
+    supplier_id: UUID,
+    status: str,
+    actor_id: UUID | None = None,
+    reason: str | None = None,
+) -> None:
+    """suppliers.status 전이 + supplier_status_history 감사 기록. flush까지만(커밋은 service).
+
+    suppliers.status 는 현재값만 보유하므로, 전이 시 이전상태(from)를 읽어 이력을 남긴다.
+    실제 상태가 바뀔 때만 기록(동일값 재지정은 스킵).
+    """
+    current = (await db.execute(
+        select(Supplier.status).where(Supplier.supplier_id == supplier_id)
+    )).scalar_one_or_none()
+
+    if current != status:
+        await db.execute(
+            text("""
+                INSERT INTO supplier_status_history
+                    (supplier_id, from_status, to_status, actor_id, reason)
+                VALUES (:sid, :from_s, :to_s, :actor, :reason)
+            """),
+            {
+                "sid": str(supplier_id),
+                "from_s": current,
+                "to_s": status,
+                "actor": str(actor_id) if actor_id else None,
+                "reason": reason,
+            },
+        )
+
     await db.execute(
         update(Supplier).where(Supplier.supplier_id == supplier_id).values(status=status)
     )

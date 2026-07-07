@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from backend.infrastructure.database import get_db
-from backend.domains.risk.service import calculate_risk_score
+from backend.infrastructure.auth import CurrentUser, get_current_user
+from backend.domains.risk.service import calculate_risk_score, resolve_risk
 from backend.domains.risk.repository import RiskRepository
 from backend.infrastructure.trace import trace_tool
 
@@ -20,6 +21,10 @@ class StageRiskRequest(BaseModel):
     supplier_id: UUID
     violations: list[ViolationItem]
 
+class ResolveRiskRequest(BaseModel):
+    batch_id: UUID | None = None  # 종결 계기가 된 배치(선택)
+    note: str | None = None       # 종결 사유 메모(감사)
+
 
 @router.post("/stage-risk")
 async def execute_stage_risk(req: StageRiskRequest, db: AsyncSession = Depends(get_db)):
@@ -30,6 +35,27 @@ async def execute_stage_risk(req: StageRiskRequest, db: AsyncSession = Depends(g
         violations=[v.model_dump() for v in req.violations]
     )
     return result
+
+@router.post("/{supplier_id}/resolve")
+@trace_tool("resolve_risk")
+async def resolve_risk_endpoint(
+    supplier_id: UUID,
+    req: ResolveRiskRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    [API] POST /risk/{supplier_id}/resolve — 협력사 리스크를 종결 처리한다.
+    점수/고위험 플래그를 리셋하고 RiskResolved 이벤트를 발행한다.
+    resolved_by 는 인증 사용자(감사).
+    """
+    return await resolve_risk(
+        db,
+        supplier_id=supplier_id,
+        resolved_by=current_user.user_id,
+        batch_id=req.batch_id,
+        note=req.note,
+    )
 
 @router.get("/scores")
 @trace_tool("get_risk_scores")

@@ -289,6 +289,34 @@ CREATE TABLE supplier_risk_profiles (
     UNIQUE(supplier_id)
 );
 
+-- [감사] 협력사 status 전이 이력. suppliers.status 는 현재값만 보유하므로,
+--   "언제·누가·왜·무엇에서 무엇으로" 전이했는지 append-only 로 남긴다. (SupplierStatusChanged 대체 감사 소스)
+CREATE TABLE supplier_status_history (
+    history_id    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    supplier_id   UUID REFERENCES suppliers(supplier_id) ON DELETE CASCADE,
+    from_status   VARCHAR(30),                       -- 신규 등록 등 이전상태 없으면 NULL
+    to_status     VARCHAR(30) NOT NULL,
+    actor_id      UUID REFERENCES users(user_id),    -- 전이 주체(시스템/파이프라인 전이면 NULL)
+    reason        TEXT,                              -- 전이 사유/맥락
+    changed_at    TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_supplier_status_history ON supplier_status_history(supplier_id, changed_at DESC);
+
+-- [감사] 협력사 리스크 점수/레벨 변경 이력. supplier_risk_profiles 는 단일행 덮어쓰기라
+--   변경 추적이 불가능하므로, 매 변경을 append-only 로 남긴다. (RiskProfileUpdated 대체 감사 소스)
+CREATE TABLE risk_score_history (
+    history_id    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    supplier_id   UUID REFERENCES suppliers(supplier_id) ON DELETE CASCADE,
+    from_score    INT,                               -- 최초 산정이면 NULL
+    to_score      INT NOT NULL,
+    from_level    VARCHAR(20),
+    to_level      VARCHAR(20),
+    reason        TEXT,                              -- 변경 계기(위반 사유/재산정/수동조정 등)
+    changed_by    UUID REFERENCES users(user_id),    -- 수동 조정 주체(파이프라인 자동 산정이면 NULL)
+    changed_at    TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_risk_score_history ON risk_score_history(supplier_id, changed_at DESC);
+
 -- [테이블 역할] 공급망 실사(Due Diligence)의 법적 수행 실적 관리 대장. (CSDDD 대응)
 CREATE TABLE supplier_audit_records (
     audit_record_id    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -786,7 +814,7 @@ CREATE TABLE processed_jobs (
     idempotency_key  VARCHAR(255) PRIMARY KEY, -- 예: '{event_name}:{batch_id}:{rule}' 등 작업 고유 키
     queue_name       VARCHAR(50)
         CONSTRAINT chk_processed_queue CHECK (queue_name IN (
-            'document_parse_queue', 'verification_queue', 'risk_queue',
+            'document_parse_queue',
             'hitl_queue', 'notification_queue',
             'batch_pipeline_queue', 'dead_letter_queue'
         )),
@@ -809,7 +837,7 @@ CREATE TABLE processed_jobs (
 CREATE TABLE hitl_reviews (
     review_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     batch_id          UUID REFERENCES batches(batch_id) ON DELETE CASCADE,
-    reason            VARCHAR(100) NOT NULL, -- 'gray_zone' | 'risk_escalated' (low_confidence는 협력사 reverify 경로, 미기입)
+    reason            VARCHAR(100) NOT NULL, -- 'gray_zone' | 'risk_escalated' | 'geographical_risk' (low_confidence는 협력사 reverify 경로, 미기입)
     trigger_stage     VARCHAR(50) NOT NULL,
     assigned_to       UUID REFERENCES users(user_id),
     
