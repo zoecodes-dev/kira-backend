@@ -232,7 +232,9 @@ class SupplyChainService:
 
             # 제3자 정보제공 동의서 — 규제 필수 필드 목록엔 없지만 데이터 계약 성립의 전제조건.
             # 원청(is_root_anchor) 자신은 동의 대상이 아니므로 제외. '요청됨'만으론 미완료로 집계.
-            if not row.get("is_root_anchor", False) and not row.get("has_consent_agreed"):
+            # 광산(miner)도 입력 주체가 아니라(제련소가 원산지·광물을 대신 제공) 동의서 대상이 아니다 —
+            # 안 그러면 나머지 항목이 전부 '해당 없음'인 광산도 이 항목 하나 때문에 gap_count=1로 잡힌다.
+            if provider_type != "miner" and not row.get("is_root_anchor", False) and not row.get("has_consent_agreed"):
                 missing.append({
                     "field_name":      "consent_agreement",
                     "field_label":     "제3자 정보제공 동의서",

@@ -35,6 +35,7 @@ from backend.domains.supplier.models import (
 from backend.events.types import (
     RiskProfileUpdatedEvent,
     SupplierInvitedEvent,
+    SupplierStatusChangedEvent,
     SupplierDocumentUploadedEvent,
 )
 from backend.infrastructure import geocode
@@ -1010,6 +1011,7 @@ async def submit_onboarding(
     supplier = await repository.get_supplier_by_id(db, supplier_id)
     if supplier is None:
         return None
+    from_status = supplier.status
 
     users = UserRepository(db)
     # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
@@ -1133,58 +1135,6 @@ async def submit_onboarding(
                 "supplier_id": sub_supplier.supplier_id, "email": sub.email, "sla_due_date": sub_sla_due,
             })
 
-        # 7-c) [FIX] 하위협력사 캐스케이드 초대(STEP3) — 예전엔 프론트 로컬 state로만 남고
-        #   어디에도 저장되지 않았다(PM 확인 후 정식 연결). 무토큰 공개 submit 트랜잭션
-        #   안에서 create_supplier_and_invite 와 동일한 절차(협력사+리스크프로필+온보딩행+
-        #   PIC+완성도)를 그대로 반복하되, 커밋은 이 트랜잭션 한 번으로 묶는다.
-        invited_sub_suppliers: list[dict] = []
-        for sub in body.sub_suppliers:
-            sub_supplier = await repository.create_supplier(db, {
-                "company_name": sub.company_name,
-                "provider_type": "manufacturer",  # STEP3 화면엔 유형 선택이 없어 기본값(원청이 추후 조정 가능)
-                "tenant_id": supplier.tenant_id,
-                "status": "supplier_pending",
-            })
-            db.add(SupplierRiskProfile(
-                supplier_id=sub_supplier.supplier_id,
-                overall_risk_score=0,
-                risk_level="low",
-                is_high_risk_flag=False,
-            ))
-            sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
-            db.add(SupplierOnboarding(
-                supplier_id=sub_supplier.supplier_id,
-                consent_status="consent_pending",
-                agreement_status="pending",
-                last_invited_at=datetime.now(timezone.utc),
-                sla_due_date=sub_sla_due,
-                reminder_count=0,
-            ))
-            await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
-                MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
-            ])
-            await recompute_completeness(db, sub_supplier.supplier_id)
-            # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
-            # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
-            await consent_repo.create(
-                db, tenant_id=supplier.tenant_id, requested_by=None,
-                body=ConsentCreateBody(
-                    supplier_id=sub_supplier.supplier_id,
-                    data_scope=["company", "contacts", "factories", "carbon_epd", "origin"],
-                    purpose="EU_BATTERY",
-                    third_party_sharing=True,
-                    valid_from=datetime.now(timezone.utc).date(),
-                    form_version="v1.0",
-                ),
-            )
-            await submission_repo.create_data_request(db, DataRequestLog(
-                target_supplier_id=sub_supplier.supplier_id,
-                requested_data_type="general_info",
-            ))
-            invited_sub_suppliers.append({
-                "supplier_id": sub_supplier.supplier_id, "email": sub.email, "sla_due_date": sub_sla_due,
-            })
-
         # 8) 단일 커밋(atomic) — 여기 도달해야만 전체 영속화.
         await db.commit()
     except OnboardingConflictError:
@@ -1200,6 +1150,13 @@ async def submit_onboarding(
             inviter_supplier_id=supplier_id,
         )
         await publish("SupplierInvited", dataclasses.asdict(event))
+
+    # 9-b) 이 협력사(모든 차수 공통) 자신의 온보딩 제출 — 원청에 STEP4 수신확인 알림
+    #   (onboarding_review_notify.py가 to_status=='supplier_review'일 때만 처리).
+    status_event = SupplierStatusChangedEvent(
+        supplier_id=supplier_id, from_status=from_status, to_status="supplier_review",
+    )
+    await publish("SupplierStatusChanged", dataclasses.asdict(status_event))
 
     return {
         "supplier_id": supplier_id,
