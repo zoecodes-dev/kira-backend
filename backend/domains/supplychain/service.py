@@ -478,6 +478,87 @@ class SupplyChainService:
             base.update(judgment)
         return base
 
+    # ── 고객사 전송용 다국어 리스크 요약 (이 맵=product+bom_version 단위) ──────
+    # (구 report 도메인 risk-summary/outbound 이관 — 테넌트 전체가 아니라 이 맵의
+    #  협력사로만 집계를 좁혀서, 이 제품을 이 고객사에 보낼 때의 요약을 만든다.)
+
+    @staticmethod
+    def _compute_risk_summary_metrics(raw: Dict[str, int]) -> Dict[str, int]:
+        def _safe_rate(numerator: int, denominator: int) -> int:
+            return int(round(100.0 * numerator / denominator)) if denominator else 0
+
+        return {
+            "supplier_total":       raw["supplier_total"],
+            "high_risk_count":      raw["high_risk_count"],
+            "audited_suppliers":    raw["audited_suppliers"],
+            "audit_decided":        raw["audit_decided"],
+            "audit_pass_rate":      _safe_rate(raw["audit_pass"], raw["audit_decided"]),
+            "capa_total":           raw["capa_total"],
+            "capa_closed":          raw["capa_closed"],
+            "capa_rate":            _safe_rate(raw["capa_closed"], raw["capa_total"]),
+            "compliance_pass_rate": _safe_rate(raw["compliance_passed"], raw["compliance_total"]),
+            "chain_verified_rate":  _safe_rate(raw["chain_verified"], raw["chain_total"]),
+        }
+
+    async def get_outbound_risk_summary(
+        self,
+        product_id: str,
+        tenant_id: str,
+        customer_id: str,
+        bom_version_id: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        """고객사 전송용 다국어 리스크 요약 프리뷰 — 이 맵(product+bom_version)의
+        협력사로만 집계를 좁힌다. 고객사 국가로 언어 자동 결정(독일=EN+DE, 그 외=EN).
+        국가 미상이면 EN만 내되 country_known=False로 사람이 언어를 고르도록 신호.
+        타 테넌트/미보유 고객사면 None(→404)."""
+        from backend.domains.supplychain.risk_summary_templates import (
+            render_key_points,
+            render_summary,
+            resolve_outbound_locales,
+            section_title,
+        )
+
+        customer = await self.repository.get_outbound_customer(customer_id, tenant_id)
+        if customer is None:
+            return None
+
+        rows = await self.repository.get_supplier_field_data(product_id, bom_version_id)
+        supplier_ids = [str(r["supplier_id"]) for r in rows if not r.get("is_root_anchor")]
+
+        raw = await self.repository.aggregate_risk_summary_for_map(supplier_ids)
+        metrics = self._compute_risk_summary_metrics(raw)
+
+        country = customer.get("country")
+        locales = resolve_outbound_locales(country)
+        country_known = bool(country)
+
+        note = None
+        if not country_known:
+            note = "고객사 국가 정보가 없습니다 — 전송 언어를 직접 선택하세요(독일이면 DE 추가)."
+
+        def _render_locale(locale: str) -> Dict[str, Any]:
+            return {
+                "locale": locale,
+                "section_title": section_title(locale),
+                "summary_text": render_summary(metrics, locale),
+                "key_points": render_key_points(metrics, locale),
+            }
+
+        return {
+            "product_id": product_id,
+            "bom_version_id": bom_version_id,
+            "customer": {
+                "customer_id": str(customer["customer_id"]),
+                "customer_name": customer["customer_name"],
+                "country": country,
+            },
+            "country_known": country_known,
+            "locales": locales,
+            "renders": [_render_locale(loc) for loc in locales],
+            "metrics": metrics,
+            "note": note,
+        }
+
     async def export_supply_chain_xlsx(
         self,
         product_id: str,

@@ -594,11 +594,6 @@ INSERT INTO audit_trail (batch_id, step_number, node_type, node_name, input_hash
 UPDATE users SET manager_id = '11111111-0000-4000-8000-000000000002'
 WHERE user_id = '11111111-0000-4000-8000-000000000003';
 
--- 실사 정책 문서 1건 (CSDDD 대응, active)
-INSERT INTO due_diligence_policies (policy_id, title, version, status, document_url, created_by, published_at) VALUES
-('d0000000-0000-4000-8000-000000000001', 'KIRA 공급망 실사 정책', 'v1.0', 'active', 's3://kira-documents/policies/dd_policy_v1.pdf', '11111111-0000-4000-8000-000000000002', now());
-
-
 -- ===== SEED DELTA: 결재선용 부서장 추가 (02_seed_data.sql) =====
 -- A 방향: role enum 변경 없음. 직책 계층(담당↔부서장)은 manager_id 로만 표현.
 -- ESG 담당(002)이 컴플라이언스 보고서 기안 → ESG 부서장(008) 결재 → 끝. (2단계)

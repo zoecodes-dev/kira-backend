@@ -661,18 +661,6 @@ class Part(Base):
         ),
     )
 
-    purchase_unit = Column(
-        String(20),
-        nullable=True,
-        comment="구매 단위. 예: kg / 개 / MWh",
-    )
-
-    specs = Column(
-        JSONB,
-        nullable=True,
-        comment="부품 규격(JSONB).",
-    )
-
     created_at = Column(
         TIMESTAMP(timezone=True),
         server_default=func.now(),
