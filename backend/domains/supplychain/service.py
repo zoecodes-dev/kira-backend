@@ -259,6 +259,7 @@ class SupplyChainService:
         actor_id: UUID,
         due_date: Optional[datetime] = None,
         supplier_ids: Optional[List[UUID]] = None,
+        bom_version_id: Optional[UUID] = None,   # [map별 독립 제출] 지정 시 그 맵(BOM)으로 gap 한정 + 요청에 실림
     ) -> List[Dict[str, Any]]:
         """
         C3 맵 gap→자료요청 트리거(이벤트 방식). gap 있는 노드별로 SupplyChainGapDetected
@@ -274,7 +275,10 @@ class SupplyChainService:
         발행 순서 주의: 이 도메인은 여기서 DB write 를 하지 않는다(순수 read→publish).
           따라서 커밋 없이 발행해도 롤백 불일치가 없다(규칙 #3의 대상 아님).
         """
-        gaps = await self.get_gaps(product_id=str(product_id))
+        gaps = await self.get_gaps(
+            product_id=str(product_id),
+            bom_version_id=str(bom_version_id) if bom_version_id else None,
+        )
         nodes = gaps.get("nodes", [])
         target_ids = {str(s) for s in supplier_ids} if supplier_ids else None
 
@@ -295,6 +299,7 @@ class SupplyChainService:
             requested_data_type = ",".join(f["field_name"] for f in node["missing_fields"])
             event = SupplyChainGapDetectedEvent(
                 product_id=product_id,
+                bom_version_id=bom_version_id,
                 supplier_id=node["supplier_id"],
                 requested_data_type=requested_data_type,
                 requester_user_id=requester_user_id,

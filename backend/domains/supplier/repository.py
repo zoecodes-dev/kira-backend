@@ -574,6 +574,7 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
                pr.product_name,
                c.customer_name,
                scm.hop_level,
+               sr.factory_id,
                COALESCE(scm.core_minerals, s.core_minerals) AS core_minerals
         FROM supply_chain_map scm
         JOIN parts p ON p.part_id = scm.part_id
@@ -581,6 +582,9 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
         LEFT JOIN products pr      ON pr.product_id = bv.product_id
         LEFT JOIN customers c      ON c.customer_id = pr.customer_id
         LEFT JOIN suppliers s      ON s.supplier_id = scm.child_supplier_id
+        -- [맵별 탭] 이 협력사가 이 맵(엣지)에서 대는 공장 — supply_ratio(엣지→공장 분할)로 매핑.
+        --   프론트가 map 탭에서 '그 맵에 속한 공장'만 필터할 수 있게 factory_id 동봉.
+        LEFT JOIN supply_ratio sr  ON sr.edge_id = scm.edge_id
         WHERE scm.child_supplier_id = :sid
         ORDER BY c.customer_name NULLS LAST, pr.model_name NULLS LAST,
                  scm.bom_version_id, p.tier_level NULLS LAST, p.part_code

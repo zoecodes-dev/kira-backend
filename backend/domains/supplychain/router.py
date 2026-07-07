@@ -262,6 +262,7 @@ async def verify_supplier_endpoint(
 
 class TriggerDataRequestsBody(BaseModel):
     product_id: UUID
+    bom_version_id: Optional[UUID] = None  # [map별 독립 제출] 지정 시 그 맵(BOM)으로 한정 + 요청에 실림. None=회사 단위
     supplier_ids: Optional[List[UUID]] = None  # None = gap 있는 노드 전체
     requester_user_id: UUID
     actor_id: UUID
@@ -290,6 +291,7 @@ async def trigger_data_requests_for_gaps_endpoint(
         actor_id=body.actor_id,
         due_date=body.due_date,
         supplier_ids=body.supplier_ids,
+        bom_version_id=body.bom_version_id,
     )
 
     return {

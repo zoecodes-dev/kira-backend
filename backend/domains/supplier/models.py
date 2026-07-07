@@ -491,6 +491,7 @@ class SuppliedItemDTO(BaseModel):
     product_name: Optional[str] = None
     customer_name: Optional[str] = None    # 고객사 (예: BMW) — 탭 라벨
     hop_level: Optional[int] = None        # 이 맵에서 협력사 차수
+    factory_id: Optional[uuid.UUID] = None # 이 맵(엣지)에서 대는 공장 — map 탭에서 공장 필터용
     core_minerals: Optional[dict] = None   # 이 맵(엣지)의 핵심광물 함량 %; 없으면 회사값 폴백
     model_config = {"from_attributes": True}
 
