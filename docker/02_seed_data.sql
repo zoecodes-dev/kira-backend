@@ -40,10 +40,11 @@ INSERT INTO users (user_id, tenant_id, email, password_hash, name, role) VALUES
 ('11111111-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'esg@daesung.demo',      '$2b$12$XO1O./JYL5VKDkodX2RdpOZSfFA7PSkeViaPqiOSQG4szW7fGVjf.', 'Daesung ESG',     'supplier_esg'),
 ('11111111-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'ceo@woojin.demo',       '$2b$12$XO1O./JYL5VKDkodX2RdpOZSfFA7PSkeViaPqiOSQG4szW7fGVjf.', 'Woojin CEO',      'supplier_ceo');
 
--- 데모 로그인 계정 (프론트 로그인 화면 기본값 — oem/supplier). password: demo1234
+-- 데모 로그인 계정 (프론트 로그인 화면 기본값 — prime/supplier). password: demo1234
 -- (구 alembic 0004_demo_accounts 에서 이관 — DDL/데이터 모두 docker schema·seed 로 일원화)
+-- 원청(prime) 계정 — 원청은 OEM(고객사)이 아니므로 prime@kira.demo 로 표기.
 INSERT INTO users (user_id, tenant_id, email, password_hash, name, role) VALUES
-('11111111-0000-4000-8000-0000000000a1', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'oem@kira.demo',              '$2b$12$LdrfIceVZR7twTzU8rxKF.M0uqv9vmcUawZNKRoLjbjb9gAidiynS', 'Demo OEM',          'admin'),
+('11111111-0000-4000-8000-0000000000a1', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'prime@kira.demo',            '$2b$12$LdrfIceVZR7twTzU8rxKF.M0uqv9vmcUawZNKRoLjbjb9gAidiynS', 'Demo 원청',         'admin'),
 ('11111111-0000-4000-8000-0000000000b1', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'supplier@hanyang-cell.com',  '$2b$12$LdrfIceVZR7twTzU8rxKF.M0uqv9vmcUawZNKRoLjbjb9gAidiynS', '한양셀 데모 협력사', 'supplier_ceo');
 
 -- 협력사 계정 ↔ 본인 supplier 매핑 (§0.5 — 로그인 supplier_id 클레임 / 협력사 포털 스코프 소스).
@@ -2588,3 +2589,44 @@ INSERT INTO supplier_contacts (supplier_id, name, name_en, role, department, ema
 ('71000009-0000-4000-8000-000000000009', '오세훈', 'Oh SH', '구매 담당자', '구매팀',  'sh.oh@pmtest09.demo',    '+82-2-711-0009',  TRUE, 'ko'),
 ('7100000a-0000-4000-8000-00000000000a', 'Grace Lim', 'Grace Lim', 'Trading Manager', 'Trading', 'grace.lim@pmtest10.demo', '+65-711-0010', TRUE, 'en')
 ON CONFLICT DO NOTHING;
+
+
+-- ============================================================
+-- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형) 1곳만
+-- ============================================================
+-- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유)"만 있는 단순 공급망을
+--   보여주기 위한 전용 데이터셋. 실 iX3(d1111111)는 안 건드리고 복제 제품을 새로 만든다.
+--   실 데이터와 유사하되 이름만 살짝 변형(한양셀 제조(주) → 한양배터리셀(주)).
+--   구성은 최소한 — 회사명 + 서류(사업자등록증/환경성적서 URL)만. 공장/담당자/탄소선언 생략.
+
+-- 32-1. 1차 협력사(한양셀 변형) — 환경성적서 + 사업자등록증 DB 보유(핵심 요건).
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
+('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', 'Kim CEO', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 남구 포항산단로 51', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
+ON CONFLICT (supplier_id) DO NOTHING;
+
+-- 32-2. iX3 복제 제품(실 iX3와 사양 동일, 이름/코드만 데모 표기).
+INSERT INTO products (product_id, product_code, product_name, manufacturer_id, tenant_id, customer_id, model_name, amperage_ah, type, source_system, external_id) VALUES
+('d5111111-0000-4000-8000-000000000001', 'KE-CYL-NCM811-108-DEMO', 'KIRA PRiMX Cylindrical NCM811 108Ah (데모)', 'a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0000000-0000-4000-8000-0000000000b1', 'iX3 데모', 108.00, 'battery_pack', 'MANUAL_DEMO', 'DEMO-PROD-IX3')
+ON CONFLICT (product_id) DO NOTHING;
+
+-- 32-3. BOM 버전.
+INSERT INTO bom_versions (bom_version_id, product_id, version_number, production_from, production_to, status, source_system, external_id) VALUES
+('e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', '1.0', '2025-01-01', NULL, 'active', 'MANUAL_DEMO', 'DEMO-BOM-IX3')
+ON CONFLICT (bom_version_id) DO NOTHING;
+
+-- 32-4. BOM 항목 — 기존 부품 재사용(루트 Pack ...01, 1차 Module ...02).
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
+('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000001', 1,   'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-PACK'),
+('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-MOD')
+ON CONFLICT DO NOTHING;
+
+-- 32-5. 공급망 맵 헤더(completed — 1차까지 검증 완료 상태로 노출).
+INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status) VALUES
+('55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', 'completed')
+ON CONFLICT (bom_version_id) DO NOTHING;
+
+-- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀). 1차만.
+INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
+('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'verified', '2025-01-01', '2025-12-31'),
+('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_confirmed', 'ERP', 'verified', '2025-01-01', '2025-12-31')
+ON CONFLICT (edge_id) DO NOTHING;
