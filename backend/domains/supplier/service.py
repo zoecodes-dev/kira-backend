@@ -35,6 +35,7 @@ from backend.domains.supplier.models import (
 from backend.events.types import (
     RiskProfileUpdatedEvent,
     SupplierInvitedEvent,
+    SupplierStatusChangedEvent,
     SupplierDocumentUploadedEvent,
 )
 from backend.infrastructure import geocode
@@ -1010,6 +1011,7 @@ async def submit_onboarding(
     supplier = await repository.get_supplier_by_id(db, supplier_id)
     if supplier is None:
         return None
+    from_status = supplier.status
 
     users = UserRepository(db)
     # 1) 재제출 가드 — 이미 활성 계정이 있는 supplier 면 409(decision #8).
@@ -1148,6 +1150,13 @@ async def submit_onboarding(
             inviter_supplier_id=supplier_id,
         )
         await publish("SupplierInvited", dataclasses.asdict(event))
+
+    # 9-b) 이 협력사(모든 차수 공통) 자신의 온보딩 제출 — 원청에 STEP4 수신확인 알림
+    #   (onboarding_review_notify.py가 to_status=='supplier_review'일 때만 처리).
+    status_event = SupplierStatusChangedEvent(
+        supplier_id=supplier_id, from_status=from_status, to_status="supplier_review",
+    )
+    await publish("SupplierStatusChanged", dataclasses.asdict(status_event))
 
     return {
         "supplier_id": supplier_id,
