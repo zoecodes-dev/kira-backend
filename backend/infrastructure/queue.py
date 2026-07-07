@@ -9,9 +9,11 @@ ARQ + Redis. 비동기 작업을 Queue에 넣는 단일 인터페이스만 제�
 
 [정합성 핵심 — 큐 이름은 schema.sql processed_jobs.chk_processed_queue 허용값과 1:1]
     schema.sql의 processed_jobs.queue_name CHECK 제약이 허용하는 값만 사용한다:
-        document_parse_queue / verification_queue / risk_queue /
+        document_parse_queue / verification_queue /
         hitl_queue / notification_queue /
         batch_pipeline_queue / dead_letter_queue
+    (risk_queue는 소비 워커가 없어 죽은 큐 정리 때 QUEUE_NAMES에서 제거됨 — schema CHECK도
+     동일하게 정리해 1:1 정합 유지. 되살아나면 이 문서와 CHECK 양쪽에 다시 추가할 것.)
     (과거 표기였던 'ocr_queue' / 'validation_queue'는 허용값에 없어 processed_jobs
      INSERT 시 CHECK 위반으로 멱등성 기록이 깨졌다. 폴더·큐·도메인·state·이벤트를
      전부 verification으로 통일하는 결정에 따라 verification_queue로 일원화한다.)
