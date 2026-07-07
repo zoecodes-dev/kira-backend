@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # 리프레시 토큰 만료 — 액세스 만료 시 재로그인 없이 조용히 재발급하는 데 쓴다.
+    # 무상태 JWT(테이블 없음): 만료 전 강제 폐기는 안 되나, 액세스가 짧아 노출창은 작다. 기본 14일.
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 20160
 
     # AWS / 메일(SES) 설정
     #   MAIL_ENABLED=False 또는 MAIL_FROM 미설정이면 실제 발송 없이 no-op(로그만).
