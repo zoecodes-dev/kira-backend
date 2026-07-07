@@ -358,6 +358,29 @@ async def get_validation_summary_endpoint(
 
 
 # ============================================================
+# GET /products/{product_id}/supply-chain-map/evaluation
+#   공급망 맵 '평가 리포트'(종합 판정 문구). 배치 파이프라인 종합판정
+#   (batch_final_judgment)을 bom_version_id로 이 맵에 연결해 문구를 노출.
+# ============================================================
+
+@product_supply_chain_router.get("/{product_id}/supply-chain-map/evaluation")
+async def get_evaluation_report_endpoint(
+    product_id: UUID,
+    bom_version_id: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: SupplyChainService = Depends(get_supply_chain_service),
+):
+    """공급망 맵 평가 리포트(종합 판정 문구). products.tenant_id 경로로 tenant 격리."""
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="테넌트 정보가 없습니다.")
+    return await service.get_evaluation_report(
+        product_id=str(product_id),
+        tenant_id=str(current_user.tenant_id),
+        bom_version_id=bom_version_id,
+    )
+
+
+# ============================================================
 # P4  GET /products/{product_id}/supply-chain-map/export
 #   고객사 제출용 공급망 엑셀(xlsx) 서버 생성 다운로드.
 # ============================================================

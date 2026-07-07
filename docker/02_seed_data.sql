@@ -457,6 +457,34 @@ INSERT INTO batches (batch_id, product_id, bom_version_id, tenant_id, destinatio
 -- ④ EQS [Happy] EU向 발행완료
 ('ba444444-0000-4000-8000-000000000004', 'd4444444-0000-4000-8000-000000000004', 'e4444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'EU', 'stage_risk',   'batch_completed', 0.9500, 'MES', 'MES-LOT-EQS');
 
+-- ------------------------------------------------------------
+-- 종합 판정(batch_final_judgment) — 공급망 맵 '평가 리포트' 문구의 SSOT.
+--   agents/final_judgment.py(render_summary/render_key_risks/RECOMMENDED_ACTIONS)가
+--   생성하는 것과 동일 형식. 배치는 bom_version_id로 공급망 맵과 연결되므로,
+--   프론트 공급망 맵/PageContent가 이 문구를 product×BOM 기준으로 끌어와 노출한다.
+-- ------------------------------------------------------------
+INSERT INTO batch_final_judgment (batch_id, overall_verdict, executive_summary, key_risks, recommended_action, confidence) VALUES
+-- ① iX3 [Happy] — 전 규제 통과
+('ba111111-0000-4000-8000-000000000001', 'pass',
+ '이 배치는 규제 1건을 모두 통과해 적합(pass) 판정입니다.',
+ '[]'::jsonb,
+ '이상 없음 — 승인 진행', 0.9600),
+-- ② i4 [Gray] — 회색지대/위험 신호
+('ba222222-0000-4000-8000-000000000002', 'conditional',
+ '이 배치는 회색지대/위험 신호(1건)로 조건부(conditional) 판정입니다.',
+ '["회색지대/위험 신호 1건"]'::jsonb,
+ '회색지대/위험 신호 존재 — HITL 심사 후 조건부 승인 검토', 0.7000),
+-- ③ GLC Lot2 [Sad] — UFLPA 위반 + 신장 지리 위험
+('ba333333-0000-4000-8000-000000000003', 'fail',
+ '이 배치는 규제 위반 1건으로 부적합(fail) 판정입니다. 지리 위험: xinjiang_forced_labor.',
+ '["규제 위반 1건", "지리 위험: xinjiang_forced_labor"]'::jsonb,
+ '규제 위반 확인 — 배치 반려 및 협력사 시정조치(CAPA) 요구', 0.9100),
+-- ④ EQS [Happy] — 전 규제 통과
+('ba444444-0000-4000-8000-000000000004', 'pass',
+ '이 배치는 규제 1건을 모두 통과해 적합(pass) 판정입니다.',
+ '[]'::jsonb,
+ '이상 없음 — 승인 진행', 0.9500);
+
 
 -- ============================================================
 -- 13. 규제 / 컴플라이언스 (영역 10) — 배치별 판정

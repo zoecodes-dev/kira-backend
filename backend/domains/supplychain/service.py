@@ -436,6 +436,46 @@ class SupplyChainService:
             ],
         }
 
+    async def get_evaluation_report(
+        self,
+        product_id: str,
+        tenant_id: str,
+        bom_version_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """공급망 맵 '평가 리포트'(종합 판정 문구) 조회 — 조회 전용.
+
+        판정 문구의 SSOT는 배치 파이프라인 종합판정(agents/final_judgment.py →
+        batch_final_judgment). 배치는 bom_version_id로 이 맵과 연결되므로, 프론트가
+        가진 product_id(+bom_version_id)로 그 맵에 걸린 최신 배치 판정을 끌어와 노출한다.
+
+        [도메인 격리 예외 — CLAUDE.md 규칙4] 판정은 batches 도메인 소유 데이터이고
+        이벤트로 대체 불가한 '동기 조회 read'라, batches repository의 read 함수를
+        직접 호출한다(write/커밋 없음). 세션은 이 서비스의 repository 세션을 공유한다.
+        """
+        from backend.domains.batches.repository import get_final_judgment_by_bom_version
+
+        judgment = await get_final_judgment_by_bom_version(
+            self.repository.session,
+            product_id=product_id,
+            tenant_id=tenant_id,
+            bom_version_id=bom_version_id,
+        )
+        base = {
+            "product_id": product_id,
+            "bom_version_id": bom_version_id,
+            "available": judgment is not None,
+            "batch_id": None,
+            "overall_verdict": None,
+            "executive_summary": None,
+            "key_risks": [],
+            "recommended_action": None,
+            "confidence": None,
+            "created_at": None,
+        }
+        if judgment is not None:
+            base.update(judgment)
+        return base
+
     async def export_supply_chain_xlsx(
         self,
         product_id: str,
