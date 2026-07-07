@@ -35,6 +35,7 @@ from backend.domains.submission.service import (
     count_submissions_for_tenant,
     get_submission_detail_for_tenant,
     list_ai_extractions,
+    confirm_extraction,
 )
 from backend.domains.submission.models import (
     SubmissionBriefOut,
@@ -56,6 +57,7 @@ router = APIRouter(prefix="/data-requests", tags=["Submission"])
 @router.get("", response_model=List[DataRequestResponse])
 async def list_data_requests_endpoint(
     supplier_id: Optional[uuid.UUID] = Query(None, description="협력사 ID 필터"),
+    bom_version_id: Optional[uuid.UUID] = Query(None, description="[map별 독립 제출] 공급망 맵(제품 BOM) 필터"),
     status: Optional[SubmissionStatus] = Query(None, description="제출 상태 필터"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
@@ -85,7 +87,8 @@ async def list_data_requests_endpoint(
                     )
 
     return await get_submissions_list(
-        db=db, supplier_id=supplier_id, status=status.value if status else None, skip=skip, limit=limit
+        db=db, supplier_id=supplier_id, status=status.value if status else None,
+        skip=skip, limit=limit, bom_version_id=bom_version_id,
     )
 
 @router.post("", response_model=DataRequestResponse, status_code=status.HTTP_201_CREATED)
@@ -112,6 +115,7 @@ async def create_data_request_endpoint(
             requested_data_type=req.requested_data_type,
             due_date=req.due_date,
             actor_id=actor,
+            bom_version_id=req.bom_version_id,
         )
     except ValueError as e:
         # 비즈니스 규칙 위반 또는 DB 참조 무결성 위반 시 422 반환
@@ -438,7 +442,7 @@ async def confirm_extraction_endpoint(
     - 멱등 재호출: 이미 확정된 경우 confirmed_at을 갱신하지 않고 200 반환.
     - tenant 불일치 또는 document 없음 모두 404 (존재 여부 노출하지 않음).
     """
-    row = await submission_repo.confirm_extraction_result(
+    row = await confirm_extraction(
         db, document_id, current_user.tenant_id
     )
     if not row:

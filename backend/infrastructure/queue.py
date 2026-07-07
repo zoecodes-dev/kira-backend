@@ -9,12 +9,11 @@ ARQ + Redis. 비동기 작업을 Queue에 넣는 단일 인터페이스만 제�
 
 [정합성 핵심 — 큐 이름은 schema.sql processed_jobs.chk_processed_queue 허용값과 1:1]
     schema.sql의 processed_jobs.queue_name CHECK 제약이 허용하는 값만 사용한다:
-        document_parse_queue / verification_queue / risk_queue /
-        hitl_queue / notification_queue /
+        document_parse_queue / hitl_queue / notification_queue /
         batch_pipeline_queue / dead_letter_queue
     (과거 표기였던 'ocr_queue' / 'validation_queue'는 허용값에 없어 processed_jobs
-     INSERT 시 CHECK 위반으로 멱등성 기록이 깨졌다. 폴더·큐·도메인·state·이벤트를
-     전부 verification으로 통일하는 결정에 따라 verification_queue로 일원화한다.)
+     INSERT 시 CHECK 위반으로 멱등성 기록이 깨졌다. 룰 검증(verification_queue)·
+     risk_queue 는 producer/worker가 없어 제거됐다 — 검증은 graph 파이프라인에서 인라인 처리.)
 
 Retry: 지수 백오프, 최대 3회. 3회 실패 시 dead_letter_queue.
 Idempotency: 각 작업 함수는 동일 인자로 두 번 호출돼도 같은 결과를 내야 한다
@@ -29,16 +28,14 @@ from backend.core.config import config
 
 # ----- Queue 이름 상수 (schema.sql processed_jobs 허용값과 1:1) -----
 DOCUMENT_PARSE_QUEUE = "document_parse_queue"   # 구 ocr_queue (문서 파싱 — 은진 Data Gateway)
-VERIFICATION_QUEUE = "verification_queue"       # 구 validation_queue (룰 검증 — E)
 HITL_QUEUE = "hitl_queue"
 NOTIFICATION_QUEUE = "notification_queue"
 BATCH_PIPELINE_QUEUE = "batch_pipeline_queue"   # W5-#09 batch 시작 큐 (submit→트리거가 enqueue, #10이 소비)
 DEAD_LETTER_QUEUE = "dead_letter_queue"
 
-# enqueue 허용 큐 5종 (dead_letter_queue는 실패 시 시스템이 내부적으로만 사용)
+# enqueue 허용 큐 4종 (dead_letter_queue는 실패 시 시스템이 내부적으로만 사용)
 QUEUE_NAMES = {
     DOCUMENT_PARSE_QUEUE,
-    VERIFICATION_QUEUE,
     HITL_QUEUE,
     NOTIFICATION_QUEUE,
     BATCH_PIPELINE_QUEUE,

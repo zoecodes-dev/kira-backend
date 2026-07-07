@@ -10,8 +10,7 @@ payload는 JSON 직렬화 가능해야 하며, event_bus.publish(event_name, pay
 출처:
 - spec 7장 본문/표: Product, Supplier, Submission, Verification, Risk,
   GeoRiskDetected, ComplianceCompleted, HITL
-- backend_md_additions I·E-1절: RiskProfileUpdated, FactoryRegulationChanged,
-  SubmissionStatusChanged
+- backend_md_additions I·E-1절: RiskProfileUpdated, SubmissionStatusChanged
 - 폴더·큐·도메인·state·이벤트 전부 verification으로 통일 (events/types.py 기준).
 """
 from dataclasses import dataclass, field
@@ -40,14 +39,6 @@ class SupplierInvitedEvent:
     #   수신: D(supplychain)가 supply_chain_map.discovered_via 에 기록 → pool 구축.
     inviter_supplier_id: Optional[UUID] = None
     event_name: str = "SupplierInvited"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class SupplierConnectedEvent:
-    supplier_id: Optional[UUID] = None
-    tier: Optional[int] = None
-    event_name: str = "SupplierConnected"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
@@ -87,19 +78,6 @@ class SupplierDocumentUploadedEvent:
     file_name: Optional[str] = None
     doc_kind: Optional[str] = None
     event_name: str = "SupplierDocumentUploaded"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class FactoryRegulationChangedEvent:
-    """
-    공장의 applicable_regulations 컬럼 수정 시 발행. (backend_md_additions I절)
-    발행: B → 수신: C(Compliance)
-    """
-    factory_id: Optional[UUID] = None
-    supplier_id: Optional[UUID] = None
-    applicable_regulations: list = field(default_factory=list)
-    event_name: str = "FactoryRegulationChanged"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
@@ -184,6 +162,7 @@ class SupplyChainGapDetectedEvent:
       CSV(예: "carbon_intensity,mine_coordinates").
     """
     product_id: Optional[UUID] = None
+    bom_version_id: Optional[UUID] = None   # [map별 독립 제출] gap이 검출된 공급망 맵(제품 BOM 버전). None=회사 단위
     supplier_id: Optional[UUID] = None
     requested_data_type: Optional[str] = None
     requester_user_id: Optional[UUID] = None
@@ -232,6 +211,7 @@ class RiskEscalatedEvent:
 @dataclass
 class RiskResolvedEvent:
     batch_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None  # 리스크 프로필은 supplier당 1개 — 어느 협력사 리스크가 닫혔는지 (감사)
     resolved_by: Optional[UUID] = None
     event_name: str = "RiskResolved"
     occurred_at: datetime = field(default_factory=_now_utc)
@@ -257,25 +237,6 @@ class HITLRequestedEvent:
     reason: Optional[str] = None
     reviewer_id: Optional[UUID] = None
     event_name: str = "HITLRequested"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class HITLAssignedEvent:
-    review_id: Optional[UUID] = None
-    batch_id: Optional[UUID] = None
-    reviewer_id: Optional[UUID] = None
-    event_name: str = "HITLAssigned"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
-@dataclass
-class HITLApprovedEvent:
-    review_id: Optional[UUID] = None
-    batch_id: Optional[UUID] = None
-    reviewer_id: Optional[UUID] = None
-    note: Optional[str] = None
-    event_name: str = "HITLApproved"
     occurred_at: datetime = field(default_factory=_now_utc)
 
 

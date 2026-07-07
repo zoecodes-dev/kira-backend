@@ -18,13 +18,14 @@ from backend.infrastructure.trace import trace_node, trace_tool
 logger = logging.getLogger(__name__)
 from backend.domains.submission.models import DataRequestLog, SubmissionStatus
 from backend.domains.submission.repository import (
-    create_data_request, 
-    get_data_request, 
+    create_data_request,
+    get_data_request,
     list_data_requests,
     get_missing_counts,
     get_completeness_by_supplier,
     get_timeline_by_supplier,
     list_extractions_for_review,
+    confirm_extraction_result,
 )
 
 
@@ -70,6 +71,16 @@ async def list_ai_extractions(db: AsyncSession, tenant_id) -> list[dict]:
             "hitl_reason": r.get("hitl_reason"),
         })
     return out
+
+
+async def confirm_extraction(db: AsyncSession, document_id: uuid.UUID, tenant_id) -> Optional[dict]:
+    """AI 추출결과 협력사 검토 확정 — 커밋 일원화(service)."""
+    row = await confirm_extraction_result(db, document_id, tenant_id)
+    if row is not None:
+        await db.commit()
+    return row
+
+
 from backend.domains.submission.state_machine import transition_submission
 from backend.domains.submission.models import DataCompletenessStatus, SubmissionStatusHistory
 from backend.events.types import (
@@ -88,7 +99,8 @@ async def create_and_request_submission(
     target_supplier_id: uuid.UUID,
     requested_data_type: str,
     due_date: Optional[datetime],
-    actor_id: uuid.UUID
+    actor_id: uuid.UUID,
+    bom_version_id: Optional[uuid.UUID] = None,   # [map별 독립 제출] 이 요청이 속한 공급망 맵(제품 BOM). None=회사 단위
 ) -> DataRequestLog:
     """
     [Pipeline Coordinator]
@@ -111,6 +123,7 @@ async def create_and_request_submission(
     new_log = DataRequestLog(
         requester_user_id=requester_user_id,
         target_supplier_id=target_supplier_id,
+        bom_version_id=bom_version_id,
         requested_data_type=requested_data_type,
         requested_at=requested_at,
         due_date=due_date,
@@ -243,13 +256,14 @@ async def get_submissions_list(
     supplier_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    bom_version_id: Optional[uuid.UUID] = None,   # [map별 독립 제출] 이 맵(BOM)의 요청만
 ) -> list[dict]:
     """
     [조회 도구] 목록 필터링 조회
     - 협력사(supplier_id)나 현재 진행 상태(status)를 기준으로 다건을 조회합니다.
     """
-    logs = await list_data_requests(db, supplier_id, status, skip, limit)
+    logs = await list_data_requests(db, supplier_id, status, skip, limit, bom_version_id=bom_version_id)
     sids = list({l.target_supplier_id for l in logs if l.target_supplier_id})
     missing_map = await get_missing_counts(db, sids)
     return [
@@ -257,6 +271,7 @@ async def get_submissions_list(
             "request_id": l.request_id,
             "requester_user_id": l.requester_user_id,
             "target_supplier_id": l.target_supplier_id,
+            "bom_version_id": l.bom_version_id,
             "requested_data_type": l.requested_data_type,
             "requested_at": l.requested_at,
             "due_date": l.due_date,
