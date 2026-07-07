@@ -579,6 +579,191 @@ async def get_contacts(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
     }
 
 
+# ============================================================
+# general-review 완성도 — provider_type별 '필수 데이터 완비' 판정 로직 + 재계산
+#   결과는 data_completeness_status(entity_type='supplier')에 upsert 된다.
+#   ★ 폼 저장(초대/master-form/자료제출/온보딩) 커밋 '직전'에 flush로 호출 → 단일 트랜잭션 반영.
+#     submission 제출 게이트(완성도 100% 미만 물리 차단)와 프론트 완성도 표시가 이 값을 읽는다.
+#
+# 핵심 규칙(사용자 확정):
+#   - 제련소(smelter)는 '자기가 다루는 금속'만 채우면 소재구성 완비. 다루는 금속은
+#     공급망(supply_chain_map)에서 그 제련소가 공급하는 파트(mineral/refined_metal)의
+#     광물로 도출한다(자기신고 core_minerals가 아님 — 순환 방지: 안 채우면 0/0=100% 회피).
+#   - 광산(miner)은 데이터 입력 주체가 아니다 → 완성도 판정 제외(required=0, rate=100).
+#   - 사업자등록증은 필수 아님(사용자 지시). 환경성적서만 제조사에서 필수.
+#
+# 필드 키는 프론트 섹션과 맞춘 네임스페이스 문자열: 'company.*' · 'materials.<Metal>'|'materials.any'
+#   · 'factories' · 'regulation.*' · 'documents.*'. missing_fields ⊆ required_fields.
+# ============================================================
+
+# general-review 소재구성 섹션이 추적하는 금속(모달과 일치). Mn 등은 이 화면 범위 밖.
+_TRACKED_METALS = ("Li", "Co", "Ni")
+
+# part_code → 금속 기호. 전용 컬럼이 없어 part_code 토큰으로 판정한다
+#   (MIN-NI/REF-NI→Ni, MIN-CO/REF-CO→Co, MIN-LI/LIOH-REFINED→Li, MIN-MN/REF-MN→Mn).
+# 호출은 material_type in ('mineral','refined_metal') 인 파트에만 하므로 조립품 오탐 없음.
+_METAL_TOKENS = (("LI", "Li"), ("CO", "Co"), ("NI", "Ni"), ("MN", "Mn"))
+
+
+def part_code_to_metal(part_code: Optional[str]) -> Optional[str]:
+    """광물/정제금속 part_code에서 금속 기호를 뽑는다. 해석 불가하면 None."""
+    u = (part_code or "").upper()
+    for token, symbol in _METAL_TOKENS:
+        if token in u:
+            return symbol
+    return None
+
+
+# ─── 필드 분류: 🔴필수(제출 차단) / 🟡권장(완성도 반영·비차단) / ⚪해당없음 ───
+# EU 배터리법(Annex XIII)상 소재·탄소·실사는 '필요한' 데이터라 완성도엔 계속 반영하되(권장은
+# 표시상 티 내지 않음), 제출 게이트는 🔴필수만 물리 차단한다. 데이터완비 베스트프랙티스의
+# 'at least one' 패턴 적용 — '모든 값'이 아니라 '핵심 최소 1개' 게이트:
+#   · smelter               : 취급 금속 중 '최소 1개'면 소재구성 충족 — 🔴필수(전 금속 강제 아님)
+#   · manufacturer/recycler : 광물 '최소 1개' — 🟡권장(비차단)
+#   · trader                : 소재구성 없음, 공장은 🟡권장
+#   · miner                 : 입력 주체 아님 → 전부 ⚪ (required=0, rate=100)
+# 필드 키 네임스페이스는 프론트 섹션과 일치: 'company.*' · 'materials.*' · 'factories'
+#   · 'regulation.*' · 'documents.*'.
+
+# 모든 판정대상 공통 🔴필수(회사·자가진단). ※ 사업자등록증은 필수 아님(사용자 지시).
+_COMMON_BLOCKING = (
+    "company.company_name",
+    "company.country",
+    "company.business_reg_no",
+    "company.provider_type",
+    "regulation.self_reported_risk_level",
+)
+
+
+def _classify_fields(provider_type: Optional[str], handled_metals: set) -> tuple:
+    """provider_type(+제련소는 공급망 도출 금속)로 (🔴blocking, 🟡recommended) 필드 키를 만든다.
+    miner면 ([], []) — 입력 주체 아님."""
+    pt = provider_type or ""
+    if pt == "miner":
+        return [], []
+
+    blocking = list(_COMMON_BLOCKING)
+    recommended: list = []
+
+    # 공장/사업장 — trader만 권장, 그 외(입력 주체)는 필수.
+    (recommended if pt == "trader" else blocking).append("factories")
+
+    # 소재구성(광물비율).
+    if pt == "smelter":
+        blocking.append("materials.handled_any")      # 취급 금속 중 최소 1개(부분 허용)
+    elif pt in ("manufacturer", "recycler"):
+        recommended.append("materials.any")           # 최소 1개(권장, 비차단)
+    # trader → 소재구성 요구 없음
+
+    # 탄소집약도·에너지원·환경성적서 — 제조사만, 권장(저장 가드상 제조사만 upsert 가능).
+    if pt == "manufacturer":
+        recommended += [
+            "regulation.carbon_intensity",
+            "regulation.energy_source",
+            "documents.environmental_report_url",
+        ]
+    return blocking, recommended
+
+
+def _val_present(v) -> bool:
+    if v is None:
+        return False
+    if isinstance(v, str):
+        return v.strip() != ""
+    return True
+
+
+# 스칼라 필드 키(접두어 제거 후) → snapshot 컬럼명.
+_COMPLETENESS_COLUMN = {
+    "company_name": "company_name",
+    "country": "country",
+    "business_reg_no": "business_reg_no",
+    "provider_type": "provider_type",
+    "carbon_intensity": "carbon_intensity",
+    "energy_source": "energy_source",
+    "business_reg_doc_url": "business_reg_doc_url",
+    "environmental_report_url": "environmental_report_url",
+}
+
+
+def _mineral_present(cm: dict) -> bool:
+    # 광물 키 아무거나 1종(흑연 포함). hazardous_substances는 광물 함량이 아니므로 제외.
+    return any(_val_present(v) for k, v in cm.items() if k != "hazardous_substances")
+
+
+def _field_filled(field: str, snap: dict, handled_metals: set = frozenset()) -> bool:
+    cm = snap.get("core_minerals") or {}
+    if field == "factories":
+        return (snap.get("factory_count") or 0) > 0
+    if field == "materials.any":
+        return _mineral_present(cm)
+    if field == "materials.handled_any":
+        # 취급 금속(공급망 도출) 중 최소 1개 입력이면 충족. 도출 실패(맵 미구축)면
+        #   '최소 1개 광물'로 폴백(순환 0/0=100% 방지).
+        metals = [m for m in _TRACKED_METALS if m in handled_metals]
+        if metals:
+            return any(_val_present(cm.get(m)) for m in metals)
+        return _mineral_present(cm)
+    if field.startswith("materials."):
+        return _val_present(cm.get(field.split(".", 1)[1]))
+    if field == "regulation.self_reported_risk_level":
+        v = snap.get("self_reported_risk_level")
+        return _val_present(v) and v != "unknown"
+    key = field.split(".", 1)[1] if "." in field else field
+    return _val_present(snap.get(_COMPLETENESS_COLUMN.get(key, key)))
+
+
+def _compute_completeness(snapshot: dict, handled_metals: set) -> dict:
+    """snapshot(필드값) + handled_metals(제련소 공급망 금속) → 완성도 집계.
+    완성도 표시(rate/missing)는 🔴필수+🟡권장 전체 기준(권장 티 안 냄). 제출 차단은
+    별도의 blocking_missing(🔴필수 미충족)로 판정한다.
+    반환: {required, filled, rate, missing[], blocking_missing[]}.
+    miner 등 비대상은 required=0 · rate=100 · blocking_missing=[]."""
+    blocking, recommended = _classify_fields(snapshot.get("provider_type"), handled_metals)
+    tracked = blocking + recommended
+    if not tracked:
+        return {"required": 0, "filled": 0, "rate": 100.0, "missing": [], "blocking_missing": []}
+    missing = [f for f in tracked if not _field_filled(f, snapshot, handled_metals)]
+    blocking_missing = [f for f in blocking if not _field_filled(f, snapshot, handled_metals)]
+    filled = len(tracked) - len(missing)
+    rate = round(filled * 100.0 / len(tracked), 2)
+    return {
+        "required": len(tracked), "filled": filled, "rate": rate,
+        "missing": missing, "blocking_missing": blocking_missing,
+    }
+
+
+async def _handled_metals(db: AsyncSession, supplier_id: UUID) -> set:
+    """제련소가 공급망에서 '다루는 금속' 집합(child=이 협력사 파트의 광물)."""
+    part_codes = await repository.get_supply_chain_metals(db, supplier_id)
+    return {m for m in (part_code_to_metal(c) for c in part_codes) if m}
+
+
+async def recompute_completeness(db: AsyncSession, supplier_id: UUID) -> None:
+    """general-review 완성도 재계산 → data_completeness_status upsert. flush만(커밋은 호출부).
+    없는 supplier면 무동작."""
+    snap = await repository.get_completeness_inputs(db, supplier_id)
+    if snap is None:
+        return
+    result = _compute_completeness(snap, await _handled_metals(db, supplier_id))
+    await repository.upsert_completeness(
+        db, supplier_id,
+        required=result["required"], filled=result["filled"],
+        rate=result["rate"], missing=result["missing"],
+    )
+
+
+async def has_blocking_gaps(db: AsyncSession, supplier_id: UUID) -> bool:
+    """제출 게이트용 — 🔴필수(blocking) 필드 중 미충족이 하나라도 있으면 True.
+    🟡권장 미입력은 제출을 막지 않는다(완성도 표시에만 반영). 스냅샷 없으면(대상 아님) False."""
+    snap = await repository.get_completeness_inputs(db, supplier_id)
+    if snap is None:
+        return False
+    metals = await _handled_metals(db, supplier_id)
+    blocking, _ = _classify_fields(snap.get("provider_type"), metals)
+    return any(not _field_filled(f, snap, metals) for f in blocking)
+
+
 async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
     """입력 완성도 — data_completeness_status 단건. 협력사 없으면 None,
     집계 전이면 빈 기본값으로 안전 반환."""
@@ -645,15 +830,74 @@ class OnboardingConflictError(Exception):
     """이미 가입 완료된 supplier 재제출 또는 이메일 중복 — router 가 409 로 매핑."""
 
 
+def _pending_consent(rows: List[dict]) -> Optional[dict]:
+    """동의서 이력(최신순) 중 협력사가 아직 동의해야 하는 대기 건(requested/returned)을 고른다."""
+    return next((r for r in rows if r["status"] in ("requested", "returned")), None)
+
+
 async def get_onboarding_prefill(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """공개 prefill — 비민감 필드(회사명/유형/국가)만. 없는 supplier_id면 None(→404)."""
+    """공개 prefill — 비민감 필드(회사명/유형/국가) + 대기중 동의서 요약. 없는 supplier_id면 None(→404)."""
     supplier = await repository.get_supplier_by_id(db, supplier_id)
     if supplier is None:
         return None
+    # 대기중 제3자 정보제공 동의서(있으면) — 프론트가 이 조건으로 원문을 재조립해 보여준다.
+    #   온보딩은 무토큰이라 tenant 필터 없이 supplier 기준으로 조회한다.
+    consent = None
+    pending = _pending_consent(await consent_repo.list_by_supplier(db, supplier_id, None))
+    if pending is not None:
+        consent = {
+            "consent_id": pending["consent_id"],
+            "data_scope": pending["data_scope"] or [],
+            "purpose": pending["purpose"],
+            "third_party_sharing": pending["third_party_sharing"],
+            "allowed_recipients": pending["allowed_recipients"],
+            "valid_from": pending["valid_from"],
+            "valid_to": pending["valid_to"],
+            "revocable": pending["revocable"],
+        }
+    # 본인(대표) 담당자 — 이미 등록된 대표 contact가 있으면 폼에 미리 채운다(확인·최신화용).
+    contacts = await repository.get_contacts(db, supplier_id)
+    primary = next((c for c in contacts if c.get("is_primary")), None) or (contacts[0] if contacts else None)
+    contact = None
+    if primary is not None:
+        contact = {
+            "name": primary.get("name"),
+            "email": primary.get("email"),
+            "phone": primary.get("phone"),
+            "department": primary.get("department"),
+        }
+
+    # 주소 — suppliers.address 우선, 없으면 본사(headquarters) 공장 주소로 폴백.
+    #   (submit은 주소를 suppliers.address + supplier_factories(headquarters) 양쪽에 저장한다.)
+    address = supplier.address
+    if not address:
+        factories = await repository.get_factories(db, supplier_id)
+        hq = next((f for f in factories if f.get("factory_role") == "headquarters"), None) or (
+            factories[0] if factories else None
+        )
+        if hq:
+            address = hq.get("address")
+
+    # 사업자등록증 — 이미 업로드돼 있으면 원본 파일명과 함께 표시(재확인용, 재업로드 없이 확인만).
+    #   원본 파일명(business_reg_doc_name) 우선, 없으면(구 데이터) s3 key 끝부분으로 폴백.
+    business_reg_doc = None
+    if supplier.business_reg_doc_url:
+        business_reg_doc = {
+            "s3_key": supplier.business_reg_doc_url,
+            "file_name": supplier.business_reg_doc_name or supplier.business_reg_doc_url.rsplit("/", 1)[-1],
+        }
+
     return {
         "company_name": supplier.company_name,
         "provider_type": supplier.provider_type,
         "country": supplier.country,
+        "business_reg_no": supplier.business_reg_no,
+        "duns_number": supplier.duns_number,
+        "address": address,
+        "contact": contact,
+        "business_reg_doc": business_reg_doc,
+        "unverified": bool(supplier.is_unverified),
+        "consent": consent,
     }
 
 
@@ -673,6 +917,31 @@ def _build_onboarding_contacts(body: OnboardingSubmitRequest) -> List[MasterForm
             is_primary=is_primary,
         ))
     return contacts
+
+
+async def _record_consent_agreement(
+    db: AsyncSession, supplier_id: UUID, body: OnboardingSubmitRequest, signed_at: datetime
+) -> None:
+    """대기중 제3자 정보제공 동의서를 'agreed'로 기록. 대기 건이 없으면(구 데이터 등) 스킵 —
+    입력 게이트(consent_status)만으로 진행한다. 커밋은 온보딩 트랜잭션이 일괄 담당."""
+    pending = _pending_consent(await consent_repo.list_by_supplier(db, supplier_id, None))
+    if pending is None:
+        return
+    primary = next((c for c in body.contacts if c.is_primary), None) or (body.contacts[0] if body.contacts else None)
+    signer_name = (primary.name if primary else None) or body.company.company_name
+    signer_email = (primary.email if primary else None) or body.account.email
+    agreement_hash = hashlib.sha256(
+        f"{pending['consent_id']}|{signer_name}|{signed_at.isoformat()}".encode("utf-8")
+    ).hexdigest()[:16]
+    update = ConsentUpdateBody(
+        status="agreed",
+        signer_name=signer_name,
+        signer_email=signer_email,
+        signature_method="email_form",
+        form_data={"agreed_via": "onboarding", "signer_display": signer_name, "agreed_at": signed_at.isoformat()},
+        agreement_hash=agreement_hash,
+    )
+    await consent_repo.update_status(db, pending["consent_id"], update)
 
 
 async def submit_onboarding(
@@ -738,6 +1007,9 @@ async def submit_onboarding(
         # 5) 동의 전이 — supplier_onboarding.consent_status='consent_agreed'.
         signed_at = datetime.now(timezone.utc)
         await repository.mark_consent_agreed(db, supplier_id, signed_at)
+        # 제3자 정보제공 동의서(data_consent)를 'agreed'로 — 서명자·서명방식·해시 등 감사추적 기록(플래그와 별개).
+        if body.consent_agreed:
+            await _record_consent_agreement(db, supplier_id, body, signed_at)
 
         # 6) 상태 전이 — suppliers.status='supplier_review'(원청 승인 대기). (감사 이력 자동 기록)
         await repository.set_supplier_status(
