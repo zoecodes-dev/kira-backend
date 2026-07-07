@@ -2351,6 +2351,88 @@ UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":95.0}'::jsonb  
 UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":99.95}'::jsonb WHERE edge_id = '5b111111-0000-4000-8000-000000000009'; -- PROC-GRAPHITE(구형화 정제)
 UPDATE supply_chain_map SET core_minerals = '{"graphite_natural":10.0}'::jsonb  WHERE edge_id = '5b111111-0000-4000-8000-00000000000a'; -- MIN-GRAPHITE(천연흑연 원광)
 
+-- 28-4. 동의서/자료요청 백필 재실행(섹션 27과 동일 로직) — 섹션 28에서 새로 추가된 협력사/엣지
+--   (Xiangtan Mn Refinery 등)는 섹션 27의 백필보다 파일에서 뒤에 있어 그때는 안 잡혔다.
+--   같은 NOT EXISTS 가드라 이미 이력 있는 협력사는 건드리지 않고(멱등), 이번에 새로
+--   verified/편입된 협력사만 채운다.
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, returned_at, agreed_at,
+   signer_name, signer_title, signer_email, signature_method, form_version, form_data, agreement_hash)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'agreed',
+  now() - interval '21 days', now() - interval '14 days', now() - interval '13 days',
+  c.name, c.role, c.email, 'email_form', 'v1.0',
+  jsonb_build_object('data_subject', s.company_name, 'sub_supplier_consent', true, 'retention_years', 7),
+  substr(md5(s.supplier_id::text), 1, 12)
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id
+  AND scm.hop_level > 0 AND scm.verification_status = 'verified'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+LEFT JOIN supplier_contacts c ON c.supplier_id = s.supplier_id AND c.is_primary
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, form_version)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'requested',
+  now() - interval '3 days', 'v1.0'
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id AND scm.hop_level > 0
+JOIN supply_chain_maps h ON h.bom_version_id = scm.bom_version_id AND h.status = 'completed'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM supply_chain_map v
+                  WHERE v.child_supplier_id = s.supplier_id AND v.verification_status = 'verified')
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+-- 28-5. 승격 — 섹션 28 이전에 이미 'requested'로 백필된 협력사(예: Zambia Copper & Cobalt
+--   Refinery)가 섹션 28에서 새로 verified 엣지를 얻은 경우, 위 두 INSERT는 NOT EXISTS 가드 때문에
+--   건드리지 않는다. verified 엣지가 실제로 있는데 동의서는 여전히 'requested'로 멈춰있는
+--   협력사만 골라 'agreed'로 승격한다(동의서 상태가 실제 엣지 상태를 반영하도록).
+UPDATE data_provision_consents dc SET
+  status = 'agreed',
+  returned_at = COALESCE(dc.returned_at, now() - interval '14 days'),
+  agreed_at   = COALESCE(dc.agreed_at, now() - interval '13 days')
+WHERE dc.status = 'requested'
+  AND EXISTS (
+    SELECT 1 FROM supply_chain_map v
+    WHERE v.child_supplier_id = dc.supplier_id AND v.verification_status = 'verified'
+  );
+
+INSERT INTO data_request_log
+  (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date,
+   response_status, submission_status)
+SELECT
+  NULL, dc.supplier_id, 'general_info', dc.requested_at, dc.requested_at + interval '14 days',
+  CASE WHEN dc.status = 'agreed' THEN 'response_responded' ELSE 'response_pending' END,
+  CASE WHEN dc.status = 'agreed' THEN 'submission_approved' ELSE 'submission_requested' END
+FROM data_provision_consents dc
+WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id = dc.supplier_id);
+
+-- 28-5 승격과 짝 — 이미 있던 data_request_log 행도 'agreed' 승격에 맞춰 같이 갱신.
+UPDATE data_request_log dr SET
+  response_status = 'response_responded',
+  submission_status = 'submission_approved'
+FROM data_provision_consents dc
+WHERE dr.target_supplier_id = dc.supplier_id
+  AND dc.status = 'agreed'
+  AND dr.response_status <> 'response_responded';
+
 
 -- ============================================================
 -- 29. PM테스트협력사01~10 전용 테스트 Ingest 번들
