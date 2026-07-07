@@ -124,12 +124,16 @@ async def get_by_hop_endpoint(
 @trace_tool("get_supply_chain_gaps")
 async def get_supply_chain_gaps_endpoint(
     product_id: UUID,
+    bom_version_id: Optional[str] = None,
     service: SupplyChainService = Depends(get_supply_chain_service),
 ):
     """
     C2 맵 gap 계산 API.
 
     제품 공급망 내 각 협력사 노드별로 적용 규제 대비 미보유 필수 필드 목록 반환.
+    bom_version_id 지정 시 그 맵(엣지)으로만 한정한다 — 미지정이면 이 제품의 전체
+    bom_version 통틀어 조회(기존 동작). 같은 협력사가 겸업/이중소싱으로 여러 차수에
+    걸치면 (협력사, depth) 조합마다 노드가 하나씩 나온다.
     응답 예시:
       {
         "product_id": "...",
@@ -146,7 +150,7 @@ async def get_supply_chain_gaps_endpoint(
         ]
       }
     """
-    return await service.get_gaps(product_id=str(product_id))
+    return await service.get_gaps(product_id=str(product_id), bom_version_id=bom_version_id)
 
 
 @router.get("/alternatives")
@@ -258,6 +262,7 @@ async def verify_supplier_endpoint(
 
 class TriggerDataRequestsBody(BaseModel):
     product_id: UUID
+    bom_version_id: Optional[UUID] = None  # [map별 독립 제출] 지정 시 그 맵(BOM)으로 한정 + 요청에 실림. None=회사 단위
     supplier_ids: Optional[List[UUID]] = None  # None = gap 있는 노드 전체
     requester_user_id: UUID
     actor_id: UUID
@@ -286,6 +291,7 @@ async def trigger_data_requests_for_gaps_endpoint(
         actor_id=body.actor_id,
         due_date=body.due_date,
         supplier_ids=body.supplier_ids,
+        bom_version_id=body.bom_version_id,
     )
 
     return {

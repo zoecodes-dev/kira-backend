@@ -87,14 +87,20 @@ async def submit_master_form_endpoint(
     supplier_id: UUID,
     form: MasterFormRequest,
     _auth: UUID = Depends(authorized_supplier),
+    current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     마스터폼(표준화된 단일 입력양식) 제출 — 섹션 0~6을 한 번에 받아 도메인별로 분배
     저장한다. service가 단일 트랜잭션으로 atomic commit(한 섹션 실패 시 전체 롤백).
+    호출자 협력사(current_user.supplier_id)가 경로의 supplier_id와 다르면(제련소가 광산을
+    대행 제출) service의 대행 입력 권한 게이트를 거친다 — 실패 시 403.
     ★ router에서 db.commit() 하지 않는다 — service가 일원화.
     """
-    result = await service.submit_master_form(db, supplier_id, form)
+    try:
+        result = await service.submit_master_form(db, supplier_id, form, current_user.supplier_id)
+    except service.MasterFormOnBehalfError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return result

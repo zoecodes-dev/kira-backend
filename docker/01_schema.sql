@@ -146,6 +146,9 @@ CREATE TABLE supplier_factories (
     hidden_regulations    JSONB,
     supply_ratio_percent  NUMERIC(5,2),
     supply_quantity       VARCHAR(100),
+    -- 공장별 소재 구성(핵심광물 함량, suppliers.core_minerals와 동일 셰이프) — 광산(mining)은 사이트마다
+    -- 채굴 광물이 달라 회사 단위가 아니라 공장 단위로 관리한다.
+    core_minerals         JSONB,
     -- 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분해 factory_manager_* 로 명명
     factory_manager_name  VARCHAR(100),   -- 공장 담당자 이름
     factory_manager_role  VARCHAR(100),   -- 직책
@@ -688,6 +691,9 @@ CREATE TABLE data_request_log (
     request_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     requester_user_id   UUID REFERENCES users(user_id),
     target_supplier_id  UUID REFERENCES suppliers(supplier_id),
+    -- [map별 독립 제출] 이 자료요청/제출이 어느 공급망 맵(=제품 BOM 버전)에 대한 것인지.
+    --   같은 협력사가 여러 제품(맵)에 속하면 맵별로 별개 요청·제출·검토상태가 된다. NULL=회사 단위(레거시/맵무관).
+    bom_version_id      UUID REFERENCES bom_versions(bom_version_id),
     requested_data_type VARCHAR(100),
     requested_at        TIMESTAMPTZ DEFAULT now(),
     due_date            TIMESTAMPTZ,
