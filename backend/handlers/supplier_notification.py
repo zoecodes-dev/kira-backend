@@ -7,7 +7,7 @@ supplychain 도메인이 발행하는 두 이벤트를 notifications(in-app) 행
 조회 → 알림은 큐로 위임. 도메인 경계를 넘는 배선은 여기 한곳에 둔다.)
 
   - supplier.notification_sent       → 대상 협력사 계정에 '시정 요청'(violation) 알림
-  - supplier.source_change_declared  → 원청(OEM) 담당자에 '재검증 필요'(approval_needed) 알림
+  - supplier.source_change_declared  → 원청(prime) 담당자에 '재검증 필요'(approval_needed) 알림
 
 멱등: dedup_key 로 notifications.dedup_key UNIQUE 가 중복 INSERT 를 막는다.
 """
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # 협력사 포털 계정 역할 — users.supplier_id 로 본인 협력사에 스코프됨.
 _SUPPLIER_ROLES = ("supplier_ceo", "supplier_esg")
 # 원청(발주사) 역할 — 자진신고 재검증 알림 수신 대상. (협력사 역할 supplier_* 제외)
-_OEM_ROLES = ("owner_esg", "owner_purchasing", "admin")
+_PRIME_ROLES = ("owner_esg", "owner_purchasing", "admin")
 
 
 async def notify_supplier_correction(payload: dict) -> None:
@@ -70,7 +70,7 @@ async def notify_supplier_correction(payload: dict) -> None:
 
 
 async def notify_source_change_declared(payload: dict) -> None:
-    """supplier.source_change_declared 수신 → 원청(OEM) 담당자에 재검증 필요 알림."""
+    """supplier.source_change_declared 수신 → 원청(prime) 담당자에 재검증 필요 알림."""
     bom_version_id = payload.get("bom_version_id")
     child_supplier_id = payload.get("child_supplier_id")
     if not bom_version_id:
@@ -92,7 +92,7 @@ async def notify_source_change_declared(payload: dict) -> None:
             logger.warning("[source_change] 제품/테넌트 확인 불가 (bom_version_id=%s)", bom_version_id)
             return
 
-        roles_sql = ", ".join(f"'{r}'" for r in _OEM_ROLES)
+        roles_sql = ", ".join(f"'{r}'" for r in _PRIME_ROLES)
         rows = (await db.execute(
             text(f"""
                 SELECT user_id FROM users

@@ -28,7 +28,7 @@
 -- 1. 테넌트 / 사용자 / 권한 (영역 1)
 -- ============================================================
 INSERT INTO tenants (tenant_id, company_name, business_reg_no, subscription_status)
-VALUES ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'KIRA Platform OEM', '123-45-67890', 'active');
+VALUES ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'KIRA Platform', '123-45-67890', 'active');
 
 -- 원청 관리자 + ESG/구매 담당자 + 협력사 사용자
 INSERT INTO users (user_id, tenant_id, email, password_hash, name, role) VALUES
@@ -64,7 +64,7 @@ INSERT INTO customers (customer_id, customer_code, customer_name, country, sourc
 -- ============================================================
 -- 4. 협력사 마스터 (영역 2) — 원청 1 + 협력사 12개사
 -- ============================================================
--- 원청 (OEM, tier0) — 공급망 트리 루트. supply_chain_map 최상위 parent로 사용.
+-- 원청 (prime, tier0) — 공급망 트리 루트. supply_chain_map 최상위 parent로 사용.
 -- 본질은 배터리 팩 '제조사'(provider_type=manufacturer). 원청/협력사 구분은 tier0(hop0)로.
 INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, provider_type, completeness_score, status, risk_level) VALUES
 ('a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'KIRA Energy Solutions', 'KIRA Energy Solutions', '키라에너지솔루션(주)', 'KIRA CEO', 'manufacturer', 100, 'supplier_verified', 'low');
@@ -102,7 +102,7 @@ INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, pr
 
 -- 소재 국가(ISO 3166-1 alpha-2) 시드 — INSERT에 country 미포함이라 전부 null이던 것 보완(화면 '미입력' 해소).
 UPDATE suppliers SET country = CASE supplier_id
-  WHEN 'a0000000-0000-4000-8000-000000000000' THEN 'KR'  -- KIRA Energy Solutions(OEM)
+  WHEN 'a0000000-0000-4000-8000-000000000000' THEN 'KR'  -- KIRA Energy Solutions(원청)
   WHEN 'a1111111-1111-4000-8000-000000000001' THEN 'KR'  -- 한양셀 제조
   WHEN 'a7777777-7777-4000-8000-000000000007' THEN 'KR'  -- 우진배터리
   WHEN 'a8888888-8888-4000-8000-000000000008' THEN 'KR'  -- 우진셀
