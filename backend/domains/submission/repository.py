@@ -394,5 +394,5 @@ async def confirm_extraction_result(
         {"document_id": document_id, "tenant_id": str(tenant_id)},
     )).mappings().first()
     if row:
-        await db.commit()
+        await db.flush()
     return dict(row) if row else None
