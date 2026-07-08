@@ -22,7 +22,7 @@ class DecisionRequest(BaseModel):
 
 class DecisionIn(BaseModel):
     """§2.4c 스펙 결정 바디 — decision/reason/additionalActions."""
-    decision: str  # approve | reject | escalate
+    decision: str  # approve | reject
     reason: str
     additional_actions: list[str] = []
 
@@ -205,14 +205,14 @@ async def decide_hitl_review(
 ):
     """
     [API] POST /hitl/review/{reviewId}/decision — 스펙 결정 엔드포인트.
-    decision → resolution 매핑. escalate 시 resume enqueue 제외.
+    decision → resolution 매핑.
     """
     review = await service.repo.get_by_review_id(review_id)
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
 
     batch_id = review.batch_id
-    resolution = body.decision  # approve | reject | escalate
+    resolution = body.decision  # approve | reject
 
     try:
         await service.resolve_batch(
@@ -224,7 +224,7 @@ async def decide_hitl_review(
         )
         await db.commit()
 
-        if resolution not in ("reject", "escalate"):
+        if resolution != "reject":
             await enqueue(
                 HITL_QUEUE,
                 "process_hitl_resolution",
