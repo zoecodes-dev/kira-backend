@@ -37,6 +37,17 @@ async def create_supplier(db: AsyncSession, supplier_data: dict) -> Supplier:
     await db.flush()
     return supplier
 
+async def get_supplier_by_name(db: AsyncSession, tenant_id, company_name: str) -> Optional[Supplier]:
+    """같은 테넌트 내 회사명 완전 일치 협력사 조회 — 캐스케이드 초대 시 이미 알려진(ERP/맵
+    시드 등) 협력사와 이름이 같으면 중복 생성 대신 기존 것을 재사용하기 위함."""
+    result = await db.execute(
+        select(Supplier).where(
+            Supplier.tenant_id == tenant_id,
+            Supplier.company_name == company_name,
+        )
+    )
+    return result.scalars().first()
+
 async def update_supplier_fields(db: AsyncSession, supplier_id: UUID, fields: dict) -> None:
     """협력사 기본정보 부분 업데이트. flush까지만(커밋은 service)."""
     if not fields:

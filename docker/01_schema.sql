@@ -1058,14 +1058,7 @@ CREATE TABLE audit_data_snapshots (
 );
 
 -- TO-BE 확장 인덱스
-CREATE INDEX idx_reports_requester ON reports(requester_id);
-CREATE INDEX idx_report_steps_approver ON report_approval_steps(approver_id, status);
-CREATE INDEX idx_watchlists_entity ON watchlists(entity_name) WHERE is_active = TRUE;
-CREATE INDEX idx_watchlists_matched ON watchlists(matched_supplier_id) WHERE matched_supplier_id IS NOT NULL;
-CREATE INDEX idx_auth_submissions_batch ON authority_submissions(batch_id);
-CREATE INDEX idx_trans_logs_ack_token ON transmission_logs(ack_token) WHERE ack_token IS NOT NULL;
 CREATE INDEX idx_detention_cases_due ON detention_cases(due_date) WHERE status != 'released';
-CREATE INDEX idx_reverify_logs_status ON reverification_logs(status);
 CREATE INDEX idx_audit_snapshots_batch ON audit_data_snapshots(batch_id);
 
 -- ============================================================
