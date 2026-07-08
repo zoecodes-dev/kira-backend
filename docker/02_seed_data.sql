@@ -2587,17 +2587,28 @@ ON CONFLICT DO NOTHING;
 
 
 -- ============================================================
--- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형) 1곳만
+-- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형) + 2차(하위 협력사) 데모
 -- ============================================================
--- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유)"만 있는 단순 공급망을
---   보여주기 위한 전용 데이터셋. 실 iX3(d1111111)는 안 건드리고 복제 제품을 새로 만든다.
---   실 데이터와 유사하되 이름만 살짝 변형(한양셀 제조(주) → 한양배터리셀(주)).
---   구성은 최소한 — 회사명 + 서류(사업자등록증/환경성적서 URL)만. 공장/담당자/탄소선언 생략.
+-- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유) + 2차 협력사 1곳"
+--   구성의 공급망을 보여주기 위한 전용 데이터셋. 실 iX3(d1111111)는 안 건드리고
+--   복제 제품을 새로 만든다. 실 데이터와 유사하되 이름만 살짝 변형(한양셀 제조(주)
+--   → 한양배터리셀(주)). 2차(한양테스트하위)는 PM테스트협력사02와 동일한 패턴
+--   (엣지만 있고 동의서/자료요청은 미리 만들지 않음)으로 심어 STEP3(메일 발송)·
+--   STEP4(수신 확인)를 실제로 거쳐야 노출되게 한다.
+--   [PM테스트협력사와 동일하게 미검증 시작 단계로 통일] 맵 status='building' + 엣지
+--   link_status='supplychain_declared' + verification_status='unverified' —
+--   STEP2(Pool 확정)·STEP4(수신확인)를 실제로 클릭해서 진행해야 하는 상태로 시작한다.
 
 -- 32-1. 1차 협력사(한양셀 변형) — 환경성적서 + 사업자등록증 DB 보유(핵심 요건).
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
-('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 남구 포항산단로 51', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
+('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', 'Kim CEO', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단남로117번길 71', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
+
+-- 32-1b. 담당자(PIC) — building 상태로 바뀌면서 STEP3(메일 발송)을 실제로 거치므로,
+--   수신자 이메일 자동 채움(InviteMailModal)이 동작하도록 대표 담당자 1명 추가.
+INSERT INTO supplier_contacts (supplier_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('a5111111-1111-4000-8000-000000000001', '김서준', 'Kim SJ', 'ESG 담당자', 'ESG팀', 'sj.kim@hanyangbattery.demo', '+82-54-711-5101', TRUE, 'ko')
+ON CONFLICT DO NOTHING;
 
 -- 32-2. iX3 복제 제품(실 iX3와 사양 동일, 이름/코드만 데모 표기).
 INSERT INTO products (product_id, product_code, product_name, manufacturer_id, tenant_id, customer_id, model_name, amperage_ah, type, source_system, external_id) VALUES
@@ -2609,19 +2620,27 @@ INSERT INTO bom_versions (bom_version_id, product_id, version_number, production
 ('e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', '1.0', '2025-01-01', NULL, 'active', 'MANUAL_DEMO', 'DEMO-BOM-IX3')
 ON CONFLICT (bom_version_id) DO NOTHING;
 
--- 32-4. BOM 항목 — 기존 부품 재사용(루트 Pack ...01, 1차 Module ...02).
+-- 32-4. BOM 항목 — 기존 부품 재사용(루트 Pack ...01, 1차 Module ...02, 2차 Cell ...03).
 INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
 ('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000001', 1,   'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-PACK'),
-('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-MOD')
+('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-MOD'),
+('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000003', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-CELL')
 ON CONFLICT DO NOTHING;
 
--- 32-5. 공급망 맵 헤더(completed — 1차까지 검증 완료 상태로 노출).
+-- 32-5. 공급망 맵 헤더(building — PM테스트협력사와 동일하게 STEP2부터 실제로 진행하는 시나리오).
 INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status) VALUES
-('55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', 'completed')
+('55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', 'building')
 ON CONFLICT (bom_version_id) DO NOTHING;
 
--- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀). 1차만.
+-- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀) → hop2(한양테스트하위).
+--   hop0(원청 자신)은 link_status만 confirmed(=원청은 Pool 확정 대상이 아님), verification은
+--   unverified로 시작 — PM테스트협력사 hop0 시드와 동일한 패턴.
+--   hop1(한양배터리셀)은 link_status='supplychain_declared'(Pool 미확정) +
+--   verification_status='unverified'(수신 미확인)로 시작해 STEP2·STEP4를 직접 진행해야 한다.
+--   hop2(한양테스트하위)는 PM02와 동일하게 엣지만 있고 동의서/자료요청은 안 만든다 —
+--   그래야 노출됐을 때 STEP3(메일 발송)이 미완료로 잡혀 실제로 메일을 보내야 한다.
 INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
-('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'verified', '2025-01-01', '2025-12-31'),
-('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_confirmed', 'ERP', 'verified', '2025-01-01', '2025-12-31')
+('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
+('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
+('55511111-0000-4000-8000-000000000012', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2025-01-01', '2025-12-31')
 ON CONFLICT (edge_id) DO NOTHING;

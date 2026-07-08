@@ -1050,6 +1050,7 @@ CREATE TABLE audit_data_snapshots (
     created_at         TIMESTAMPTZ DEFAULT now()
 );
 
+-- TO-BE 확장 인덱스
 CREATE INDEX idx_detention_cases_due ON detention_cases(due_date) WHERE status != 'released';
 CREATE INDEX idx_audit_snapshots_batch ON audit_data_snapshots(batch_id);
 

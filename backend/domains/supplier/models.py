@@ -725,6 +725,7 @@ class OnboardingPrefillResponse(BaseModel):
     address: Optional[str] = None
     contact: Optional[OnboardingContactPrefill] = None   # 본인 대표 담당자(있으면)
     business_reg_doc: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 사업자등록증(있으면)
+    environmental_report: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 환경성적서(있으면)
     unverified: bool = False  # 미확인(서류 미보유) 상태로 등록돼 있는지
     consent: Optional[OnboardingConsentSummary] = None
     model_config = {"from_attributes": True}
