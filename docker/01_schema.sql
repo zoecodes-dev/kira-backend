@@ -73,7 +73,6 @@ CREATE TABLE suppliers (
     company_name_ko     VARCHAR(255),
     short_name_en       VARCHAR(100),
     short_name_ko       VARCHAR(100),
-    ceo_name            VARCHAR(100),
     business_reg_no     VARCHAR(50),
     corporate_reg_no    VARCHAR(50),
     duns_number         VARCHAR(20),
