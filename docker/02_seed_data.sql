@@ -193,7 +193,9 @@ INSERT INTO bom_versions (bom_version_id, product_id, version_number, production
 -- ============================================================
 -- 제조 탄소집약도 (EU 배터리법 Art.7)
 INSERT INTO supplier_manufacturer_details (supplier_id, manufacturing_process, energy_source, capacity, carbon_intensity) VALUES
-('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', 'renewable', '10GWh/yr', 2.3400),
+-- [작업①] 한양(데모 협력사): 규제 필드는 '서류 업로드→AI 파싱 후에만' 채워지도록 초기 빈칸.
+--   energy_source·carbon_intensity NULL (자가진단도 아래 risk_profiles에서 unknown).
+('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', NULL, '10GWh/yr', NULL),
 ('a7777777-7777-4000-8000-000000000007', 'Prismatic NCM Cell Assembly', 'renewable', '8GWh/yr', 2.5100),
 ('a2222222-2222-4000-8000-000000000002', 'CAM Sintering (NCM811)', 'mixed', '5GWh/yr', 3.1000),
 -- 대성정밀: energy_source NULL (저신뢰 파싱 원인 — Gray)
@@ -212,7 +214,7 @@ INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extra
 INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
 -- 원청 (tier0 루트) — 트리 루트 노드 색상/리스크 NULL 방지용 최소 프로필
 ('a0000000-0000-4000-8000-000000000000', 0,  'low',      'low',     FALSE, NULL, now() - interval '7 days'),
-('a1111111-1111-4000-8000-000000000001', 10, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
+('a1111111-1111-4000-8000-000000000001', 10, 'low',      'unknown', FALSE, NULL, now() - interval '7 days'),  -- [작업①] 자가진단 빈칸(업로드 후 채움)
 ('a7777777-7777-4000-8000-000000000007', 10, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
 ('a2222222-2222-4000-8000-000000000002', 15, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
 -- Global Mining: critical (신장 인접 광산 / UFLPA)
@@ -548,6 +550,15 @@ INSERT INTO data_request_log (request_id, requester_user_id, target_supplier_id,
 ('da444444-0000-4000-8000-000000000004', '11111111-0000-4000-8000-000000000002', 'a4444444-4444-4000-8000-000000000004', '공장 정보',       now() - interval '6 days',  now() + interval '8 days', 'response_responded', 'submission_rework'),
 ('daababab-0000-4000-8000-0000000000ab', '11111111-0000-4000-8000-000000000002', 'abababab-abab-4000-8000-0000000000ab', '원산지 증빙',     now() - interval '22 days', now() - interval '8 days', 'response_escalated', 'submission_requested'),
 ('da555555-0000-4000-8000-000000000005', '11111111-0000-4000-8000-000000000002', 'a5555555-5555-4000-8000-000000000005', '탄소발자국 증빙', now() - interval '5 days',  now() - interval '1 day',  'response_responded', 'submission_submitted');
+
+-- [협력사 홈 '오늘의 알림' 데모] 한양셀(a1111111) 대상 4대 실무 제출 항목.
+--   requested_data_type = 프론트 매핑 키(PartnerDashboard.REQUEST_META). requested_data_type은 CHECK 없는 자유 VARCHAR라 스키마 무수정.
+--   due_date는 seed(DB init) 시점 상대값 → 프론트 calcDeadlineDDay(오늘 기준)가 D+3(연체)/D-Day/D-4/D-7 산출.
+INSERT INTO data_request_log (request_id, requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date, response_status, submission_status) VALUES
+('da777777-0000-4000-8000-000000000071', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'esg_saq',              now() - interval '10 days', now() - interval '3 days', 'response_overdue',   'submission_in_progress'),
+('da777777-0000-4000-8000-000000000072', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'pcf_energy',           now() - interval '5 days',  now(),                     'response_pending',   'submission_requested'),
+('da777777-0000-4000-8000-000000000073', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'material_composition', now() - interval '4 days',  now() + interval '4 days', 'response_responded', 'submission_rework'),
+('da777777-0000-4000-8000-000000000074', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'factory_info',         now() - interval '2 days',  now() + interval '7 days', 'response_pending',   'submission_review');
 
 INSERT INTO submission_documents (document_id, request_id, supplier_id, file_url, file_name, file_type, doc_category, uploaded_by) VALUES
 ('d0c11111-0000-4000-8000-000000000001', 'da111111-0000-4000-8000-000000000001', 'a1111111-1111-4000-8000-000000000001', 's3://kira-docs/hy_carbon.pdf',  'hy_carbon.pdf',  'pdf',  'carbon_footprint_declaration', '11111111-0000-4000-8000-000000000004'),

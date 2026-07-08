@@ -406,6 +406,9 @@ async def update_supplier_detail(
             fields.pop("country")
     manuf = {k: fields.pop(k) for k in ("carbon_intensity", "energy_source") if k in fields}
     self_risk = fields.pop("self_reported_risk_level", None)
+    # 탄소발자국 문서 — suppliers에 대응 컬럼이 없으므로(스키마 무수정) update로 보내지 않고
+    # 커밋 후 파싱 이벤트만 발행한다(핸들러가 doc_category=carbon_footprint_declaration로 매핑).
+    carbon_doc = fields.pop("carbon_footprint_doc_url", None)
     if fields:                         # 나머지는 suppliers 컬럼(core_minerals 포함)
         await repository.update_supplier_fields(db, supplier_id, fields)
     # [§8-J 가드] carbon_intensity/energy_source 는 supplier_manufacturer_details 소유다.
@@ -432,6 +435,17 @@ async def update_supplier_detail(
                     doc_kind=kind,
                 )),
             )
+    # 탄소발자국 문서 — 대응 suppliers 컬럼이 없어 위 루프(fields 기반)로는 안 잡히므로 별도 발행.
+    if carbon_doc:
+        await publish(
+            "SupplierDocumentUploaded",
+            dataclasses.asdict(SupplierDocumentUploadedEvent(
+                supplier_id=supplier_id,
+                s3_key=carbon_doc,
+                file_name=carbon_doc.rsplit("/", 1)[-1] if "/" in carbon_doc else carbon_doc,
+                doc_kind="carbon_footprint",
+            )),
+        )
 
     return await get_supplier_detail(db, supplier_id, tenant_id)
 
