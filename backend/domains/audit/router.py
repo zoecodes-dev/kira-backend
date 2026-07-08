@@ -3,13 +3,12 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.auth import CurrentUser, get_current_user
 from backend.infrastructure.database import get_db
-from backend.infrastructure.pagination import set_total_count
 from backend.domains.audit import service
 from backend.domains.audit.service import BatchNotFound
 from backend.domains.audit.models import AuditTrailRow, ChainVerificationOut
@@ -49,13 +48,6 @@ class ActionItemOut(BaseModel):
     assigned_to: UUID | None
     due_date: datetime | None
     action_status: str
-
-
-class GapAnalysisOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    affected_supplier_ids: object | None
-    newly_required_fields: object | None
 
 
 @actions_router.get("/actions", response_model=list[ActionItemOut])
@@ -104,47 +96,8 @@ async def verify_audit_chain(
         raise HTTPException(status_code=404, detail=f"batch not found: {batch_id}")
 
 
-@router.get("/gap-analysis/{regulation_id}", response_model=list[GapAnalysisOut])
-async def get_gap_analysis(
-    regulation_id: UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    return await service.get_gap_analysis_results(db, regulation_id)
-
-
-# ── 2.5b GET /audit-packages ─────────────────────────────────────────────────
-
-@audit_packages_router.get("")
-async def list_audit_packages(
-    response: Response,
-    page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    if current_user.tenant_id is None:
-        raise HTTPException(status_code=403, detail="테넌트 정보가 없어 접근할 수 없습니다.")
-    items = await service.list_audit_packages(db, current_user.tenant_id, page, size)
-    total = await service.count_audit_packages(db, current_user.tenant_id)
-    set_total_count(response, total)
-    return items
-
-
-# ── 2.5c GET /audit-packages/{packageId} ─────────────────────────────────────
-
-@audit_packages_router.get("/{package_id}")
-async def get_audit_package(
-    package_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    if current_user.tenant_id is None:
-        raise HTTPException(status_code=403, detail="테넌트 정보가 없어 접근할 수 없습니다.")
-    try:
-        return await service.get_audit_package(db, package_id, current_user.tenant_id)
-    except BatchNotFound:
-        raise HTTPException(status_code=404, detail=f"audit package not found: {package_id}")
-
+# [정리] GET /audit/gap-analysis/{regulation_id}, GET /audit-packages(목록/상세)는
+# 프론트 호출이 전혀 없어 제거됨(2026-07 전수조사). export(§2.5d)만 유지.
 
 # ── 2.5d POST /audit-packages/{packageId}/export (선택) ──────────────────────
 

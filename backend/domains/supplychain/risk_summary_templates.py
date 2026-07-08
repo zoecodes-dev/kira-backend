@@ -1,7 +1,8 @@
 """
-domains/report/summary_templates.py
+domains/supplychain/risk_summary_templates.py
 
-공급망 리스크 관리 요약문 — locale별 문장 템플릿 + 렌더러.
+공급망 맵(제품+BOM버전) 리스크 요약문 — locale별 문장 템플릿 + 렌더러.
+(기존 report 도메인의 summary_templates.py를 이 맵 단위 요약 기능과 함께 이관)
 
 설계 메모:
   - 요약문은 "집계 숫자 → 템플릿 렌더링" 방식이다(자유 텍스트/LLM 아님).
@@ -37,7 +38,7 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
             "컴플라이언스 통과율은 {compliance_pass_rate}%, 공급망 연결의 "
             "{chain_verified_rate}%가 검증 완료 상태로 지속 추적·갱신되고 있습니다."
         ),
-        # ── 핵심 포인트(결재함/스냅샷용 bullet) ──
+        # ── 핵심 포인트(모달/스냅샷용 bullet) ──
         "kp_high_risk": "고위험 협력사 {high_risk_count}곳",
         "kp_capa": "시정조치 완료율 {capa_rate}%",
         "kp_compliance": "컴플라이언스 통과율 {compliance_pass_rate}%",
@@ -134,7 +135,7 @@ def render_summary(metrics: Dict[str, int], locale: str = DEFAULT_LOCALE) -> str
 
 
 def render_key_points(metrics: Dict[str, int], locale: str = DEFAULT_LOCALE) -> List[str]:
-    """결재함 표시 및 전송 스냅샷용 핵심 포인트 bullet 목록(있는 항목만)."""
+    """모달 표시 및 전송 스냅샷용 핵심 포인트 bullet 목록(있는 항목만)."""
     if metrics["supplier_total"] == 0:
         return []
 

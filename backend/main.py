@@ -13,19 +13,16 @@ from backend.infrastructure.database import verify_extensions
 from backend.agents.graph import setup_graph, teardown_graph
 from backend.infrastructure.event_bus import start_event_listener, stop_event_listener, subscribe
 from backend.domains.supplychain.router import router as supplychain_router, product_supply_chain_router
-from backend.domains.due_diligence.router import router as due_diligence_router
 from backend.domains.submission.router import router as submission_router, submissions_router, submission_documents_router
 
 from backend.domains.users.router import router as users_router
-from backend.domains.report.router import router as report_router
 from backend.domains.product.router import router as product_router
 from backend.domains.supplier.router import router as supplier_router
 from backend.domains.audit.router import actions_router, audit_packages_router, router as audit_router
 from backend.domains.risk.router import router as risk_router
 from backend.hitl.router import router as hitl_router
 from backend.domains.batches.router import batches_router, dashboard_router
-from backend.domains.acl.router import router as acl_router
-from backend.domains.regulation.router import router as regulation_router, compliance_router
+from backend.domains.regulation.router import compliance_router
 from backend.domains.files.router import router as files_router
 from backend.domains.data_consent.router import router as data_consent_router
 from backend.domains.notifications.router import router as notifications_router
@@ -109,13 +106,11 @@ app = FastAPI(
 # 도메인 라우터 등록 (도메인 추가 시 여기에 include)
 app.include_router(supplychain_router)
 app.include_router(product_supply_chain_router)
-app.include_router(due_diligence_router)
 app.include_router(submission_router)
 app.include_router(submissions_router)
 app.include_router(submission_documents_router)
 
 app.include_router(users_router)
-app.include_router(report_router)
 app.include_router(supplier_router)
 app.include_router(product_router)
 app.include_router(audit_router)
@@ -125,8 +120,6 @@ app.include_router(risk_router)
 app.include_router(hitl_router)
 app.include_router(batches_router)
 app.include_router(dashboard_router)
-app.include_router(acl_router)
-app.include_router(regulation_router)
 app.include_router(compliance_router)
 app.include_router(files_router)
 app.include_router(data_consent_router)

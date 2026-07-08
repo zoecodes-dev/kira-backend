@@ -381,6 +381,35 @@ async def get_evaluation_report_endpoint(
 
 
 # ============================================================
+# GET /products/{product_id}/supply-chain-map/risk-summary/outbound
+#   고객사 전송용 다국어 리스크 요약 프리뷰. 이 맵(product+bom_version)의
+#   협력사로만 집계를 좁혀 국가별 언어(EN/DE)로 렌더링한다.
+#   (구 report 도메인 risk-summary/outbound 이관 — §7절 참고)
+# ============================================================
+
+@product_supply_chain_router.get("/{product_id}/supply-chain-map/risk-summary/outbound")
+async def get_outbound_risk_summary_endpoint(
+    product_id: UUID,
+    customer_id: UUID,
+    bom_version_id: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: SupplyChainService = Depends(get_supply_chain_service),
+):
+    """고객사 전송용 다국어 리스크 요약. products.tenant_id 경로로 tenant 격리."""
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="테넌트 정보가 없습니다.")
+    result = await service.get_outbound_risk_summary(
+        product_id=str(product_id),
+        tenant_id=str(current_user.tenant_id),
+        customer_id=str(customer_id),
+        bom_version_id=bom_version_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return result
+
+
+# ============================================================
 # P4  GET /products/{product_id}/supply-chain-map/export
 #   고객사 제출용 공급망 엑셀(xlsx) 서버 생성 다운로드.
 # ============================================================
