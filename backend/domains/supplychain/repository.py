@@ -1207,3 +1207,110 @@ class SupplyChainRepository:
         })).first()
         await self.session.flush()
         return dict(row._mapping) if row else None
+
+    # ── 고객사 전송용 다국어 리스크 요약 (이 맵=product+bom_version 단위) ──────
+    # (구 report 도메인 risk-summary/outbound 이관 — 그 맵 하나의 협력사로 스코프)
+
+    async def aggregate_risk_summary_for_map(self, supplier_ids: List[str]) -> Dict[str, int]:
+        """
+        이 공급망 맵(product+bom_version)에 속한 협력사(supplier_ids)로 한정한
+        리스크 관리 요약용 raw 집계. 비율 계산/문장화는 service에서 수행.
+        supplier_ids가 비어 있으면 전부 0으로 반환(집계할 협력사 없음).
+        """
+        if not supplier_ids:
+            return {
+                "supplier_total": 0, "high_risk_count": 0,
+                "audited_suppliers": 0, "audit_pass": 0, "audit_decided": 0,
+                "capa_total": 0, "capa_closed": 0,
+                "compliance_total": 0, "compliance_passed": 0,
+                "chain_total": 0, "chain_verified": 0,
+            }
+
+        sup = (await self.session.execute(text(
+            """
+            SELECT
+                COUNT(*)                                                         AS supplier_total,
+                COUNT(*) FILTER (WHERE rp.risk_level IN ('high', 'critical'))     AS high_risk_count
+            FROM suppliers s
+            LEFT JOIN supplier_risk_profiles rp ON rp.supplier_id = s.supplier_id
+            WHERE s.supplier_id = ANY(:sids)
+            """
+        ), {"sids": supplier_ids})).mappings().one()
+
+        aud = (await self.session.execute(text(
+            """
+            SELECT
+                COUNT(DISTINCT a.supplier_id)                                    AS audited_suppliers,
+                COUNT(*) FILTER (WHERE a.result IN ('pass', 'conditional_pass'))  AS audit_pass,
+                COUNT(*) FILTER (WHERE a.result IN ('pass', 'conditional_pass', 'fail')) AS audit_decided
+            FROM supplier_audit_records a
+            WHERE a.supplier_id = ANY(:sids)
+            """
+        ), {"sids": supplier_ids})).mappings().one()
+
+        capa = (await self.session.execute(text(
+            """
+            SELECT
+                COUNT(*)                                                         AS capa_total,
+                COUNT(*) FILTER (
+                    WHERE lower(item->>'status')
+                          IN ('closed', 'completed', 'resolved', 'verified', 'done')
+                )                                                                AS capa_closed
+            FROM supplier_audit_records a
+            CROSS JOIN LATERAL jsonb_array_elements(
+                CASE WHEN jsonb_typeof(a.corrective_actions) = 'array'
+                     THEN a.corrective_actions ELSE '[]'::jsonb END
+            ) AS item
+            WHERE a.supplier_id = ANY(:sids)
+            """
+        ), {"sids": supplier_ids})).mappings().one()
+
+        comp = (await self.session.execute(text(
+            """
+            SELECT
+                COUNT(*)                                                         AS compliance_total,
+                COUNT(*) FILTER (WHERE cr.verdict = 'compliance_passed')          AS compliance_passed
+            FROM compliance_results cr
+            WHERE cr.supplier_id = ANY(:sids)
+            """
+        ), {"sids": supplier_ids})).mappings().one()
+
+        chain = (await self.session.execute(text(
+            """
+            SELECT
+                COUNT(*)                                                         AS chain_total,
+                COUNT(*) FILTER (WHERE scm.verification_status = 'verified')      AS chain_verified
+            FROM supply_chain_map scm
+            WHERE scm.child_supplier_id = ANY(:sids)
+            """
+        ), {"sids": supplier_ids})).mappings().one()
+
+        return {
+            "supplier_total":    int(sup["supplier_total"] or 0),
+            "high_risk_count":   int(sup["high_risk_count"] or 0),
+            "audited_suppliers": int(aud["audited_suppliers"] or 0),
+            "audit_pass":        int(aud["audit_pass"] or 0),
+            "audit_decided":     int(aud["audit_decided"] or 0),
+            "capa_total":        int(capa["capa_total"] or 0),
+            "capa_closed":       int(capa["capa_closed"] or 0),
+            "compliance_total":  int(comp["compliance_total"] or 0),
+            "compliance_passed": int(comp["compliance_passed"] or 0),
+            "chain_total":       int(chain["chain_total"] or 0),
+            "chain_verified":    int(chain["chain_verified"] or 0),
+        }
+
+    async def get_outbound_customer(self, customer_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+        """전송 대상 고객사 단건(국가 포함). 테넌트가 해당 고객사 제품을 보유할 때만 노출.
+        타 테넌트/미보유면 None(→404, 존재 은닉)."""
+        row = (await self.session.execute(text(
+            """
+            SELECT c.customer_id, c.customer_name, c.country
+            FROM customers c
+            WHERE c.customer_id = CAST(:cid AS uuid)
+              AND EXISTS (
+                  SELECT 1 FROM products p
+                  WHERE p.customer_id = c.customer_id AND p.tenant_id = CAST(:tid AS uuid)
+              )
+            """
+        ), {"cid": customer_id, "tid": tenant_id})).mappings().one_or_none()
+        return dict(row) if row else None

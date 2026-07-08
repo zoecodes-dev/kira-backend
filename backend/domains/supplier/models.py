@@ -113,7 +113,6 @@ class SupplierFactory(Base):
     destination: Mapped[Optional[str]] = mapped_column(String(10))   # EU / US / KR / BOTH
     destination_detail: Mapped[Optional[str]] = mapped_column(Text)
     applicable_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장별 차등 규제 배열
-    hidden_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)
     supply_ratio_percent: Mapped[Optional[float]] = mapped_column(NUMERIC(5, 2))
     supply_quantity: Mapped[Optional[str]] = mapped_column(String(100))
     core_minerals: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장(사이트)별 소재 구성
