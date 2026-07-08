@@ -69,6 +69,18 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     "carbon_intensity":      ("manufacturing", "float", "탄소집약도(kgCO2eq/kg)"),
     "verification_status":   ("manufacturing", "str",   "제3자 검증 여부(예: third-party verified / self-declared / not verified) — 명시된 경우만 추출, 미명시 시 unparsed_fields에 포함"),
 
+    # [작업1] 섹션 2 — 인권/안전 실사 자가진단(SAQ, dd_audit_report). CSDDD RAG 판정 입력.
+    #   전용 스칼라 컬럼이 없어 master-form 저장 대상은 아니지만(prefill 'saq' 섹션은 프론트가 무시),
+    #   parsed_fields JSONB로 추출돼 SAQ 카드 표시 + CSDDD 준수 진단(analyze_saq_compliance)에 쓰인다.
+    "saq_standard":          ("saq", "str", "평가 표준(예: SA8000, RBA VAP, ISO 45001)"),
+    "saq_score":             ("saq", "str", "자가진단 점수 또는 등급"),
+    "saq_valid_until":       ("saq", "str", "자가진단 유효기간(만료일)"),
+    "saq_risk_level":        ("saq", "str", "종합 리스크 등급(low/medium/high)"),
+    "grievance_mechanism":   ("saq", "str", "고충 처리 채널(grievance mechanism) 운영 여부(있음/없음 또는 yes/no)"),
+    "forced_labor_risk":     ("saq", "str", "강제노동 징후 여부(있음/없음 또는 설명)"),
+    "child_labor_risk":      ("saq", "str", "아동노동 징후 여부(있음/없음 또는 설명)"),
+    "compliance_grade":      ("saq", "str", "실사 준수 등급(예: 준수/개선필요/위반)"),
+
     # [W6 정리] 재활용(recycling)·원산지(origin)·지분FEOC(ownership) 섹션은 master-form에서
     # 제거됨(연관 테이블 삭제) → 저장 위치가 없는 필드는 AI 추출 대상에서도 제외한다.
     # (원산지는 위 origin_country로 suppliers.country를 재사용해 예외적으로 추출한다.)

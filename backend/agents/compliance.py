@@ -1181,3 +1181,161 @@ async def get_compliance_history_for_batch(
         }
         for row in rows
     ]
+
+
+# ============================================================
+# [목표3] RAG 기반 탄소발자국 규제 준수 진단 (파싱 완료 시 자동 트리거)
+#   추출된 탄소집약도·에너지원 → regulation_clauses(EU_BATTERY_ART7) 벡터검색(RAG)
+#   → LLM(Bedrock)이 위반 여부 판정 + 근거 조항 인용 강제.
+# ============================================================
+
+CARBON_COMPLIANCE_SYSTEM_PROMPT = (
+    "당신은 EU/US 배터리·공급망 규제 준수 심사관입니다.\n"
+    "제공된 '규제 조항(context)'과 '협력사 데이터(탄소집약도·에너지원)'만을 근거로 판정하세요.\n"
+    "반드시 아래 JSON 스키마로만 답하세요(설명·마크다운 금지):\n"
+    '{"verdict": "pass"|"violation"|"warning", '
+    '"regulation_name": "<법령명>", '
+    '"citation": "<조항 표기, 예: EU 2023/1542 Art.7(2)>", '
+    '"clause_text": "<인용한 조항 원문 발췌>", '
+    '"reasoning": "<한국어 근거 설명>"}\n'
+    "규칙:\n"
+    "- context에 없는 규정/조항은 절대 인용하지 마세요(환각 금지). context가 비면 verdict='warning', citation=''.\n"
+    "- 수치 기준이 조항에 있으면 협력사 값과 비교해 pass/violation을 명확히 판정하세요.\n"
+    "- citation은 context의 조항 표기를 그대로 사용하세요."
+)
+
+
+def _extract_json_block(text_str: str) -> dict:
+    """LLM 응답에서 JSON 블록만 추출(코드펜스/잡음 방어)."""
+    import re
+    import json as _json
+    s = (text_str or "").strip()
+    s = re.sub(r"^```(?:json)?|```$", "", s, flags=re.MULTILINE).strip()
+    m = re.search(r"\{.*\}", s, flags=re.DOTALL)
+    if not m:
+        return {}
+    try:
+        return _json.loads(m.group(0))
+    except Exception:
+        return {}
+
+
+async def analyze_carbon_compliance(
+    carbon_intensity,
+    energy_source,
+    db: AsyncSession,
+    regulation_code: str = "EU_BATTERY_ART7",
+) -> dict:
+    """탄소집약도·에너지원 → RAG(조항 검색) + LLM 판정.
+    반환: {verdict, regulation_name, citation, clause_text, reasoning, carbon_intensity, energy_source}.
+    """
+    ci_txt = "미상" if carbon_intensity is None else f"{carbon_intensity}"
+    es_txt = energy_source or "미상"
+    query = (
+        f"배터리 제조 탄소집약도 {ci_txt} kgCO2eq/kWh, 에너지원 {es_txt} — "
+        f"EU 배터리법 Article 7 탄소발자국 선언 기준 및 등급 임계값 준수 여부"
+    )
+    clauses = await search_regulations(query, regulation_code, db, top_k=3)
+    context = "\n\n".join(
+        f"[{c.get('citation') or c.get('regulation_code')}] {c.get('content') or c.get('description') or ''}"
+        for c in clauses
+    ).strip()
+
+    human = HumanMessage(content=(
+        f"규제 조항(context):\n{context or '(관련 조항 없음)'}\n\n"
+        f"협력사 데이터:\n- 탄소집약도: {ci_txt} kgCO2eq/kWh\n- 에너지원: {es_txt}\n\n"
+        f"위 조항만 근거로 JSON 판정하세요."
+    ))
+    result: dict = {}
+    try:
+        llm = get_llm_for_agent("compliance")
+        resp = await llm.ainvoke([SystemMessage(content=CARBON_COMPLIANCE_SYSTEM_PROMPT), human])
+        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        result = _extract_json_block(content)
+    except Exception:
+        result = {}
+
+    verdict = result.get("verdict") if result.get("verdict") in ("pass", "violation", "warning") else "warning"
+    first = clauses[0] if clauses else {}
+    return {
+        "verdict": verdict,
+        "regulation_name": result.get("regulation_name") or first.get("name") or "EU 배터리법",
+        "citation": result.get("citation") or first.get("citation") or "",
+        "clause_text": result.get("clause_text") or first.get("content") or "",
+        "reasoning": result.get("reasoning") or "규제 조항을 찾지 못해 자동 판정할 수 없습니다. 수동 검토가 필요합니다.",
+        "carbon_intensity": carbon_intensity,
+        "energy_source": energy_source,
+    }
+
+
+# ============================================================
+# [작업1] RAG 기반 CSDDD 실사(SAQ) 규제 준수 진단 (파싱 완료 시 자동 트리거)
+#   파싱된 SAQ 항목(고충처리 채널·강제노동 징후·준수등급 등)
+#   → regulation_clauses(CSDDD) 벡터검색(RAG) → LLM이 인권/환경 실사 위반 여부 판정
+#   → 근거 조항(예: CSDDD Art.9 고충처리) 인용 강제.
+# ============================================================
+
+SAQ_COMPLIANCE_SYSTEM_PROMPT = (
+    "당신은 EU 공급망 실사 지침(CSDDD)·인권/환경 실사 심사관입니다.\n"
+    "제공된 '규제 조항(context)'과 '협력사 자가진단(SAQ) 데이터'만을 근거로 판정하세요.\n"
+    "반드시 아래 JSON 스키마로만 답하세요(설명·마크다운 금지):\n"
+    '{"verdict": "pass"|"violation"|"warning", '
+    '"regulation_name": "<법령명, 예: CSDDD(기업 지속가능성 실사 지침)>", '
+    '"citation": "<조항 표기, 예: CSDDD Art.9>", '
+    '"clause_text": "<인용한 조항 원문 발췌>", '
+    '"reasoning": "<한국어 근거 설명 — 어떤 SAQ 항목이 어느 조항 리스크에 해당하는지>"}\n'
+    "규칙:\n"
+    "- context에 없는 규정/조항은 절대 인용하지 마세요(환각 금지). context가 비면 verdict='warning', citation=''.\n"
+    "- 고충처리 채널 부재·강제노동/아동노동 징후·실사 절차 미비 등 인권 리스크가 확인되면 verdict='violation'.\n"
+    "- 리스크가 애매하거나 자료가 부족하면 verdict='warning'.\n"
+    "- 명백한 리스크가 없고 실사 요건을 충족하면 verdict='pass'.\n"
+    "- citation은 context의 조항 표기를 그대로 사용하세요."
+)
+
+
+async def analyze_saq_compliance(
+    saq_fields: dict,
+    db: AsyncSession,
+    regulation_code: str = "CSDDD",
+) -> dict:
+    """실사 자가진단(SAQ) 파싱 항목 → RAG(CSDDD 조항 검색) + LLM 판정.
+    saq_fields: 파싱된 SAQ 필드 dict(고충처리 채널·강제노동 징후·준수등급·평가표준 등).
+    반환: {verdict, regulation_name, citation, clause_text, reasoning, saq_fields}.
+    """
+    saq_fields = saq_fields or {}
+    # 사람이 읽는 형태로 직렬화 — LLM에 그대로 근거로 준다.
+    saq_txt = "\n".join(f"- {k}: {v}" for k, v in saq_fields.items() if v not in (None, "")) or "(제출 항목 없음)"
+    query = (
+        "공급망 실사(CSDDD) — 고충처리 절차(grievance mechanism), 강제노동·아동노동 방지, "
+        "인권·환경 리스크 식별·예방·완화 실사 의무 준수 여부"
+    )
+    clauses = await search_regulations(query, regulation_code, db, top_k=5)
+    context = "\n\n".join(
+        f"[{c.get('citation') or c.get('regulation_code')}] {c.get('content') or c.get('description') or ''}"
+        for c in clauses
+    ).strip()
+
+    human = HumanMessage(content=(
+        f"규제 조항(context):\n{context or '(관련 조항 없음)'}\n\n"
+        f"협력사 자가진단(SAQ) 데이터:\n{saq_txt}\n\n"
+        f"위 조항만 근거로 인권/환경 실사 위반 여부를 JSON 판정하세요."
+    ))
+    result: dict = {}
+    try:
+        llm = get_llm_for_agent("compliance")
+        resp = await llm.ainvoke([SystemMessage(content=SAQ_COMPLIANCE_SYSTEM_PROMPT), human])
+        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        result = _extract_json_block(content)
+    except Exception:
+        result = {}
+
+    verdict = result.get("verdict") if result.get("verdict") in ("pass", "violation", "warning") else "warning"
+    first = clauses[0] if clauses else {}
+    return {
+        "verdict": verdict,
+        "regulation_name": result.get("regulation_name") or first.get("name") or "CSDDD(기업 지속가능성 실사 지침)",
+        "citation": result.get("citation") or first.get("citation") or "",
+        "clause_text": result.get("clause_text") or first.get("content") or "",
+        "reasoning": result.get("reasoning") or "규제 조항을 찾지 못해 자동 판정할 수 없습니다. 수동 검토가 필요합니다.",
+        "saq_fields": saq_fields,
+    }

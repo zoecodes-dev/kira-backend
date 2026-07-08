@@ -338,6 +338,7 @@ class SupplierDetailUpdateRequest(BaseModel):
     environmental_report_url: Optional[str] = None   # 환경성적서
     self_assessment_doc_url: Optional[str] = None     # 실사 자가진단 보고서
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 문서(대응 suppliers 컬럼 없음 — 파싱 이벤트 트리거용)
 
 
 # ----- CTI 상세 응답 DTO (목요일: provider type별 상세 노출) -----

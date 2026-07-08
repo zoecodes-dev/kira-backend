@@ -202,7 +202,39 @@ def _is_present(value) -> bool:
     return True
 
 
-@trace_tool("parse_document")
+def _locate_fields_in_pdf(raw_bytes: bytes, parsed_fields: dict) -> dict:
+    """[목표2] 추출된 각 필드 값 텍스트를 PDF 텍스트 레이어에서 검색해 실제 좌표를 반환.
+    반환: {field: {"page": int, "bbox": [x0,y0,x1,y1], "page_width": float, "page_height": float}}.
+    PyMuPDF page.search_for 사용. 못 찾은 필드는 생략(프론트는 있는 것만 하이라이트).
+    """
+    locations: dict = {}
+    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+    try:
+        for field, value in parsed_fields.items():
+            if field.startswith("__") or value is None:
+                continue
+            needle = str(value).strip()
+            if len(needle) < 2:
+                continue
+            for pno in range(doc.page_count):
+                page = doc[pno]
+                rects = page.search_for(needle)
+                if not rects and len(needle) > 24:
+                    rects = page.search_for(needle[:24])  # 긴 값은 앞부분으로 재시도
+                if rects:
+                    r = rects[0]
+                    locations[field] = {
+                        "page": pno,
+                        "bbox": [round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1)],
+                        "page_width": round(page.rect.width, 1),
+                        "page_height": round(page.rect.height, 1),
+                    }
+                    break
+        return locations
+    finally:
+        doc.close()
+
+
 async def parse_document(document_id: str, db: AsyncSession) -> dict:
     """
     문서 한 개를 Bedrock(Sonnet 4.6 + Vision)으로 읽어 정형 데이터로 추출하고,
@@ -406,6 +438,16 @@ async def parse_document(document_id: str, db: AsyncSession) -> dict:
         and not has_smelter_identity
     ):
         _append_unique(unparsed_fields, "missing_reference_document:smelter_identification")
+
+    # [목표2] PDF 텍스트 레이어에서 추출값의 실제 좌표(bbox)를 역추적 → parsed_fields에
+    #   예약키 __locations__로 동봉한다(신규 컬럼 없이 기존 JSONB 재활용).
+    if file_type == "pdf" and parsed_fields:
+        try:
+            locs = _locate_fields_in_pdf(raw_bytes, parsed_fields)
+            if isinstance(locs, dict) and locs:  # dict가 아니면(방어) JSONB 직렬화 깨짐 방지
+                parsed_fields["__locations__"] = locs
+        except Exception:
+            pass
 
     # ── 6) document_extraction_results 적재 (submission repository 위임) ──────
     #   JSONB 컬럼이라 dict/list를 그대로 넘긴다 (json.dumps로 문자열화하면

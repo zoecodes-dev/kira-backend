@@ -262,3 +262,48 @@ async def list_regulation_results(
     )
     set_total_count(response, total)
     return items  # bare array
+
+
+# ============================================================
+# [목표3] POST /regulation/analyze-carbon — RAG 기반 탄소 규제 준수 진단 (자동 트리거)
+# ============================================================
+from pydantic import BaseModel as _BaseModel
+
+
+class CarbonAnalyzeRequest(_BaseModel):
+    carbon_intensity: Optional[float] = None
+    energy_source: Optional[str] = None
+
+
+@compliance_router.post("/analyze-carbon", summary="탄소집약도·에너지원 RAG 규제 준수 진단")
+async def analyze_carbon_endpoint(
+    body: CarbonAnalyzeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """추출된 탄소집약도·에너지원을 EU 배터리법 Article 7 조항과 RAG 비교해 위반 여부를 진단한다.
+    반환: {verdict, regulation_name, citation, clause_text, reasoning}."""
+    from backend.agents.compliance import analyze_carbon_compliance
+    return await analyze_carbon_compliance(body.carbon_intensity, body.energy_source, db)
+
+
+# ============================================================
+# [작업1] POST /regulation/analyze-saq — RAG 기반 CSDDD 실사(SAQ) 준수 진단 (자동 트리거)
+# ============================================================
+
+
+class SaqAnalyzeRequest(_BaseModel):
+    # 파싱된 SAQ 항목(고충처리 채널·강제노동 징후·준수등급·평가표준·점수 등) 자유 dict.
+    saq_fields: dict = {}
+
+
+@compliance_router.post("/analyze-saq", summary="실사 자가진단(SAQ) RAG 기반 CSDDD 준수 진단")
+async def analyze_saq_endpoint(
+    body: SaqAnalyzeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """파싱된 SAQ 항목을 CSDDD(공급망 실사 지침) 조항과 RAG 비교해 인권/환경 실사 위반 여부를 진단한다.
+    반환: {verdict, regulation_name, citation, clause_text, reasoning}."""
+    from backend.agents.compliance import analyze_saq_compliance
+    return await analyze_saq_compliance(body.saq_fields, db)
