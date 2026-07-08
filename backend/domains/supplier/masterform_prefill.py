@@ -72,12 +72,15 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     #   전용 스칼라 컬럼이 없어 master-form 저장 대상은 아니지만(prefill 'saq' 섹션은 프론트가 무시),
     #   parsed_fields JSONB로 추출돼 SAQ 카드 표시 + CSDDD 준수 진단(analyze_saq_compliance)에 쓰인다.
     "saq_standard":          ("saq", "str", "평가 표준(예: SA8000, RBA VAP, ISO 45001)"),
-    "saq_score":             ("saq", "str", "자가진단 점수 또는 등급"),
-    "saq_valid_until":       ("saq", "str", "자가진단 유효기간(만료일)"),
+    "saq_score":             ("saq", "str", "자가진단 종합 평가 점수 또는 등급"),
+    "saq_assessed_at":       ("saq", "str", "자가진단 평가 일자(평가 수행일, YYYY-MM-DD)"),
+    "saq_valid_until":       ("saq", "str", "자가진단 유효기간(만료일, YYYY-MM-DD)"),
     "saq_risk_level":        ("saq", "str", "종합 리스크 등급(low/medium/high)"),
     "grievance_mechanism":   ("saq", "str", "고충 처리 채널(grievance mechanism) 운영 여부(있음/없음 또는 yes/no)"),
     "forced_labor_risk":     ("saq", "str", "강제노동 징후 여부(있음/없음 또는 설명)"),
     "child_labor_risk":      ("saq", "str", "아동노동 징후 여부(있음/없음 또는 설명)"),
+    "iso_45001_certified":   ("saq", "str", "안전보건경영시스템(ISO 45001 등) 인증 여부(있음/없음 또는 인증명)"),
+    "iso_14001_certified":   ("saq", "str", "환경경영시스템(ISO 14001 등) 인증 여부(있음/없음 또는 인증명)"),
     "compliance_grade":      ("saq", "str", "실사 준수 등급(예: 준수/개선필요/위반)"),
 
     # [W6 정리] 재활용(recycling)·원산지(origin)·지분FEOC(ownership) 섹션은 master-form에서
