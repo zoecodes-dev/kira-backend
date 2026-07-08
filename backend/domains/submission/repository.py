@@ -57,7 +57,8 @@ async def list_data_requests(
     supplier_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    bom_version_id: Optional[uuid.UUID] = None,   # [map별 독립 제출] 이 맵(BOM)의 요청만
 ) -> list[DataRequestLog]:
     """
     [SELECT] 조건에 맞는 데이터 요청 목록을 필터링하여 조회합니다.
@@ -67,6 +68,8 @@ async def list_data_requests(
     stmt = select(DataRequestLog)
     if supplier_id:
         stmt = stmt.where(DataRequestLog.target_supplier_id == supplier_id)
+    if bom_version_id:
+        stmt = stmt.where(DataRequestLog.bom_version_id == bom_version_id)
     if status:
         stmt = stmt.where(DataRequestLog.submission_status == status)
     stmt = stmt.order_by(DataRequestLog.requested_at.desc()).offset(skip).limit(limit)

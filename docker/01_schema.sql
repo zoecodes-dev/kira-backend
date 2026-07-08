@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; -- uuid_generate_v4() 기본키 생�
 -- 영역 1. 테넌트 / 사용자 / 권한 (A 담당)
 -- ============================================================
 
--- [테이블 역할] 멀티테넌트 SaaS의 최상위 조직 단위. 원청사(OEM) 1개가 1개의 tenant로 기능.
+-- [테이블 역할] 멀티테넌트 SaaS의 최상위 조직 단위. 원청사(prime) 1개가 1개의 tenant로 기능.
 CREATE TABLE tenants (
     tenant_id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_name        VARCHAR(255) NOT NULL,
@@ -40,23 +40,9 @@ CREATE TABLE users (
     role           VARCHAR(50) 
         CONSTRAINT chk_user_role CHECK (role IN ('admin', 'owner_esg', 'owner_purchasing', 'supplier_ceo', 'supplier_esg')),
     is_active      BOOLEAN DEFAULT TRUE,
-    last_login_at  TIMESTAMPTZ,
     manager_id     UUID REFERENCES users(user_id) ON DELETE SET NULL, -- [다단계 결재] 상급자 자기참조 (결재선 자동 구성)
-    supplier_id    UUID,  -- [협력사 본인 식별 §0.5] 협력사 계정이 대표하는 supplier. 로그인 supplier_id 클레임/포털 스코프 소스. OEM 계정은 NULL.
+    supplier_id    UUID,  -- [협력사 본인 식별 §0.5] 협력사 계정이 대표하는 supplier. 로그인 supplier_id 클레임/포털 스코프 소스. 원청(prime) 계정은 NULL.
     created_at     TIMESTAMPTZ DEFAULT now()
-);
-
--- [테이블 역할] 옆 라인 정보 차단(기본값 FALSE) 및 3차수 이내 등 사용자별 세밀한 공급망 열람 제어 매트릭스.
-CREATE TABLE view_permissions (
-    permission_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id              UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    viewable_supplier_id UUID,
-    can_view_parent      BOOLEAN DEFAULT FALSE,
-    can_view_children    BOOLEAN DEFAULT FALSE,
-    can_view_siblings    BOOLEAN DEFAULT FALSE,
-    depth_limit          INT DEFAULT 1,
-    granted_by           UUID REFERENCES users(user_id),
-    granted_at           TIMESTAMPTZ DEFAULT now()
 );
 
 -- [테이블 역할 §0.8] 공통 파일 업로드 저장소. 첨부 화면(자료 제출·실사/시정 보고서·온보딩)이
@@ -104,6 +90,7 @@ CREATE TABLE suppliers (
     environmental_report_url VARCHAR(500),  -- 필요문서: 환경성적서(회원가입 시 수집) 업로드 URL
     self_assessment_doc_url VARCHAR(500),  -- 규제: 실사 자가진단 보고서 업로드 URL(내 기업 정보에서 제출·확인)
     material_composition_doc_url VARCHAR(500),  -- 필요문서: 소재구성 문서(핵심광물 함량 근거) 업로드 URL
+    carbon_footprint_doc_url VARCHAR(500),  -- 필요문서: 탄소발자국 신고서(탄소집약도/에너지원 근거) 업로드 URL
     is_unverified       BOOLEAN DEFAULT false,  -- 회원가입: 사업자등록증 미보유로 '미확인 상태' 등록(원청/상위가 검증)
     parent_supplier_id  UUID REFERENCES suppliers(supplier_id),
     established_year    INT,
@@ -143,9 +130,11 @@ CREATE TABLE supplier_factories (
     destination           VARCHAR(10) CONSTRAINT chk_factory_destination CHECK (destination IN ('EU', 'US', 'KR', 'BOTH')),
     destination_detail    TEXT,
     applicable_regulations JSONB, -- 공장별 차등 적용 규제 JSON 배열
-    hidden_regulations    JSONB,
     supply_ratio_percent  NUMERIC(5,2),
     supply_quantity       VARCHAR(100),
+    -- 공장별 소재 구성(핵심광물 함량, suppliers.core_minerals와 동일 셰이프) — 광산(mining)은 사이트마다
+    -- 채굴 광물이 달라 회사 단위가 아니라 공장 단위로 관리한다.
+    core_minerals         JSONB,
     -- 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분해 factory_manager_* 로 명명
     factory_manager_name  VARCHAR(100),   -- 공장 담당자 이름
     factory_manager_role  VARCHAR(100),   -- 직책
@@ -433,11 +422,8 @@ CREATE TABLE parts (
     function_purpose TEXT,
     
     -- [위상 조정] FTA RVC 부가가치 판정용이 아닌, 원청사의 단순 보조용 자재 단가로 용도 변경
-    unit_price       NUMERIC(15,4), 
-    
-    purchase_unit    VARCHAR(20),
-    specs            JSONB,
-    
+    unit_price       NUMERIC(15,4),
+
     -- [결정 #1 누락 정형화] 외부 원천시스템 연동 마크 주입
     source_system   VARCHAR(100) DEFAULT 'ERP_PLM',
     external_id     VARCHAR(255),
@@ -461,27 +447,6 @@ CREATE TABLE bom_items (
     source_system   VARCHAR(100) DEFAULT 'ERP_PLM',
     external_id     VARCHAR(255),
     synced_at       TIMESTAMPTZ DEFAULT now()
-);
-
--- [테이블 역할] 원청 자재 코드와 협력사 내부 고유 품번 간의 양방향 매핑 대장.
-CREATE TABLE part_code_mapping (
-    mapping_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    part_id             UUID REFERENCES parts(part_id) ON DELETE CASCADE,
-    supplier_id         UUID REFERENCES suppliers(supplier_id),
-    supplier_part_code  VARCHAR(50),
-    original_part_code  VARCHAR(50)
-);
-
--- [테이블 역할] 공정 신뢰도 및 CSDDD 감사 추적용 공정 매뉴얼 매핑 테이블.
-CREATE TABLE manufacturing_process (
-    process_id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    part_id                   UUID REFERENCES parts(part_id) ON DELETE CASCADE,
-    sequence_no               INT,
-    process_name              VARCHAR(255),
-    process_description       TEXT,
-    is_outsourced             BOOLEAN DEFAULT FALSE,
-    outsourced_to_supplier_id UUID REFERENCES suppliers(supplier_id),
-    process_image_url         VARCHAR(500)
 );
 
 
@@ -635,15 +600,6 @@ CREATE TABLE compliance_results (
     created_at       TIMESTAMPTZ DEFAULT now()
 );
 
--- [테이블 역할] 법률의 적용 대상 차수 및 업종 정의 매트릭스.
-CREATE TABLE regulation_applicability (
-    applicability_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    regulation_id            UUID REFERENCES regulations(regulation_id),
-    applicable_provider_type VARCHAR(30),
-    applicable_tier          INT,
-    severity                 VARCHAR(20) CONSTRAINT chk_app_severity CHECK (severity IN ('mandatory', 'recommended'))
-);
-
 -- [테이블 역할] 규제별 협력사 필수 제출 필드 명세. C2 gap 계산의 기준 데이터.
 -- regulation_id FK + field_name + field_type + provider_type_applicable(해당 업종 필터).
 CREATE TABLE regulation_required_fields (
@@ -688,6 +644,9 @@ CREATE TABLE data_request_log (
     request_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     requester_user_id   UUID REFERENCES users(user_id),
     target_supplier_id  UUID REFERENCES suppliers(supplier_id),
+    -- [map별 독립 제출] 이 자료요청/제출이 어느 공급망 맵(=제품 BOM 버전)에 대한 것인지.
+    --   같은 협력사가 여러 제품(맵)에 속하면 맵별로 별개 요청·제출·검토상태가 된다. NULL=회사 단위(레거시/맵무관).
+    bom_version_id      UUID REFERENCES bom_versions(bom_version_id),
     requested_data_type VARCHAR(100),
     requested_at        TIMESTAMPTZ DEFAULT now(),
     due_date            TIMESTAMPTZ,
@@ -1066,116 +1025,7 @@ CREATE INDEX idx_processed_jobs_failed    ON processed_jobs(queue_name, processe
 -- ============================================================
 
 -- ------------------------------------------------------------
--- [지혜-A] 결재(report) 도메인 — 다단계 결재. manager_id 는 users 테이블에 통합됨.
--- ------------------------------------------------------------
-CREATE TABLE reports (
-    report_id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    batch_id        UUID REFERENCES batches(batch_id) ON DELETE CASCADE,
-    title           VARCHAR(255) NOT NULL,
-    description     TEXT,
-    requester_id    UUID NOT NULL REFERENCES users(user_id),
-    status          VARCHAR(30) DEFAULT 'draft'
-        CONSTRAINT chk_report_status CHECK (status IN ('draft', 'approval_pending', 'fully_approved', 'returned')),
-    current_step    INT DEFAULT 1,
-
-    -- [P3 §3.2·3.3 audit/report 확장]
-    type            VARCHAR(50) DEFAULT 'compliance',  -- 보고서 종류 (compliance / sustainability / due_diligence 등)
-    submitted_at    TIMESTAMPTZ,                       -- draft→approval_pending 전이 시점
-    severity        VARCHAR(20) DEFAULT 'medium',      -- 결재함 표시용 심각도
-    deadline        TIMESTAMPTZ,                       -- 결재 기한
-    key_points      JSONB DEFAULT '[]',                -- 결재함 표시용 핵심 포인트 배열
-
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    updated_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE report_approval_steps (
-    step_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    report_id       UUID NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
-    step_number     INT NOT NULL,
-    approver_id     UUID NOT NULL REFERENCES users(user_id),
-    status          VARCHAR(30) DEFAULT 'pending'
-        CONSTRAINT chk_step_status CHECK (status IN ('pending', 'approved', 'rejected')),
-    decision_text   TEXT,
-    decided_at      TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    UNIQUE(report_id, step_number)
-);
-
--- ------------------------------------------------------------
 -- [은지-C] Watchlist (UFLPA/제재명단) + 소급 재검증
--- ⚠️수정#2: matched_supplier_id 추가 — 등재 entity ↔ 우리 공급사 매칭(자동 소급 강등의 연결고리).
---          텍스트 이름만으론 자동 대조가 약해 supplier FK 를 둠. 미매칭 시 NULL(텍스트 후보만).
--- ------------------------------------------------------------
-CREATE TABLE watchlists (
-    watchlist_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    entity_name         VARCHAR(255) NOT NULL,
-    country             VARCHAR(2),
-    reason              TEXT,
-    matched_supplier_id UUID REFERENCES suppliers(supplier_id) ON DELETE SET NULL, -- ⚠️#2 우리 공급사 매칭(소급 강등 연결)
-    source              VARCHAR(30) DEFAULT 'UFLPA_ENTITY_LIST'
-        CONSTRAINT chk_watchlist_source CHECK (source IN ('UFLPA_ENTITY_LIST', 'SANCTION', 'FEOC', 'MANUAL')),
-    listed_at           TIMESTAMPTZ DEFAULT now(),
-    is_active           BOOLEAN DEFAULT TRUE,
-    created_at          TIMESTAMPTZ DEFAULT now()
-);
-
--- 소급 재검증 이력 (출처9). trigger_source_id 는 watchlists/regulations 를 가리키는 polymorphic — FK 없음(의도).
-CREATE TABLE reverification_logs (
-    reverification_id     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    trigger_type          VARCHAR(30) NOT NULL
-        CONSTRAINT chk_reverify_trigger CHECK (trigger_type IN ('watchlist_update', 'regulation_amendment', 'manual')),
-    trigger_source_id     UUID,         -- ⚠️#3 polymorphic(watchlist_id 또는 regulation_id) → FK 없음(의도)
-    status                VARCHAR(20) DEFAULT 'running'
-        CONSTRAINT chk_reverify_status CHECK (status IN ('running', 'completed', 'failed')),
-    affected_batch_count  INT DEFAULT 0,
-    changed_verdict_count INT DEFAULT 0, -- 재검증 결과 판정이 달라진(위반 강등 등) 건수
-    started_at            TIMESTAMPTZ DEFAULT now(),
-    completed_at          TIMESTAMPTZ,
-    results_summary       JSONB         -- {batch_id: 'old -> new'} 요약
-);
-
--- ------------------------------------------------------------
--- [차윤-X] 외부 당국 시스템 제출 + 참조번호 (EUDR TRACES / IRA 30D / CBP)
--- ------------------------------------------------------------
-CREATE TABLE authority_submissions (
-    submission_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    batch_id           UUID REFERENCES batches(batch_id) ON DELETE CASCADE,
-    product_id         UUID REFERENCES products(product_id) ON DELETE CASCADE,
-    authority_type     VARCHAR(30) NOT NULL
-        CONSTRAINT chk_auth_type CHECK (authority_type IN ('TRACES_NT', 'CBP_DETENTION')),
-    reference_number   VARCHAR(100), -- TRACES-NT 고유 참조번호 / IRS Safe Harbor 등록번호 등
-    status             VARCHAR(20) DEFAULT 'pending'
-        CONSTRAINT chk_auth_submission_status CHECK (status IN ('pending', 'submitted', 'approved', 'failed')),
-    payload            JSONB,        -- 당국 전송 원본 JSON 스냅샷
-    response_metadata  JSONB,        -- 당국 수신 응답값
-    submitted_at       TIMESTAMPTZ,
-    created_at         TIMESTAMPTZ DEFAULT now()
-);
-
--- [차윤-X] 대외 전송 로그 + 도달확인(Ack) (X-10 정밀 정합). recipient_id 는 customer/supplier/authority polymorphic — FK 없음(의도).
-CREATE TABLE transmission_logs (
-    transmission_id     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    batch_id            UUID REFERENCES batches(batch_id) ON DELETE SET NULL,
-    sender_id           UUID REFERENCES users(user_id), -- 최종 발송 주체(원청 담당자)
-    recipient_type      VARCHAR(20) NOT NULL
-        CONSTRAINT chk_recipient_type CHECK (recipient_type IN ('customer', 'supplier', 'authority')),
-    recipient_id        UUID,         -- polymorphic(customers/suppliers/당국) → FK 없음(의도)
-    recipient_email     VARCHAR(255) NOT NULL,
-    transmission_type   VARCHAR(30) NOT NULL
-        CONSTRAINT chk_trans_type CHECK (
-            transmission_type IN ('compliance_summary', 'rework_request', 'post_violation_notice', 'customs_response')
-        ),
-    status              VARCHAR(20) DEFAULT 'sent'
-        CONSTRAINT chk_trans_status CHECK (status IN ('sent', 'delivered', 'failed', 'acknowledged')),
-    payload_summary     TEXT,
-    attachment_urls     JSONB,        -- 동반 PDF/증거묶음 URL 배열
-    ack_token           VARCHAR(64) UNIQUE, -- 수신확인 링크 검증용 유니크 토큰
-    sent_at             TIMESTAMPTZ DEFAULT now(),
-    delivered_at        TIMESTAMPTZ,
-    acknowledged_at     TIMESTAMPTZ   -- Ack 고리 완성 시각
-);
-
 -- ------------------------------------------------------------
 -- [영수-D] CBP 억류 통지(Detention) + 반증 대응 케이스 (회사경계·당국 대응)
 -- ------------------------------------------------------------
@@ -1194,21 +1044,6 @@ CREATE TABLE detention_cases (
 );
 
 -- ------------------------------------------------------------
--- [은지-C] 실사 정책 문서 (CSDDD·배터리 규제 대응)
--- ------------------------------------------------------------
-CREATE TABLE due_diligence_policies (
-    policy_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    title              VARCHAR(255) NOT NULL,
-    version            VARCHAR(20) NOT NULL,
-    status             VARCHAR(20) DEFAULT 'draft'
-        CONSTRAINT chk_policy_status CHECK (status IN ('draft', 'active', 'archived')),
-    document_url       VARCHAR(500) NOT NULL,
-    created_by         UUID REFERENCES users(user_id),
-    published_at       TIMESTAMPTZ,
-    created_at         TIMESTAMPTZ DEFAULT now()
-);
-
--- ------------------------------------------------------------
 -- [지혜-A·차윤-E·은진] 결정 시점 데이터 스냅샷 + 부인방지 서명 (사람결정 증적 — 책임증명 비대칭 해소)
 -- step_id 는 report_approval_steps 또는 hitl_reviews 시점 polymorphic — FK 없음(의도).
 -- ------------------------------------------------------------
@@ -1223,14 +1058,7 @@ CREATE TABLE audit_data_snapshots (
 );
 
 -- TO-BE 확장 인덱스
-CREATE INDEX idx_reports_requester ON reports(requester_id);
-CREATE INDEX idx_report_steps_approver ON report_approval_steps(approver_id, status);
-CREATE INDEX idx_watchlists_entity ON watchlists(entity_name) WHERE is_active = TRUE;
-CREATE INDEX idx_watchlists_matched ON watchlists(matched_supplier_id) WHERE matched_supplier_id IS NOT NULL;
-CREATE INDEX idx_auth_submissions_batch ON authority_submissions(batch_id);
-CREATE INDEX idx_trans_logs_ack_token ON transmission_logs(ack_token) WHERE ack_token IS NOT NULL;
 CREATE INDEX idx_detention_cases_due ON detention_cases(due_date) WHERE status != 'released';
-CREATE INDEX idx_reverify_logs_status ON reverification_logs(status);
 CREATE INDEX idx_audit_snapshots_batch ON audit_data_snapshots(batch_id);
 
 -- ============================================================

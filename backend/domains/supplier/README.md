@@ -58,7 +58,7 @@ Supplier 도메인을 확장하거나 디벨롭할 때 다른 팀원과 LLM은 �
 원청↔협력사 흐름(초대→가입→자료수집→승인)을 실데이터로 잇는 supplier 도메인 기능:
 
 * **협력사 초대 + PIC 저장**: `POST /suppliers`(`create_supplier_and_invite`) — stub 생성 + `SupplierInvited` 발행(초대 메일 SES + `supply_chain_map.discovered_via`) + PIC를 `supplier_contacts`에 같은 트랜잭션 저장(다음 화면 재표기용). body: `inviter_supplier_id`(상위 협력사, 원청 직접이면 null) + `contacts[]`.
-* **제3자 정보제공 동의 게이트**: `require_supplier_consent`(infrastructure/auth) — 협력사 계정이 `supplier_onboarding.consent_status='consent_agreed'` 전이면 데이터 입력(`master-form`·`PATCH /detail`)에서 403 `CONSENT_REQUIRED`. OEM/감사자는 통과.
+* **제3자 정보제공 동의 게이트**: `require_supplier_consent`(infrastructure/auth) — 협력사 계정이 `supplier_onboarding.consent_status='consent_agreed'` 전이면 데이터 입력(`master-form`·`PATCH /detail`)에서 403 `CONSENT_REQUIRED`. 원청(prime)/감사자는 통과.
 * **온보딩(URL 초대 진입)**: `GET .../onboarding/prefill`(회사·타입 미리채움) + `POST .../onboarding/submit`(회사·PIC·문서·동의·계정 생성) — stub을 UPDATE(회원가입 전 저장 → 가입 즉시 진행).
 * **AI 추출값 승격**: `promote_extraction_to_details` — 배치 게이트(`data_gateway`) 통과 시 협력사 확정 추출값을 provider_type별 상세테이블로 승격(`masterform_prefill` 매핑 재사용). 승격 대상 필드는 규제/스코프에 따라 변동(코드가 SSOT).
 * **메일 발송(SES)**: `infrastructure/mail.py`(안전 no-op 스위치, `MAIL_ENABLED`/`MAIL_FROM`) + notification 워커 email 채널.

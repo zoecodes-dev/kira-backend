@@ -162,6 +162,7 @@ class SupplyChainGapDetectedEvent:
       CSV(예: "carbon_intensity,mine_coordinates").
     """
     product_id: Optional[UUID] = None
+    bom_version_id: Optional[UUID] = None   # [map별 독립 제출] gap이 검출된 공급망 맵(제품 BOM 버전). None=회사 단위
     supplier_id: Optional[UUID] = None
     requested_data_type: Optional[str] = None
     requester_user_id: Optional[UUID] = None

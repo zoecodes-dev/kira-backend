@@ -124,12 +124,16 @@ async def get_by_hop_endpoint(
 @trace_tool("get_supply_chain_gaps")
 async def get_supply_chain_gaps_endpoint(
     product_id: UUID,
+    bom_version_id: Optional[str] = None,
     service: SupplyChainService = Depends(get_supply_chain_service),
 ):
     """
     C2 맵 gap 계산 API.
 
     제품 공급망 내 각 협력사 노드별로 적용 규제 대비 미보유 필수 필드 목록 반환.
+    bom_version_id 지정 시 그 맵(엣지)으로만 한정한다 — 미지정이면 이 제품의 전체
+    bom_version 통틀어 조회(기존 동작). 같은 협력사가 겸업/이중소싱으로 여러 차수에
+    걸치면 (협력사, depth) 조합마다 노드가 하나씩 나온다.
     응답 예시:
       {
         "product_id": "...",
@@ -146,7 +150,7 @@ async def get_supply_chain_gaps_endpoint(
         ]
       }
     """
-    return await service.get_gaps(product_id=str(product_id))
+    return await service.get_gaps(product_id=str(product_id), bom_version_id=bom_version_id)
 
 
 @router.get("/alternatives")
@@ -258,6 +262,7 @@ async def verify_supplier_endpoint(
 
 class TriggerDataRequestsBody(BaseModel):
     product_id: UUID
+    bom_version_id: Optional[UUID] = None  # [map별 독립 제출] 지정 시 그 맵(BOM)으로 한정 + 요청에 실림. None=회사 단위
     supplier_ids: Optional[List[UUID]] = None  # None = gap 있는 노드 전체
     requester_user_id: UUID
     actor_id: UUID
@@ -286,6 +291,7 @@ async def trigger_data_requests_for_gaps_endpoint(
         actor_id=body.actor_id,
         due_date=body.due_date,
         supplier_ids=body.supplier_ids,
+        bom_version_id=body.bom_version_id,
     )
 
     return {
@@ -349,6 +355,58 @@ async def get_validation_summary_endpoint(
         tenant_id=str(current_user.tenant_id),
         bom_version_id=bom_version_id,
     )
+
+
+# ============================================================
+# GET /products/{product_id}/supply-chain-map/evaluation
+#   공급망 맵 '평가 리포트'(종합 판정 문구). 배치 파이프라인 종합판정
+#   (batch_final_judgment)을 bom_version_id로 이 맵에 연결해 문구를 노출.
+# ============================================================
+
+@product_supply_chain_router.get("/{product_id}/supply-chain-map/evaluation")
+async def get_evaluation_report_endpoint(
+    product_id: UUID,
+    bom_version_id: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: SupplyChainService = Depends(get_supply_chain_service),
+):
+    """공급망 맵 평가 리포트(종합 판정 문구). products.tenant_id 경로로 tenant 격리."""
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="테넌트 정보가 없습니다.")
+    return await service.get_evaluation_report(
+        product_id=str(product_id),
+        tenant_id=str(current_user.tenant_id),
+        bom_version_id=bom_version_id,
+    )
+
+
+# ============================================================
+# GET /products/{product_id}/supply-chain-map/risk-summary/outbound
+#   고객사 전송용 다국어 리스크 요약 프리뷰. 이 맵(product+bom_version)의
+#   협력사로만 집계를 좁혀 국가별 언어(EN/DE)로 렌더링한다.
+#   (구 report 도메인 risk-summary/outbound 이관 — §7절 참고)
+# ============================================================
+
+@product_supply_chain_router.get("/{product_id}/supply-chain-map/risk-summary/outbound")
+async def get_outbound_risk_summary_endpoint(
+    product_id: UUID,
+    customer_id: UUID,
+    bom_version_id: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: SupplyChainService = Depends(get_supply_chain_service),
+):
+    """고객사 전송용 다국어 리스크 요약. products.tenant_id 경로로 tenant 격리."""
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="테넌트 정보가 없습니다.")
+    result = await service.get_outbound_risk_summary(
+        product_id=str(product_id),
+        tenant_id=str(current_user.tenant_id),
+        customer_id=str(customer_id),
+        bom_version_id=bom_version_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return result
 
 
 # ============================================================

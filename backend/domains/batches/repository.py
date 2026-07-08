@@ -274,6 +274,62 @@ async def get_batch_detail(
     }
 
 
+async def get_final_judgment_by_bom_version(
+    db: AsyncSession,
+    product_id: str,
+    tenant_id: Optional[UUID] = None,
+    bom_version_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """공급망 맵(제품 × BOM 버전) 기준 '평가 리포트' 조회 — 해당 맵에 걸린 배치의
+    종합 판정(batch_final_judgment) 문구를 반환한다.
+
+    배치는 bom_version_id로 supply_chain_map(공급망 맵)과 연결되므로, 프론트가 가진
+    product_id(+bom_version_id)만으로 그 맵의 최종 판정 문구를 끌어온다. 같은 맵에
+    여러 배치(생산 Lot)가 있으면 가장 최근 판정(created_at DESC) 1건을 대표로 쓴다.
+    판정이 아직 없으면(파이프라인 미완) None.
+    """
+    row = (await db.execute(
+        text("""
+            SELECT
+                b.batch_id,
+                b.bom_version_id,
+                fj.overall_verdict,
+                fj.executive_summary,
+                fj.key_risks,
+                fj.recommended_action,
+                fj.confidence,
+                fj.created_at
+            FROM batch_final_judgment fj
+            JOIN batches b ON b.batch_id = fj.batch_id
+            WHERE b.product_id = CAST(:product_id AS uuid)
+              AND (CAST(:tenant_id AS uuid) IS NULL OR b.tenant_id = CAST(:tenant_id AS uuid))
+              AND (CAST(:bom_version_id AS uuid) IS NULL OR b.bom_version_id = CAST(:bom_version_id AS uuid))
+            ORDER BY fj.created_at DESC
+            LIMIT 1
+        """),
+        {
+            "product_id": product_id,
+            "tenant_id": str(tenant_id) if tenant_id is not None else None,
+            "bom_version_id": bom_version_id,
+        },
+    )).mappings().fetchone()
+
+    if row is None:
+        return None
+    return {
+        "batch_id": str(row["batch_id"]),
+        "bom_version_id": str(row["bom_version_id"]) if row["bom_version_id"] else None,
+        "overall_verdict": row["overall_verdict"],
+        "executive_summary": row["executive_summary"],
+        "key_risks": _json_list(row["key_risks"]),
+        "recommended_action": row["recommended_action"],
+        "confidence": (
+            float(row["confidence"]) if row["confidence"] is not None else None
+        ),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+    }
+
+
 async def get_dashboard_kpis(
     db: AsyncSession,
     tenant_id: Optional[UUID] = None,

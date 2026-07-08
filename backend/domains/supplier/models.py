@@ -62,6 +62,7 @@ class Supplier(Base):
     environmental_report_url: Mapped[Optional[str]] = mapped_column(String(500))  # 환경성적서(회원가입 수집) 업로드 URL
     self_assessment_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 실사 자가진단 보고서 업로드 URL
     material_composition_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 소재구성 문서 업로드 URL
+    carbon_footprint_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 탄소발자국 신고서 업로드 URL
     is_unverified: Mapped[bool] = mapped_column(Boolean, default=False)  # 회원가입: 사업자등록증 미보유 '미확인 등록'
     parent_supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id")
@@ -112,9 +113,9 @@ class SupplierFactory(Base):
     destination: Mapped[Optional[str]] = mapped_column(String(10))   # EU / US / KR / BOTH
     destination_detail: Mapped[Optional[str]] = mapped_column(Text)
     applicable_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장별 차등 규제 배열
-    hidden_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)
     supply_ratio_percent: Mapped[Optional[float]] = mapped_column(NUMERIC(5, 2))
     supply_quantity: Mapped[Optional[str]] = mapped_column(String(100))
+    core_minerals: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장(사이트)별 소재 구성
     # 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분: factory_manager_*
     factory_manager_name: Mapped[Optional[str]] = mapped_column(String(100))
     factory_manager_role: Mapped[Optional[str]] = mapped_column(String(100))
@@ -383,6 +384,7 @@ class SupplierDetailResponse(BaseModel):
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL(확인용)
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL(확인용)
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서 업로드 URL(확인용)
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서 업로드 URL(확인용)
     status: str
     risk_level: str
     manufacturer_detail: Optional[ManufacturerDetailDTO] = None
@@ -408,6 +410,7 @@ class FactoryDTO(BaseModel):
     destination_detail: Optional[str] = None
     supply_ratio_percent: Optional[float] = None
     supply_quantity: Optional[str] = None
+    core_minerals: Optional[dict] = None
     factory_manager_name: Optional[str] = None
     factory_manager_role: Optional[str] = None
     factory_manager_phone: Optional[str] = None
@@ -490,6 +493,7 @@ class SuppliedItemDTO(BaseModel):
     product_name: Optional[str] = None
     customer_name: Optional[str] = None    # 고객사 (예: BMW) — 탭 라벨
     hop_level: Optional[int] = None        # 이 맵에서 협력사 차수
+    factory_id: Optional[uuid.UUID] = None # 이 맵(엣지)에서 대는 공장 — map 탭에서 공장 필터용
     core_minerals: Optional[dict] = None   # 이 맵(엣지)의 핵심광물 함량 %; 없으면 회사값 폴백
     model_config = {"from_attributes": True}
 
@@ -567,6 +571,7 @@ class MasterFormCompany(BaseModel):
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서 업로드 URL
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서 업로드 URL
     established_year: Optional[int] = None
     employee_count: Optional[int] = None
 
@@ -591,6 +596,7 @@ class MasterFormFactory(BaseModel):
     applicable_regulations: Optional[list] = None
     supply_ratio_percent: Optional[float] = None
     supply_quantity: Optional[str] = None
+    core_minerals: Optional[dict] = None  # 공장(사이트)별 소재 구성 — 광산은 사이트마다 채굴 광물이 다름
     # 공장 담당자(공장 단위) — 이름/직책/연락처/메일
     factory_manager_name: Optional[str] = None
     factory_manager_role: Optional[str] = None
@@ -609,6 +615,9 @@ class MasterFormContact(BaseModel):
     mobile: Optional[str] = None
     is_primary: bool = False
     language: Optional[str] = None
+    # 이 담당자가 속한 공장 — 폼 안 factories 리스트 순서(같은 요청에서 신규 공장도 즉시 연결
+    # 가능). None이면 특정 공장에 속하지 않는 회사 공통 담당자(§MasterFormFactoryCarbon.factory_index와 동일 패턴).
+    factory_index: Optional[int] = None
 
 
 # ----- 섹션 1: 탄소발자국 (supplier_manufacturer_details / factory_carbon_declarations) -----
@@ -719,6 +728,7 @@ class OnboardingPrefillResponse(BaseModel):
     address: Optional[str] = None
     contact: Optional[OnboardingContactPrefill] = None   # 본인 대표 담당자(있으면)
     business_reg_doc: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 사업자등록증(있으면)
+    environmental_report: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 환경성적서(있으면)
     unverified: bool = False  # 미확인(서류 미보유) 상태로 등록돼 있는지
     consent: Optional[OnboardingConsentSummary] = None
     model_config = {"from_attributes": True}

@@ -13,7 +13,7 @@
 
 | 개념 | 설명 |
 |---|---|
-| **N차 공급망 추적** | 원청(OEM)부터 말단 광산까지 재귀적으로 추적(`supply_chain_map` 재귀 CTE). 겸업·tier 점프 수용 |
+| **N차 공급망 추적** | 원청(prime)부터 말단 광산까지 재귀적으로 추적(`supply_chain_map` 재귀 CTE). 겸업·tier 점프 수용 |
 | **Geo Audit** | PostGIS 공간쿼리로 고위험 지역(신장·DRC 등) 좌표 판정 → 지리적 위험 플래그 |
 | **HITL** | confidence·규제 위반·지리 위험 등으로 자동 판정이 애매하면 사람 심사 큐로 라우팅 |
 | **규제 세트** | 적용 규제·필수필드는 `regulations`/`regulation_required_fields` 테이블 기반(데이터 주도). 스코프에 따라 변동 |
