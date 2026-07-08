@@ -46,7 +46,6 @@ class Supplier(Base):
     company_name_ko: Mapped[Optional[str]] = mapped_column(String(255))
     short_name_en: Mapped[Optional[str]] = mapped_column(String(100))
     short_name_ko: Mapped[Optional[str]] = mapped_column(String(100))
-    ceo_name: Mapped[Optional[str]] = mapped_column(String(100))
     business_reg_no: Mapped[Optional[str]] = mapped_column(String(50))
     corporate_reg_no: Mapped[Optional[str]] = mapped_column(String(50))
     duns_number: Mapped[Optional[str]] = mapped_column(String(20))
@@ -339,7 +338,7 @@ class SupplierDetailUpdateRequest(BaseModel):
     environmental_report_url: Optional[str] = None   # 환경성적서
     self_assessment_doc_url: Optional[str] = None     # 실사 자가진단 보고서
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서
-    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 문서(대응 suppliers 컬럼 없음 — 파싱 이벤트 트리거용)
 
 
 # ----- CTI 상세 응답 DTO (목요일: provider type별 상세 노출) -----
@@ -369,7 +368,6 @@ class SupplierDetailResponse(BaseModel):
     # 기업 기본정보 섹션용 — suppliers 테이블 컬럼(있으면 채움).
     company_name_en: Optional[str] = None
     company_name_ko: Optional[str] = None
-    ceo_name: Optional[str] = None
     business_reg_no: Optional[str] = None
     duns_number: Optional[str] = None
     website: Optional[str] = None
@@ -557,7 +555,6 @@ class MasterFormCompany(BaseModel):
     company_name_ko: Optional[str] = None
     short_name_en: Optional[str] = None
     short_name_ko: Optional[str] = None
-    ceo_name: Optional[str] = None
     business_reg_no: Optional[str] = None
     corporate_reg_no: Optional[str] = None
     duns_number: Optional[str] = None
@@ -728,6 +725,7 @@ class OnboardingPrefillResponse(BaseModel):
     address: Optional[str] = None
     contact: Optional[OnboardingContactPrefill] = None   # 본인 대표 담당자(있으면)
     business_reg_doc: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 사업자등록증(있으면)
+    environmental_report: Optional[OnboardingDocPrefill] = None  # 이미 업로드된 환경성적서(있으면)
     unverified: bool = False  # 미확인(서류 미보유) 상태로 등록돼 있는지
     consent: Optional[OnboardingConsentSummary] = None
     model_config = {"from_attributes": True}

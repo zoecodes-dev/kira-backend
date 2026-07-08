@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from backend.domains.risk.models import RiskProfile
 
 
@@ -35,19 +33,3 @@ def update_risk_profile_state(profile: RiskProfile, new_score: int, additional_r
     
     # 70점(critical) 이상이면 에스컬레이션(HITL) 필요
     return profile.risk_level == "critical"
-
-
-def resolve_risk_profile(profile: RiskProfile, resolved_note: str | None = None) -> None:
-    """
-    리스크 종결(닫기). 가점식 점수라 '내리는' 경로가 없어, 종결 시 점수를 0으로
-    리셋해 low 레벨로 전이하고 고위험 플래그를 해제한다. last_risk_review_at 에
-    종결 시각을 남겨 '언제 사람이 리스크를 닫았는지' 감사 가능하게 한다.
-
-    (다음 파이프라인에서 새 위반이 적재되면 점수는 다시 가점식으로 누적된다 —
-     이 종결은 '이번 리스크 에피소드를 닫는' 의미다.)
-    """
-    profile.overall_risk_score = 0
-    profile.risk_level = calculate_risk_level(0)  # low
-    profile.is_high_risk_flag = False
-    profile.high_risk_reasons = [f"resolved: {resolved_note}"] if resolved_note else ["resolved"]
-    profile.last_risk_review_at = datetime.now(timezone.utc)

@@ -202,7 +202,39 @@ def _is_present(value) -> bool:
     return True
 
 
-@trace_tool("parse_document")
+def _locate_fields_in_pdf(raw_bytes: bytes, parsed_fields: dict) -> dict:
+    """[목표2] 추출된 각 필드 값 텍스트를 PDF 텍스트 레이어에서 검색해 실제 좌표를 반환.
+    반환: {field: {"page": int, "bbox": [x0,y0,x1,y1], "page_width": float, "page_height": float}}.
+    PyMuPDF page.search_for 사용. 못 찾은 필드는 생략(프론트는 있는 것만 하이라이트).
+    """
+    locations: dict = {}
+    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+    try:
+        for field, value in parsed_fields.items():
+            if field.startswith("__") or value is None:
+                continue
+            needle = str(value).strip()
+            if len(needle) < 2:
+                continue
+            for pno in range(doc.page_count):
+                page = doc[pno]
+                rects = page.search_for(needle)
+                if not rects and len(needle) > 24:
+                    rects = page.search_for(needle[:24])  # 긴 값은 앞부분으로 재시도
+                if rects:
+                    r = rects[0]
+                    locations[field] = {
+                        "page": pno,
+                        "bbox": [round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1)],
+                        "page_width": round(page.rect.width, 1),
+                        "page_height": round(page.rect.height, 1),
+                    }
+                    break
+        return locations
+    finally:
+        doc.close()
+
+
 async def parse_document(document_id: str, db: AsyncSession) -> dict:
     """
     문서 한 개를 Bedrock(Sonnet 4.6 + Vision)으로 읽어 정형 데이터로 추출하고,
@@ -407,6 +439,16 @@ async def parse_document(document_id: str, db: AsyncSession) -> dict:
     ):
         _append_unique(unparsed_fields, "missing_reference_document:smelter_identification")
 
+    # [목표2] PDF 텍스트 레이어에서 추출값의 실제 좌표(bbox)를 역추적 → parsed_fields에
+    #   예약키 __locations__로 동봉한다(신규 컬럼 없이 기존 JSONB 재활용).
+    if file_type == "pdf" and parsed_fields:
+        try:
+            locs = _locate_fields_in_pdf(raw_bytes, parsed_fields)
+            if isinstance(locs, dict) and locs:  # dict가 아니면(방어) JSONB 직렬화 깨짐 방지
+                parsed_fields["__locations__"] = locs
+        except Exception:
+            pass
+
     # ── 6) document_extraction_results 적재 (submission repository 위임) ──────
     #   JSONB 컬럼이라 dict/list를 그대로 넘긴다 (json.dumps로 문자열화하면
     #   이중 직렬화돼서 "{...}" 문자열이 박힌다 — 넘기지 않는다).
@@ -591,82 +633,3 @@ async def data_gateway_node(state: BatchState) -> BatchState:
             "promoted_suppliers": promoted_suppliers,
         },
     }
-
-
-def _coerce_number(value):
-    """숫자로 해석되면 float, 아니면 None. '95 kgCO2eq' 같은 단위 접미사는 앞 숫자만 본다."""
-    if isinstance(value, bool):       # bool은 int 하위형이라 숫자 취급 방지
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        head = value.strip().split()[0] if value.strip() else ""
-        try:
-            return float(head)
-        except ValueError:
-            return None
-    return None
-
-
-async def get_integrity_pairs(
-    db: AsyncSession, supplier_id, confirmed_fields: dict | None
-) -> list[dict]:
-    """
-    [문서무결성 검증용 B 제공 계약 — 결정 #4 · #3 연장]
-
-    협력사 확정값(confirmed_fields, parsed_fields와 같은 키 공간)과 그 협력사가 올린
-    증빙문서의 AI 추출값(document_extraction_results.parsed_fields)을 같은 키로 짝지어
-    비교 가능한 페어 리스트로 반환한다. verification 도메인(E)의 document_integrity_rule이
-    이 페어를 받아 불일치 판정만 한다 — 점수/등급은 STEP 6 몫(레이어 경계 유지).
-
-    규칙:
-      - 미확정 문서(supplier_confirmed=False)는 제외 — 협력사 확정값만 검증(헛검증 방지, 결정 #4).
-      - 한 키가 여러 문서에 있으면 추출 신뢰도(confidence_map)가 가장 높은 문서값을 대표로 채택.
-      - 증빙에 없는 확정 키, 증빙문서가 아예 없는 경우, confirmed_fields가 비면 → 페어에서 제외.
-        (E의 룰은 빈 리스트를 '무결성 통과'로 처리하면 된다.)
-
-    인자:
-      supplier_id      : 확정값의 주인(제출 협력사). UUID 또는 str.
-      confirmed_fields : 협력사 확정값 dict. 보통 state["confirmed_fields"]를 그대로 넘긴다.
-
-    반환 페어: {"field", "confirmed_value", "document_value", "confidence", "value_type"}
-      value_type: "numeric"(양쪽 수치 해석 가능) | "string"(그 외 — 정규화 후 문자열 비교)
-    """
-    if not confirmed_fields:
-        return []
-
-    sid = supplier_id if isinstance(supplier_id, UUID) else UUID(str(supplier_id))
-    results = await submission_repo.list_extraction_results_by_suppliers(db, [sid])
-
-    # 키별 '최고 신뢰' 증빙값 집계 (확정 문서만 대상)
-    best_doc_value: dict = {}
-    best_conf: dict = {}
-    for record, _provider_type, _sid in results:
-        if not record.supplier_confirmed:
-            continue
-        parsed = record.parsed_fields or {}
-        cmap = record.confidence_map or {}
-        for key, doc_value in parsed.items():
-            try:
-                conf = float(cmap.get(key, 0.0))
-            except (TypeError, ValueError):
-                conf = 0.0
-            if key not in best_conf or conf > best_conf[key]:
-                best_doc_value[key] = doc_value
-                best_conf[key] = conf
-
-    pairs: list[dict] = []
-    for key, confirmed_value in confirmed_fields.items():
-        if key not in best_doc_value:
-            continue  # 증빙에 없는 확정값 — 무결성 비교 대상 아님
-        doc_value = best_doc_value[key]
-        c_num, d_num = _coerce_number(confirmed_value), _coerce_number(doc_value)
-        numeric = c_num is not None and d_num is not None
-        pairs.append({
-            "field": key,
-            "confirmed_value": c_num if numeric else confirmed_value,
-            "document_value": d_num if numeric else doc_value,
-            "confidence": best_conf[key],
-            "value_type": "numeric" if numeric else "string",
-        })
-    return pairs

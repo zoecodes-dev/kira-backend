@@ -66,35 +66,35 @@ INSERT INTO customers (customer_id, customer_code, customer_name, country, sourc
 -- ============================================================
 -- 원청 (prime, tier0) — 공급망 트리 루트. supply_chain_map 최상위 parent로 사용.
 -- 본질은 배터리 팩 '제조사'(provider_type=manufacturer). 원청/협력사 구분은 tier0(hop0)로.
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, provider_type, completeness_score, status, risk_level) VALUES
-('a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'KIRA Energy Solutions', 'KIRA Energy Solutions', '키라에너지솔루션(주)', 'KIRA CEO', 'manufacturer', 100, 'supplier_verified', 'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, provider_type, completeness_score, status, risk_level) VALUES
+('a0000000-0000-4000-8000-000000000000', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'KIRA Energy Solutions', 'KIRA Energy Solutions', '키라에너지솔루션(주)', 'manufacturer', 100, 'supplier_verified', 'low');
 
 -- 제조사/셀
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, provider_type, completeness_score, status, risk_level) VALUES
-('a1111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양셀 제조(주)', 'Hanyang Cell Mfg',   '한양셀 제조(주)', 'Kim CEO',   'manufacturer', 92, 'supplier_verified',    'low'),
-('a7777777-7777-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '우진배터리(주)',  'Woojin Battery',     '우진배터리(주)',  'Park CEO',  'manufacturer', 90, 'supplier_verified',    'low'),
-('a8888888-8888-4000-8000-000000000008', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '우진셀(주)',      'Woojin Cell',        '우진셀(주)',      'Park CTO',  'manufacturer', 88, 'supplier_verified',    'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, provider_type, completeness_score, status, risk_level) VALUES
+('a1111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양셀 제조(주)', 'Hanyang Cell Mfg',   '한양셀 제조(주)', 'manufacturer', 92, 'supplier_verified',    'low'),
+('a7777777-7777-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '우진배터리(주)',  'Woojin Battery',     '우진배터리(주)',  'manufacturer', 90, 'supplier_verified',    'low'),
+('a8888888-8888-4000-8000-000000000008', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '우진셀(주)',      'Woojin Cell',        '우진셀(주)',      'manufacturer', 88, 'supplier_verified',    'low');
 
 -- CAM/전구체 (활물질·전구체 tier 4~5)
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, provider_type, completeness_score, status, risk_level) VALUES
-('a2222222-2222-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '동성머티리얼(주)', 'Dongsung Material', '동성머티리얼(주)', 'Choi CEO',  'manufacturer', 89, 'supplier_verified',    'low'),
-('a4444444-4444-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '대성정밀(주)',     'Daesung Precision', '대성정밀(주)',     'Lee CEO',   'manufacturer', 55, 'supplier_review',      'medium'),
-('a6666666-6666-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '청정전구체(주)',   'Cheongjeong Precursor','청정전구체(주)', 'Jung CEO',  'manufacturer', 85, 'supplier_verified',    'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, provider_type, completeness_score, status, risk_level) VALUES
+('a2222222-2222-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '동성머티리얼(주)', 'Dongsung Material', '동성머티리얼(주)', 'manufacturer', 89, 'supplier_verified',    'low'),
+('a4444444-4444-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '대성정밀(주)',     'Daesung Precision', '대성정밀(주)',     'manufacturer', 55, 'supplier_review',      'medium'),
+('a6666666-6666-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '청정전구체(주)',   'Cheongjeong Precursor','청정전구체(주)', 'manufacturer', 85, 'supplier_verified',    'low');
 
 -- 제련·정제 (tier 6)
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, provider_type, completeness_score, status, risk_level) VALUES
-('aaaaaaaa-aaaa-4000-8000-00000000000a', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한중제련(주)',    'Hanjung Refinery',  '한중제련(주)',    'Yoon CEO',  'smelter', 80, 'supplier_verified',    'low'),
-('acacacac-acac-4000-8000-0000000000ac', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xinjiang Nickel Refinery', 'Xinjiang Nickel Refinery', NULL, 'Wang CEO', 'smelter', 60, 'supplier_review', 'high');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, provider_type, completeness_score, status, risk_level) VALUES
+('aaaaaaaa-aaaa-4000-8000-00000000000a', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한중제련(주)',    'Hanjung Refinery',  '한중제련(주)',    'smelter', 80, 'supplier_verified',    'low'),
+('acacacac-acac-4000-8000-0000000000ac', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xinjiang Nickel Refinery', 'Xinjiang Nickel Refinery', NULL, 'smelter', 60, 'supplier_review', 'high');
 
 -- 제련소 세부(RMI 기준): 검증완료 = RMAP conformant → rmi / 고위험 신장 = private.
 UPDATE suppliers SET smelter_type = 'rmi'     WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a';
 UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id = 'acacacac-acac-4000-8000-0000000000ac';
 
 -- 광산 (tier 7)
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, provider_type, completeness_score, status, risk_level) VALUES
-('a3333333-3333-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '호주리튬광업', 'Australia Lithium Mining', NULL, 'Smith CEO', 'miner', 86, 'supplier_verified',  'low'),
-('a9999999-9999-4000-8000-000000000009', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '칠레리튬광업', 'Chile Lithium Mining',     NULL, 'Garcia CEO','miner', 84, 'supplier_verified',  'low'),
-('a5555555-5555-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Global Mining Corp', 'Global Mining Corp', NULL, 'Zhang CEO', 'miner', 35, 'supplier_violation', 'critical');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, provider_type, completeness_score, status, risk_level) VALUES
+('a3333333-3333-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '호주리튬광업', 'Australia Lithium Mining', NULL, 'miner', 86, 'supplier_verified',  'low'),
+('a9999999-9999-4000-8000-000000000009', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '칠레리튬광업', 'Chile Lithium Mining',     NULL, 'miner', 84, 'supplier_verified',  'low'),
+('a5555555-5555-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Global Mining Corp', 'Global Mining Corp', NULL, 'miner', 35, 'supplier_violation', 'critical');
 
 -- 트레이더 (i4 Gray — 미확인 전구체)
 INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, completeness_score, status, risk_level) VALUES
@@ -193,7 +193,9 @@ INSERT INTO bom_versions (bom_version_id, product_id, version_number, production
 -- ============================================================
 -- 제조 탄소집약도 (EU 배터리법 Art.7)
 INSERT INTO supplier_manufacturer_details (supplier_id, manufacturing_process, energy_source, capacity, carbon_intensity) VALUES
-('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', 'renewable', '10GWh/yr', 2.3400),
+-- [작업①] 한양(데모 협력사): 규제 필드는 '서류 업로드→AI 파싱 후에만' 채워지도록 초기 빈칸.
+--   energy_source·carbon_intensity NULL (자가진단도 아래 risk_profiles에서 unknown).
+('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', NULL, '10GWh/yr', NULL),
 ('a7777777-7777-4000-8000-000000000007', 'Prismatic NCM Cell Assembly', 'renewable', '8GWh/yr', 2.5100),
 ('a2222222-2222-4000-8000-000000000002', 'CAM Sintering (NCM811)', 'mixed', '5GWh/yr', 3.1000),
 -- 대성정밀: energy_source NULL (저신뢰 파싱 원인 — Gray)
@@ -212,7 +214,7 @@ INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extra
 INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
 -- 원청 (tier0 루트) — 트리 루트 노드 색상/리스크 NULL 방지용 최소 프로필
 ('a0000000-0000-4000-8000-000000000000', 0,  'low',      'low',     FALSE, NULL, now() - interval '7 days'),
-('a1111111-1111-4000-8000-000000000001', 10, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
+('a1111111-1111-4000-8000-000000000001', 10, 'low',      'unknown', FALSE, NULL, now() - interval '7 days'),  -- [작업①] 자가진단 빈칸(업로드 후 채움)
 ('a7777777-7777-4000-8000-000000000007', 10, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
 ('a2222222-2222-4000-8000-000000000002', 15, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
 -- Global Mining: critical (신장 인접 광산 / UFLPA)
@@ -549,11 +551,20 @@ INSERT INTO data_request_log (request_id, requester_user_id, target_supplier_id,
 ('daababab-0000-4000-8000-0000000000ab', '11111111-0000-4000-8000-000000000002', 'abababab-abab-4000-8000-0000000000ab', '원산지 증빙',     now() - interval '22 days', now() - interval '8 days', 'response_escalated', 'submission_requested'),
 ('da555555-0000-4000-8000-000000000005', '11111111-0000-4000-8000-000000000002', 'a5555555-5555-4000-8000-000000000005', '탄소발자국 증빙', now() - interval '5 days',  now() - interval '1 day',  'response_responded', 'submission_submitted');
 
-INSERT INTO submission_documents (document_id, request_id, supplier_id, file_url, file_name, file_type, doc_category, file_hash, uploaded_by) VALUES
-('d0c11111-0000-4000-8000-000000000001', 'da111111-0000-4000-8000-000000000001', 'a1111111-1111-4000-8000-000000000001', 's3://kira-docs/hy_carbon.pdf',  'hy_carbon.pdf',  'pdf',  'carbon_footprint_declaration', 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90', '11111111-0000-4000-8000-000000000004'),
-('d0c44444-0000-4000-8000-000000000004', 'da444444-0000-4000-8000-000000000004', 'a4444444-4444-4000-8000-000000000004', 's3://kira-docs/ds_factory.xlsx','ds_factory.xlsx','xlsx', 'product_spec', 'b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1', '11111111-0000-4000-8000-000000000006'),
-('d0c44444-0000-4000-8000-000000000044', 'da444444-0000-4000-8000-000000000004', 'a4444444-4444-4000-8000-000000000004', 's3://kira-docs/ds_process.pdf', 'ds_process.pdf', 'pdf',  'manufacturing_process_doc', 'd4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3', '11111111-0000-4000-8000-000000000006'),
-('d0c55555-0000-4000-8000-000000000005', 'da555555-0000-4000-8000-000000000005', 'a5555555-5555-4000-8000-000000000005', 's3://kira-docs/gm_carbon.pdf',  'gm_carbon.pdf',  'pdf',  'carbon_footprint_declaration', 'c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2', '11111111-0000-4000-8000-000000000004');
+-- [협력사 홈 '오늘의 알림' 데모] 한양셀(a1111111) 대상 4대 실무 제출 항목.
+--   requested_data_type = 프론트 매핑 키(PartnerDashboard.REQUEST_META). requested_data_type은 CHECK 없는 자유 VARCHAR라 스키마 무수정.
+--   due_date는 seed(DB init) 시점 상대값 → 프론트 calcDeadlineDDay(오늘 기준)가 D+3(연체)/D-Day/D-4/D-7 산출.
+INSERT INTO data_request_log (request_id, requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date, response_status, submission_status) VALUES
+('da777777-0000-4000-8000-000000000071', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'esg_saq',              now() - interval '10 days', now() - interval '3 days', 'response_overdue',   'submission_in_progress'),
+('da777777-0000-4000-8000-000000000072', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'pcf_energy',           now() - interval '5 days',  now(),                     'response_pending',   'submission_requested'),
+('da777777-0000-4000-8000-000000000073', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'material_composition', now() - interval '4 days',  now() + interval '4 days', 'response_responded', 'submission_rework'),
+('da777777-0000-4000-8000-000000000074', '11111111-0000-4000-8000-000000000002', 'a1111111-1111-4000-8000-000000000001', 'factory_info',         now() - interval '2 days',  now() + interval '7 days', 'response_pending',   'submission_review');
+
+INSERT INTO submission_documents (document_id, request_id, supplier_id, file_url, file_name, file_type, doc_category, uploaded_by) VALUES
+('d0c11111-0000-4000-8000-000000000001', 'da111111-0000-4000-8000-000000000001', 'a1111111-1111-4000-8000-000000000001', 's3://kira-docs/hy_carbon.pdf',  'hy_carbon.pdf',  'pdf',  'carbon_footprint_declaration', '11111111-0000-4000-8000-000000000004'),
+('d0c44444-0000-4000-8000-000000000004', 'da444444-0000-4000-8000-000000000004', 'a4444444-4444-4000-8000-000000000004', 's3://kira-docs/ds_factory.xlsx','ds_factory.xlsx','xlsx', 'product_spec', '11111111-0000-4000-8000-000000000006'),
+('d0c44444-0000-4000-8000-000000000044', 'da444444-0000-4000-8000-000000000004', 'a4444444-4444-4000-8000-000000000004', 's3://kira-docs/ds_process.pdf', 'ds_process.pdf', 'pdf',  'manufacturing_process_doc', '11111111-0000-4000-8000-000000000006'),
+('d0c55555-0000-4000-8000-000000000005', 'da555555-0000-4000-8000-000000000005', 'a5555555-5555-4000-8000-000000000005', 's3://kira-docs/gm_carbon.pdf',  'gm_carbon.pdf',  'pdf',  'carbon_footprint_declaration', '11111111-0000-4000-8000-000000000004');
 
 INSERT INTO document_extraction_results (request_id, document_id, parsed_fields, confidence_map, unparsed_fields, supplier_confirmed, confirmed_at) VALUES
 ('da111111-0000-4000-8000-000000000001', 'd0c11111-0000-4000-8000-000000000001', '{"carbon_intensity":2.34,"energy_source":"renewable"}'::jsonb, '{"carbon_intensity":0.96,"energy_source":0.91}'::jsonb, '[]'::jsonb, TRUE, now() - interval '2 days'),
@@ -671,15 +682,15 @@ INSERT INTO bom_versions (bom_version_id, product_id, version_number, production
 -- 16-4. 1차 협력사 — 신규 7개 (기준정보: 회사명/사업자등록번호/주소/provider_type/
 --        핵심광물+유해물질/서류 URL) + 공장 + PIC 3명 + 제조상세 + 탄소선언 + 리스크
 -- ============================================================
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, self_assessment_doc_url, completeness_score, status, risk_level) VALUES
-('61111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '삼보배터리(주)', 'Sambo Battery Co.', '삼보배터리(주)', 'Park JH CEO', '111-86-11111', 'manufacturer', '{"Li":7.2,"Ni":80.0,"Co":10.0,"Mn":10.0,"hazardous_substances":["Pb","Cd"]}'::jsonb, 'KR', '경기도 평택시 포승읍 산업단지로 120', 's3://kira-docs/suppliers/61111111/biz_reg.pdf', 's3://kira-docs/suppliers/61111111/env_report.pdf', 's3://kira-docs/suppliers/61111111/self_assess.pdf', 88, 'supplier_verified', 'low'),
-('61222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '하나에너지셀(주)', 'Hana Energy Cell Corp', '하나에너지셀(주)', 'Choi SY CEO', '222-86-11122', 'manufacturer', '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '충청북도 청주시 흥덕구 오송읍 오송산단로 55', 's3://kira-docs/suppliers/61222222/biz_reg.pdf', 's3://kira-docs/suppliers/61222222/env_report.pdf', 's3://kira-docs/suppliers/61222222/self_assess.pdf', 91, 'supplier_verified', 'low'),
-('61333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '성진셀(주)', 'Sungjin Cell Co.', '성진셀(주)', 'Kim DH CEO', '333-86-11133', 'manufacturer', '{"Li":7.1,"Ni":79.0,"Co":11.0,"Mn":10.0}'::jsonb, 'KR', '경상남도 창원시 성산구 공단로 88', 's3://kira-docs/suppliers/61333333/biz_reg.pdf', 's3://kira-docs/suppliers/61333333/env_report.pdf', 's3://kira-docs/suppliers/61333333/self_assess.pdf', 85, 'supplier_verified', 'low'),
-('61444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '동아셀(주)', 'Donga Cell Corp', '동아셀(주)', 'Lee SB CEO', '444-86-11144', 'manufacturer', '{"Li":7.0,"Ni":78.5,"Co":11.5,"Mn":10.0}'::jsonb, 'KR', '전라남도 광양시 광양읍 산단1로 200', 's3://kira-docs/suppliers/61444444/biz_reg.pdf', 's3://kira-docs/suppliers/61444444/env_report.pdf', NULL, 78, 'supplier_in_progress', 'low'),
-('61555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한독배터리(주)', 'Handok Battery Co.', '한독배터리(주)', 'Jung KW CEO', '555-86-11155', 'manufacturer', '{"Li":7.3,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 구미시 산동읍 구미국가산단로 350', 's3://kira-docs/suppliers/61555555/biz_reg.pdf', 's3://kira-docs/suppliers/61555555/env_report.pdf', 's3://kira-docs/suppliers/61555555/self_assess.pdf', 93, 'supplier_verified', 'low'),
-('61666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '고려에너지(주)', 'Koryo Energy Corp', '고려에너지(주)', 'Han MJ CEO', '666-86-11166', 'manufacturer', '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '인천광역시 남동구 남동공단로 99', 's3://kira-docs/suppliers/61666666/biz_reg.pdf', 's3://kira-docs/suppliers/61666666/env_report.pdf', 's3://kira-docs/suppliers/61666666/self_assess.pdf', 87, 'supplier_verified', 'low'),
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, self_assessment_doc_url, completeness_score, status, risk_level) VALUES
+('61111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '삼보배터리(주)', 'Sambo Battery Co.', '삼보배터리(주)', '111-86-11111', 'manufacturer', '{"Li":7.2,"Ni":80.0,"Co":10.0,"Mn":10.0,"hazardous_substances":["Pb","Cd"]}'::jsonb, 'KR', '경기도 평택시 포승읍 산업단지로 120', 's3://kira-docs/suppliers/61111111/biz_reg.pdf', 's3://kira-docs/suppliers/61111111/env_report.pdf', 's3://kira-docs/suppliers/61111111/self_assess.pdf', 88, 'supplier_verified', 'low'),
+('61222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '하나에너지셀(주)', 'Hana Energy Cell Corp', '하나에너지셀(주)', '222-86-11122', 'manufacturer', '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '충청북도 청주시 흥덕구 오송읍 오송산단로 55', 's3://kira-docs/suppliers/61222222/biz_reg.pdf', 's3://kira-docs/suppliers/61222222/env_report.pdf', 's3://kira-docs/suppliers/61222222/self_assess.pdf', 91, 'supplier_verified', 'low'),
+('61333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '성진셀(주)', 'Sungjin Cell Co.', '성진셀(주)', '333-86-11133', 'manufacturer', '{"Li":7.1,"Ni":79.0,"Co":11.0,"Mn":10.0}'::jsonb, 'KR', '경상남도 창원시 성산구 공단로 88', 's3://kira-docs/suppliers/61333333/biz_reg.pdf', 's3://kira-docs/suppliers/61333333/env_report.pdf', 's3://kira-docs/suppliers/61333333/self_assess.pdf', 85, 'supplier_verified', 'low'),
+('61444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '동아셀(주)', 'Donga Cell Corp', '동아셀(주)', '444-86-11144', 'manufacturer', '{"Li":7.0,"Ni":78.5,"Co":11.5,"Mn":10.0}'::jsonb, 'KR', '전라남도 광양시 광양읍 산단1로 200', 's3://kira-docs/suppliers/61444444/biz_reg.pdf', 's3://kira-docs/suppliers/61444444/env_report.pdf', NULL, 78, 'supplier_in_progress', 'low'),
+('61555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한독배터리(주)', 'Handok Battery Co.', '한독배터리(주)', '555-86-11155', 'manufacturer', '{"Li":7.3,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 구미시 산동읍 구미국가산단로 350', 's3://kira-docs/suppliers/61555555/biz_reg.pdf', 's3://kira-docs/suppliers/61555555/env_report.pdf', 's3://kira-docs/suppliers/61555555/self_assess.pdf', 93, 'supplier_verified', 'low'),
+('61666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '고려에너지(주)', 'Koryo Energy Corp', '고려에너지(주)', '666-86-11166', 'manufacturer', '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '인천광역시 남동구 남동공단로 99', 's3://kira-docs/suppliers/61666666/biz_reg.pdf', 's3://kira-docs/suppliers/61666666/env_report.pdf', 's3://kira-docs/suppliers/61666666/self_assess.pdf', 87, 'supplier_verified', 'low'),
 -- 신성배터리: BMW iX(B5) 이중소싱 보조 1차사 — 온보딩 초기(서류 미비) 상태로 재현
-('61777777-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '신성배터리(주)', 'Shinsung Battery Co.', '신성배터리(주)', 'Oh JH CEO', '777-86-11177', 'manufacturer', NULL, 'KR', '경기도 화성시 향남읍 향남로 175', 's3://kira-docs/suppliers/61777777/biz_reg.pdf', NULL, NULL, 42, 'supplier_in_progress', 'low');
+('61777777-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '신성배터리(주)', 'Shinsung Battery Co.', '신성배터리(주)', '777-86-11177', 'manufacturer', NULL, 'KR', '경기도 화성시 향남읍 향남로 175', 's3://kira-docs/suppliers/61777777/biz_reg.pdf', NULL, NULL, 42, 'supplier_in_progress', 'low');
 
 INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
 ('71111111-0000-4000-8000-000000000001', '61111111-0000-4000-8000-000000000001', '평택 제1공장', 'Pyeongtaek Plant 1', 'KR', 'Pyeongtaek', ST_SetSRID(ST_MakePoint(126.996, 36.993), 4326), 'production', 'EU',   '["EU_BATTERY","EU_BATTERY_ART7","EU_BATTERY_ART47","CSDDD"]'::jsonb, 100.00),
@@ -750,13 +761,13 @@ INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level,
 -- ============================================================
 -- 16-5. 2차 협력사 — 신규 6개 (CAM 양극재 제조사)
 -- ============================================================
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
-('62111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '에코양극재(주)', 'Eco Cathode Materials', 'Yoon BK CEO', '611-86-20001', 'manufacturer', '{"Ni":55.0,"Co":8.0,"Mn":7.0}'::jsonb,   'KR', '충청남도 천안시 서북구 성환읍 성환산단로 30', 's3://kira-docs/suppliers/62111111/biz_reg.pdf', 's3://kira-docs/suppliers/62111111/env_report.pdf', 82, 'supplier_verified',    'low'),
-('62222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '포스피케미칼(주)', 'PospiChem Co.', 'Shin TH CEO', '622-86-20002', 'manufacturer', '{"Ni":53.0,"Co":8.5,"Mn":8.5}'::jsonb, 'KR', '경상북도 포항시 남구 오천읍 포항산단4로 10', 's3://kira-docs/suppliers/62222222/biz_reg.pdf', 's3://kira-docs/suppliers/62222222/env_report.pdf', 79, 'supplier_verified',    'low'),
-('62333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '신진CAM(주)', 'Sinjin CAM Co.', 'Kwak MS CEO', '633-86-20003', 'manufacturer', '{"Ni":54.0,"Co":9.0,"Mn":8.0}'::jsonb,      'KR', '전라북도 군산시 소룡동 군산국가산단로 88', NULL,                                              NULL,                                              68, 'supplier_in_progress', 'low'),
-('62444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한라소재(주)', 'Halla Materials Co.', 'Kwon YS CEO', '644-86-20004', 'manufacturer', '{"Ni":52.0,"Co":9.5,"Mn":8.5}'::jsonb,   'KR', '경상남도 거제시 장승포동 거제산단로 15', 's3://kira-docs/suppliers/62444444/biz_reg.pdf', 's3://kira-docs/suppliers/62444444/env_report.pdf', 75, 'supplier_verified',    'low'),
-('62555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '대한CAM(주)', 'Daehan CAM Co.', 'Baek JW CEO', '655-86-20005', 'manufacturer', '{"Ni":55.5,"Co":8.0,"Mn":6.5}'::jsonb,    'KR', '울산광역시 남구 매암동 울산산단로 210', 's3://kira-docs/suppliers/62555555/biz_reg.pdf', 's3://kira-docs/suppliers/62555555/env_report.pdf', 80, 'supplier_verified',    'low'),
-('62666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '청우CAM(주)', 'Cheongwoo CAM Co.', 'Nam HJ CEO', '666-86-20006', 'manufacturer', '{"Ni":53.5,"Co":8.8,"Mn":7.7}'::jsonb,   'KR', '경기도 이천시 부발읍 이천산단로 44', NULL,                                              NULL,                                              60, 'supplier_in_progress', 'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('62111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '에코양극재(주)', 'Eco Cathode Materials', '611-86-20001', 'manufacturer', '{"Ni":55.0,"Co":8.0,"Mn":7.0}'::jsonb,   'KR', '충청남도 천안시 서북구 성환읍 성환산단로 30', 's3://kira-docs/suppliers/62111111/biz_reg.pdf', 's3://kira-docs/suppliers/62111111/env_report.pdf', 82, 'supplier_verified',    'low'),
+('62222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '포스피케미칼(주)', 'PospiChem Co.', '622-86-20002', 'manufacturer', '{"Ni":53.0,"Co":8.5,"Mn":8.5}'::jsonb, 'KR', '경상북도 포항시 남구 오천읍 포항산단4로 10', 's3://kira-docs/suppliers/62222222/biz_reg.pdf', 's3://kira-docs/suppliers/62222222/env_report.pdf', 79, 'supplier_verified',    'low'),
+('62333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '신진CAM(주)', 'Sinjin CAM Co.', '633-86-20003', 'manufacturer', '{"Ni":54.0,"Co":9.0,"Mn":8.0}'::jsonb,      'KR', '전라북도 군산시 소룡동 군산국가산단로 88', NULL,                                              NULL,                                              68, 'supplier_in_progress', 'low'),
+('62444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한라소재(주)', 'Halla Materials Co.', '644-86-20004', 'manufacturer', '{"Ni":52.0,"Co":9.5,"Mn":8.5}'::jsonb,   'KR', '경상남도 거제시 장승포동 거제산단로 15', 's3://kira-docs/suppliers/62444444/biz_reg.pdf', 's3://kira-docs/suppliers/62444444/env_report.pdf', 75, 'supplier_verified',    'low'),
+('62555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '대한CAM(주)', 'Daehan CAM Co.', '655-86-20005', 'manufacturer', '{"Ni":55.5,"Co":8.0,"Mn":6.5}'::jsonb,    'KR', '울산광역시 남구 매암동 울산산단로 210', 's3://kira-docs/suppliers/62555555/biz_reg.pdf', 's3://kira-docs/suppliers/62555555/env_report.pdf', 80, 'supplier_verified',    'low'),
+('62666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '청우CAM(주)', 'Cheongwoo CAM Co.', '666-86-20006', 'manufacturer', '{"Ni":53.5,"Co":8.8,"Mn":7.7}'::jsonb,   'KR', '경기도 이천시 부발읍 이천산단로 44', NULL,                                              NULL,                                              60, 'supplier_in_progress', 'low');
 
 INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
 ('72111111-0000-4000-8000-000000000001', '62111111-0000-4000-8000-000000000001', '천안 양극재공장', 'Cheonan CAM Plant', 'KR', 'Cheonan', ST_SetSRID(ST_MakePoint(127.100, 36.810), 4326), 'processing', 'BOTH', '["EU_BATTERY","CRMA","EU_BATTERY_ART7"]'::jsonb, 100.00),
@@ -793,13 +804,13 @@ INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level,
 -- ============================================================
 -- 16-6. 3차 협력사 — 신규 6개 (전구체 제조사)
 -- ============================================================
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
-('63111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '동신전구체(주)', 'Dongsin Precursor Corp', 'Bae CW CEO', '611-86-30001', 'manufacturer', '{"Ni":50.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '전라북도 군산시 소룡동 군산국가산단로 90', 's3://kira-docs/suppliers/63111111/biz_reg.pdf', 's3://kira-docs/suppliers/63111111/env_report.pdf', 74, 'supplier_verified',    'low'),
-('63222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '대성전구체(주)', 'Daesung Precursor Materials', 'Han SK CEO', '622-86-30002', 'manufacturer', '{"Ni":48.0,"Co":11.0,"Mn":11.0}'::jsonb, 'KR', '경기도 화성시 정남면 화성산단로 60', NULL, NULL, 55, 'supplier_review', 'medium'),
-('63333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한중정밀화학(주)', 'Hanjung Precision Chemical', 'Ma YL CEO', '633-86-30003', 'manufacturer', '{"Ni":51.0,"Co":9.5,"Mn":9.5}'::jsonb, 'KR', '경상북도 포항시 남구 포항산단로 200', 's3://kira-docs/suppliers/63333333/biz_reg.pdf', 's3://kira-docs/suppliers/63333333/env_report.pdf', 76, 'supplier_verified', 'low'),
-('63444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '세종프리커서(주)', 'Sejong Precursor Co.', 'Cho HY CEO', '644-86-30004', 'manufacturer', '{"Ni":49.5,"Co":10.5,"Mn":10.0}'::jsonb, 'KR', '세종특별자치시 소정면 세종산단로 15', 's3://kira-docs/suppliers/63444444/biz_reg.pdf', 's3://kira-docs/suppliers/63444444/env_report.pdf', 71, 'supplier_verified', 'low'),
-('63555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '남해케미칼(주)', 'Namhae Chemical Co.', 'Yang JS CEO', '655-86-30005', 'manufacturer', '{"Ni":50.5,"Co":9.8,"Mn":9.7}'::jsonb, 'KR', '경상남도 남해군 서면 남해산단로 8', NULL, NULL, 58, 'supplier_in_progress', 'low'),
-('63666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '은성정밀소재(주)', 'Eunsung Precision Materials', 'Ko DW CEO', '666-86-30006', 'manufacturer', '{"Ni":52.5,"Co":9.0,"Mn":8.5}'::jsonb, 'KR', '충청남도 아산시 인주면 아산산단로 33', 's3://kira-docs/suppliers/63666666/biz_reg.pdf', 's3://kira-docs/suppliers/63666666/env_report.pdf', 73, 'supplier_verified', 'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('63111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '동신전구체(주)', 'Dongsin Precursor Corp', '611-86-30001', 'manufacturer', '{"Ni":50.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '전라북도 군산시 소룡동 군산국가산단로 90', 's3://kira-docs/suppliers/63111111/biz_reg.pdf', 's3://kira-docs/suppliers/63111111/env_report.pdf', 74, 'supplier_verified',    'low'),
+('63222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '대성전구체(주)', 'Daesung Precursor Materials', '622-86-30002', 'manufacturer', '{"Ni":48.0,"Co":11.0,"Mn":11.0}'::jsonb, 'KR', '경기도 화성시 정남면 화성산단로 60', NULL, NULL, 55, 'supplier_review', 'medium'),
+('63333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한중정밀화학(주)', 'Hanjung Precision Chemical', '633-86-30003', 'manufacturer', '{"Ni":51.0,"Co":9.5,"Mn":9.5}'::jsonb, 'KR', '경상북도 포항시 남구 포항산단로 200', 's3://kira-docs/suppliers/63333333/biz_reg.pdf', 's3://kira-docs/suppliers/63333333/env_report.pdf', 76, 'supplier_verified', 'low'),
+('63444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '세종프리커서(주)', 'Sejong Precursor Co.', '644-86-30004', 'manufacturer', '{"Ni":49.5,"Co":10.5,"Mn":10.0}'::jsonb, 'KR', '세종특별자치시 소정면 세종산단로 15', 's3://kira-docs/suppliers/63444444/biz_reg.pdf', 's3://kira-docs/suppliers/63444444/env_report.pdf', 71, 'supplier_verified', 'low'),
+('63555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '남해케미칼(주)', 'Namhae Chemical Co.', '655-86-30005', 'manufacturer', '{"Ni":50.5,"Co":9.8,"Mn":9.7}'::jsonb, 'KR', '경상남도 남해군 서면 남해산단로 8', NULL, NULL, 58, 'supplier_in_progress', 'low'),
+('63666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '은성정밀소재(주)', 'Eunsung Precision Materials', '666-86-30006', 'manufacturer', '{"Ni":52.5,"Co":9.0,"Mn":8.5}'::jsonb, 'KR', '충청남도 아산시 인주면 아산산단로 33', 's3://kira-docs/suppliers/63666666/biz_reg.pdf', 's3://kira-docs/suppliers/63666666/env_report.pdf', 73, 'supplier_verified', 'low');
 
 INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
 ('73111111-0000-4000-8000-000000000001', '63111111-0000-4000-8000-000000000001', '군산 전구체공장', 'Gunsan Precursor Plant', 'KR', 'Gunsan',   ST_SetSRID(ST_MakePoint(126.715, 35.965), 4326), 'processing', 'EU',   '["EU_BATTERY","CRMA"]'::jsonb, 100.00),
@@ -829,12 +840,12 @@ INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level,
 -- ============================================================
 -- 16-7. 4차 협력사 — 신규 5개 (제련/정제, smelter)
 -- ============================================================
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
-('64111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '고려제련(주)', 'Koryo Smelting Corp', 'Jang YB CEO', 'smelter', '{"Ni":99.5,"Co":99.8}'::jsonb, 'KR', '경상남도 울산시 울주군 온산읍 온산공단로 55', 's3://kira-docs/suppliers/64111111/biz_reg.pdf', NULL, 80, 'supplier_verified', 'low'),
-('64222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PT Indosel Nickel Refinery', 'PT Indosel Nickel Refinery', 'Budi Hartono CEO', 'smelter', '{"Ni":99.2}'::jsonb, 'ID', 'Sulawesi Tengah, Morowali Industrial Park', 's3://kira-docs/suppliers/64222222/biz_reg.pdf', NULL, 55, 'supplier_review', 'medium'),
-('64333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'AusRef Processing Pty Ltd', 'AusRef Processing Pty Ltd', 'James Wilson CEO', 'smelter', '{"Ni":99.7}'::jsonb, 'AU', 'Western Australia, Kwinana Industrial Area', 's3://kira-docs/suppliers/64333333/biz_reg.pdf', 's3://kira-docs/suppliers/64333333/env_report.pdf', 78, 'supplier_verified', 'low'),
-('64444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Zambia Copper & Cobalt Refinery', 'Zambia Copper & Cobalt Refinery', 'Emmanuel Banda CEO', 'smelter', '{"Co":85.0,"Ni":10.0}'::jsonb, 'ZM', 'Copperbelt Province, Kitwe Industrial Area', 's3://kira-docs/suppliers/64444444/biz_reg.pdf', NULL, 50, 'supplier_review', 'medium'),
-('64555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Brazil Nickel Refining SA', 'Brazil Nickel Refining SA', 'Carlos Silva CEO', 'smelter', '{"Ni":99.4}'::jsonb, 'BR', 'Goiás State, Niquelândia Industrial Zone', 's3://kira-docs/suppliers/64555555/biz_reg.pdf', 's3://kira-docs/suppliers/64555555/env_report.pdf', 77, 'supplier_verified', 'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('64111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '고려제련(주)', 'Koryo Smelting Corp', 'smelter', '{"Ni":99.5,"Co":99.8}'::jsonb, 'KR', '경상남도 울산시 울주군 온산읍 온산공단로 55', 's3://kira-docs/suppliers/64111111/biz_reg.pdf', NULL, 80, 'supplier_verified', 'low'),
+('64222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PT Indosel Nickel Refinery', 'PT Indosel Nickel Refinery', 'smelter', '{"Ni":99.2}'::jsonb, 'ID', 'Sulawesi Tengah, Morowali Industrial Park', 's3://kira-docs/suppliers/64222222/biz_reg.pdf', NULL, 55, 'supplier_review', 'medium'),
+('64333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'AusRef Processing Pty Ltd', 'AusRef Processing Pty Ltd', 'smelter', '{"Ni":99.7}'::jsonb, 'AU', 'Western Australia, Kwinana Industrial Area', 's3://kira-docs/suppliers/64333333/biz_reg.pdf', 's3://kira-docs/suppliers/64333333/env_report.pdf', 78, 'supplier_verified', 'low'),
+('64444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Zambia Copper & Cobalt Refinery', 'Zambia Copper & Cobalt Refinery', 'smelter', '{"Co":85.0,"Ni":10.0}'::jsonb, 'ZM', 'Copperbelt Province, Kitwe Industrial Area', 's3://kira-docs/suppliers/64444444/biz_reg.pdf', NULL, 50, 'supplier_review', 'medium'),
+('64555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Brazil Nickel Refining SA', 'Brazil Nickel Refining SA', 'smelter', '{"Ni":99.4}'::jsonb, 'BR', 'Goiás State, Niquelândia Industrial Zone', 's3://kira-docs/suppliers/64555555/biz_reg.pdf', 's3://kira-docs/suppliers/64555555/env_report.pdf', 77, 'supplier_verified', 'low');
 
 UPDATE suppliers SET smelter_type = 'rmi'     WHERE supplier_id IN ('64111111-0000-4000-8000-000000000001', '64333333-0000-4000-8000-000000000003', '64555555-0000-4000-8000-000000000005');
 UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id IN ('64222222-0000-4000-8000-000000000002', '64444444-0000-4000-8000-000000000004');
@@ -864,12 +875,12 @@ INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level,
 -- ============================================================
 -- 16-8. 5차 협력사 — 신규 5개 (광산, miner)
 -- ============================================================
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, country, address, business_reg_doc_url, completeness_score, status, risk_level) VALUES
-('65111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Sulawesi Nickel Mining Corp', 'Sulawesi Nickel Mining Corp', 'Andi Wijaya CEO', 'miner', 'ID', 'Sulawesi Tengah, Morowali Mining District', NULL, 40, 'supplier_in_progress', 'medium'),
-('65222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Weda Bay Nickel Mine', 'Weda Bay Nickel Mine', 'Liu Wei CEO', 'miner', 'ID', 'North Maluku, Weda Bay Industrial Park', NULL, 35, 'supplier_review', 'medium'),
-('65333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Western Australia Nickel Mine Pty Ltd', 'Western Australia Nickel Mine Pty Ltd', 'Sarah Thompson CEO', 'miner', 'AU', 'Western Australia, Kalgoorlie Mining District', 's3://kira-docs/suppliers/65333333/biz_reg.pdf', 68, 'supplier_verified', 'low'),
-('65444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Zambia Copperbelt Cobalt Mine', 'Zambia Copperbelt Cobalt Mine', 'Joseph Mwansa CEO', 'miner', 'ZM', 'Copperbelt Province, Chililabombwe Mining Zone', NULL, 30, 'supplier_in_progress', 'medium'),
-('65555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Brazil Nickel Laterite Mine', 'Brazil Nickel Laterite Mine', 'Paulo Almeida CEO', 'miner', 'BR', 'Goiás State, Niquelândia Mining District', 's3://kira-docs/suppliers/65555555/biz_reg.pdf', 65, 'supplier_verified', 'low');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, country, address, business_reg_doc_url, completeness_score, status, risk_level) VALUES
+('65111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Sulawesi Nickel Mining Corp', 'Sulawesi Nickel Mining Corp', 'miner', 'ID', 'Sulawesi Tengah, Morowali Mining District', NULL, 40, 'supplier_in_progress', 'medium'),
+('65222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Weda Bay Nickel Mine', 'Weda Bay Nickel Mine', 'miner', 'ID', 'North Maluku, Weda Bay Industrial Park', NULL, 35, 'supplier_review', 'medium'),
+('65333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Western Australia Nickel Mine Pty Ltd', 'Western Australia Nickel Mine Pty Ltd', 'miner', 'AU', 'Western Australia, Kalgoorlie Mining District', 's3://kira-docs/suppliers/65333333/biz_reg.pdf', 68, 'supplier_verified', 'low'),
+('65444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Zambia Copperbelt Cobalt Mine', 'Zambia Copperbelt Cobalt Mine', 'miner', 'ZM', 'Copperbelt Province, Chililabombwe Mining Zone', NULL, 30, 'supplier_in_progress', 'medium'),
+('65555555-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Brazil Nickel Laterite Mine', 'Brazil Nickel Laterite Mine', 'miner', 'BR', 'Goiás State, Niquelândia Mining District', 's3://kira-docs/suppliers/65555555/biz_reg.pdf', 65, 'supplier_verified', 'low');
 
 INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
 ('75111111-0000-4000-8000-000000000001', '65111111-0000-4000-8000-000000000001', 'Sulawesi Nickel Mine',      'Sulawesi Nickel Mine',      'ID', 'Sulawesi',   ST_SetSRID(ST_MakePoint(121.700, -1.950), 4326),  'mining', 'BOTH', '["CRMA","CONFLICT_MINERALS","EUDR"]'::jsonb, 100.00),
@@ -2056,10 +2067,10 @@ INSERT INTO parts (part_id, part_code, part_name, tier_level, parent_part_id, hs
 ('b1111111-0000-4000-8000-000000000015', 'MIN-GRAPHITE',  'Natural Graphite Ore (Flake)',  6, 'b1111111-0000-4000-8000-000000000014', '250410', 'mineral',        6.0000, 'ERP_PLM', 'ERP-PART-MINGR');
 
 -- 협력사 3개사 (2차 음극재 제조 / 3차 구형화 가공 / 4차 천연흑연 광산)
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
-('66111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한빛음극재(주)', 'Hanbit Anode Materials', 'Seo YJ CEO', '661-86-30001', 'manufacturer', '{"graphite_natural":88.0,"graphite_synthetic":12.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단로 77', 's3://kira-docs/suppliers/66111111/biz_reg.pdf', 's3://kira-docs/suppliers/66111111/env_report.pdf', 84, 'supplier_verified', 'low'),
-('66222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Qingdao Spherical Graphite Co.', 'Qingdao Spherical Graphite Co.', 'Chen CEO', NULL, 'smelter', '{"graphite_natural":95.0}'::jsonb, 'CN', 'Laixi Graphite Industrial Park, Qingdao, Shandong', 's3://kira-docs/suppliers/66222222/biz_reg.pdf', NULL, 71, 'supplier_verified', 'low'),
-('66333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Balama Graphite Mining SA', 'Balama Graphite Mining SA', 'Machel CEO', NULL, 'miner', NULL, 'MZ', 'Balama District, Cabo Delgado Province', 's3://kira-docs/suppliers/66333333/biz_reg.pdf', NULL, 58, 'supplier_verified', 'medium');
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('66111111-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한빛음극재(주)', 'Hanbit Anode Materials', '661-86-30001', 'manufacturer', '{"graphite_natural":88.0,"graphite_synthetic":12.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단로 77', 's3://kira-docs/suppliers/66111111/biz_reg.pdf', 's3://kira-docs/suppliers/66111111/env_report.pdf', 84, 'supplier_verified', 'low'),
+('66222222-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Qingdao Spherical Graphite Co.', 'Qingdao Spherical Graphite Co.', NULL, 'smelter', '{"graphite_natural":95.0}'::jsonb, 'CN', 'Laixi Graphite Industrial Park, Qingdao, Shandong', 's3://kira-docs/suppliers/66222222/biz_reg.pdf', NULL, 71, 'supplier_verified', 'low'),
+('66333333-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Balama Graphite Mining SA', 'Balama Graphite Mining SA', NULL, 'miner', NULL, 'MZ', 'Balama District, Cabo Delgado Province', 's3://kira-docs/suppliers/66333333/biz_reg.pdf', NULL, 58, 'supplier_verified', 'medium');
 
 INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
 ('76111111-0000-4000-8000-000000000001', '66111111-0000-4000-8000-000000000001', '포항 음극재공장', 'Pohang Anode Plant', 'KR', 'Pohang', ST_SetSRID(ST_MakePoint(129.385, 36.077), 4326), 'production', 'BOTH', '["EU_BATTERY","EU_BATTERY_ART7","EU_BATTERY_ART47","CSDDD"]'::jsonb, 100.00),
@@ -2209,12 +2220,12 @@ WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id 
 -- ============================================================
 
 -- 26-1. 형제 광산 supplier (miner)
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, country, address, business_reg_doc_url, completeness_score, status, risk_level) VALUES
-('d5000000-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Morowali Nickel Mine 2', 'Morowali Nickel Mine 2', 'Rudi Salim CEO',       'miner', 'ID', 'Sulawesi Tengah, Morowali Mining District B', NULL, 32, 'supplier_review',      'medium'),
-('d6000000-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Obi Island Nickel Mine', 'Obi Island Nickel Mine', 'Hendra Gunawan CEO',  'miner', 'ID', 'North Maluku, Obi Island Mining Zone',        NULL, 30, 'supplier_in_progress', 'medium'),
-('d7000000-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Mt Keith Nickel Mine',   'Mt Keith Nickel Mine',   'David Brown CEO',     'miner', 'AU', 'Western Australia, Mt Keith Mining District', 's3://kira-docs/suppliers/d7000000/biz_reg.pdf', 66, 'supplier_verified', 'low'),
-('d8000000-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kolwezi Cobalt Mine',    'Kolwezi Cobalt Mine',    'Jean-Pierre Mbaya CEO','miner', 'CD', 'Lualaba Province, Kolwezi Mining Zone',       NULL, 25, 'supplier_review',      'high'),
-('d9000000-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Barro Alto Nickel Mine', 'Barro Alto Nickel Mine', 'Ricardo Souza CEO',   'miner', 'BR', 'Goiás State, Barro Alto Mining District',     's3://kira-docs/suppliers/d9000000/biz_reg.pdf', 64, 'supplier_verified', 'low')
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, country, address, business_reg_doc_url, completeness_score, status, risk_level) VALUES
+('d5000000-0000-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Morowali Nickel Mine 2', 'Morowali Nickel Mine 2', 'miner', 'ID', 'Sulawesi Tengah, Morowali Mining District B', NULL, 32, 'supplier_review',      'medium'),
+('d6000000-0000-4000-8000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Obi Island Nickel Mine', 'Obi Island Nickel Mine', 'miner', 'ID', 'North Maluku, Obi Island Mining Zone',        NULL, 30, 'supplier_in_progress', 'medium'),
+('d7000000-0000-4000-8000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Mt Keith Nickel Mine',   'Mt Keith Nickel Mine',   'miner', 'AU', 'Western Australia, Mt Keith Mining District', 's3://kira-docs/suppliers/d7000000/biz_reg.pdf', 66, 'supplier_verified', 'low'),
+('d8000000-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kolwezi Cobalt Mine',    'Kolwezi Cobalt Mine',    'miner', 'CD', 'Lualaba Province, Kolwezi Mining Zone',       NULL, 25, 'supplier_review',      'high'),
+('d9000000-0000-4000-8000-000000000005', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Barro Alto Nickel Mine', 'Barro Alto Nickel Mine', 'miner', 'BR', 'Goiás State, Barro Alto Mining District',     's3://kira-docs/suppliers/d9000000/biz_reg.pdf', 64, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
 
 -- 26-2. 광산 사업장 (factory_role='mining' — 광산이 곧 사업장)
@@ -2326,9 +2337,9 @@ WHERE s.provider_type = 'miner'
 -- ============================================================
 
 -- 28-1. 신규 망간(Mn) 제련소 + 광산 (기존에 Mn 노드 부재 — 트리 완성용)
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, ceo_name, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
-('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'Zhao Lei CEO', 'smelter', '{"Mn":32.5}'::jsonb, 'CN', 'Hunan, Xiangtan Manganese Industrial Zone, China', 's3://kira-docs/suppliers/64666666/biz_reg.pdf', NULL, 74, 'supplier_verified', 'low'),
-('65666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'Pieter Botha CEO', 'miner', '{"Mn":38.0}'::jsonb, 'ZA', 'Northern Cape, Kalahari Manganese Field, South Africa', 's3://kira-docs/suppliers/65666666/biz_reg.pdf', NULL, 60, 'supplier_verified', 'low')
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'smelter', '{"Mn":32.5}'::jsonb, 'CN', 'Hunan, Xiangtan Manganese Industrial Zone, China', 's3://kira-docs/suppliers/64666666/biz_reg.pdf', NULL, 74, 'supplier_verified', 'low'),
+('65666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'miner', '{"Mn":38.0}'::jsonb, 'ZA', 'Northern Cape, Kalahari Manganese Field, South Africa', 's3://kira-docs/suppliers/65666666/biz_reg.pdf', NULL, 60, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
 UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id = '64666666-0000-4000-8000-000000000006';
 
@@ -2587,17 +2598,28 @@ ON CONFLICT DO NOTHING;
 
 
 -- ============================================================
--- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형) 1곳만
+-- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형) + 2차(하위 협력사) 데모
 -- ============================================================
--- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유)"만 있는 단순 공급망을
---   보여주기 위한 전용 데이터셋. 실 iX3(d1111111)는 안 건드리고 복제 제품을 새로 만든다.
---   실 데이터와 유사하되 이름만 살짝 변형(한양셀 제조(주) → 한양배터리셀(주)).
---   구성은 최소한 — 회사명 + 서류(사업자등록증/환경성적서 URL)만. 공장/담당자/탄소선언 생략.
+-- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유) + 2차 협력사 1곳"
+--   구성의 공급망을 보여주기 위한 전용 데이터셋. 실 iX3(d1111111)는 안 건드리고
+--   복제 제품을 새로 만든다. 실 데이터와 유사하되 이름만 살짝 변형(한양셀 제조(주)
+--   → 한양배터리셀(주)). 2차(한양테스트하위)는 PM테스트협력사02와 동일한 패턴
+--   (엣지만 있고 동의서/자료요청은 미리 만들지 않음)으로 심어 STEP3(메일 발송)·
+--   STEP4(수신 확인)를 실제로 거쳐야 노출되게 한다.
+--   [PM테스트협력사와 동일하게 미검증 시작 단계로 통일] 맵 status='building' + 엣지
+--   link_status='supplychain_declared' + verification_status='unverified' —
+--   STEP2(Pool 확정)·STEP4(수신확인)를 실제로 클릭해서 진행해야 하는 상태로 시작한다.
 
 -- 32-1. 1차 협력사(한양셀 변형) — 환경성적서 + 사업자등록증 DB 보유(핵심 요건).
 INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
-('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', 'Kim CEO', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 남구 포항산단로 51', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
+('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', 'Kim CEO', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단남로117번길 71', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
+
+-- 32-1b. 담당자(PIC) — building 상태로 바뀌면서 STEP3(메일 발송)을 실제로 거치므로,
+--   수신자 이메일 자동 채움(InviteMailModal)이 동작하도록 대표 담당자 1명 추가.
+INSERT INTO supplier_contacts (supplier_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('a5111111-1111-4000-8000-000000000001', '김서준', 'Kim SJ', 'ESG 담당자', 'ESG팀', 'sj.kim@hanyangbattery.demo', '+82-54-711-5101', TRUE, 'ko')
+ON CONFLICT DO NOTHING;
 
 -- 32-2. iX3 복제 제품(실 iX3와 사양 동일, 이름/코드만 데모 표기).
 INSERT INTO products (product_id, product_code, product_name, manufacturer_id, tenant_id, customer_id, model_name, amperage_ah, type, source_system, external_id) VALUES
@@ -2609,19 +2631,27 @@ INSERT INTO bom_versions (bom_version_id, product_id, version_number, production
 ('e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', '1.0', '2025-01-01', NULL, 'active', 'MANUAL_DEMO', 'DEMO-BOM-IX3')
 ON CONFLICT (bom_version_id) DO NOTHING;
 
--- 32-4. BOM 항목 — 기존 부품 재사용(루트 Pack ...01, 1차 Module ...02).
+-- 32-4. BOM 항목 — 기존 부품 재사용(루트 Pack ...01, 1차 Module ...02, 2차 Cell ...03).
 INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, origin_country, source_system, external_id) VALUES
 ('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000001', 1,   'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-PACK'),
-('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-MOD')
+('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-MOD'),
+('e5111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000003', 100, 'ea', 100.00, 'KR', 'MANUAL_DEMO', 'DEMO-BI-IX3-CELL')
 ON CONFLICT DO NOTHING;
 
--- 32-5. 공급망 맵 헤더(completed — 1차까지 검증 완료 상태로 노출).
+-- 32-5. 공급망 맵 헤더(building — PM테스트협력사와 동일하게 STEP2부터 실제로 진행하는 시나리오).
 INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status) VALUES
-('55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', 'completed')
+('55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', 'building')
 ON CONFLICT (bom_version_id) DO NOTHING;
 
--- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀). 1차만.
+-- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀) → hop2(한양테스트하위).
+--   hop0(원청 자신)은 link_status만 confirmed(=원청은 Pool 확정 대상이 아님), verification은
+--   unverified로 시작 — PM테스트협력사 hop0 시드와 동일한 패턴.
+--   hop1(한양배터리셀)은 link_status='supplychain_declared'(Pool 미확정) +
+--   verification_status='unverified'(수신 미확인)로 시작해 STEP2·STEP4를 직접 진행해야 한다.
+--   hop2(한양테스트하위)는 PM02와 동일하게 엣지만 있고 동의서/자료요청은 안 만든다 —
+--   그래야 노출됐을 때 STEP3(메일 발송)이 미완료로 잡혀 실제로 메일을 보내야 한다.
 INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
-('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'verified', '2025-01-01', '2025-12-31'),
-('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_confirmed', 'ERP', 'verified', '2025-01-01', '2025-12-31')
+('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
+('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
+('55511111-0000-4000-8000-000000000012', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2025-01-01', '2025-12-31')
 ON CONFLICT (edge_id) DO NOTHING;

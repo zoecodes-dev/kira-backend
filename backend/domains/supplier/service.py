@@ -406,6 +406,9 @@ async def update_supplier_detail(
             fields.pop("country")
     manuf = {k: fields.pop(k) for k in ("carbon_intensity", "energy_source") if k in fields}
     self_risk = fields.pop("self_reported_risk_level", None)
+    # 탄소발자국 문서 — suppliers에 대응 컬럼이 없으므로(스키마 무수정) update로 보내지 않고
+    # 커밋 후 파싱 이벤트만 발행한다(핸들러가 doc_category=carbon_footprint_declaration로 매핑).
+    carbon_doc = fields.pop("carbon_footprint_doc_url", None)
     if fields:                         # 나머지는 suppliers 컬럼(core_minerals 포함)
         await repository.update_supplier_fields(db, supplier_id, fields)
     # [§8-J 가드] carbon_intensity/energy_source 는 supplier_manufacturer_details 소유다.
@@ -432,6 +435,17 @@ async def update_supplier_detail(
                     doc_kind=kind,
                 )),
             )
+    # 탄소발자국 문서 — 대응 suppliers 컬럼이 없어 위 루프(fields 기반)로는 안 잡히므로 별도 발행.
+    if carbon_doc:
+        await publish(
+            "SupplierDocumentUploaded",
+            dataclasses.asdict(SupplierDocumentUploadedEvent(
+                supplier_id=supplier_id,
+                s3_key=carbon_doc,
+                file_name=carbon_doc.rsplit("/", 1)[-1] if "/" in carbon_doc else carbon_doc,
+                doc_kind="carbon_footprint",
+            )),
+        )
 
     return await get_supplier_detail(db, supplier_id, tenant_id)
 
@@ -944,6 +958,14 @@ async def get_onboarding_prefill(db: AsyncSession, supplier_id: UUID) -> Optiona
             "file_name": supplier.business_reg_doc_name or supplier.business_reg_doc_url.rsplit("/", 1)[-1],
         }
 
+    # 환경성적서 — business_reg_doc과 동일 패턴. 원본 파일명 컬럼이 없어 s3 key 끝부분으로 표시.
+    environmental_report = None
+    if supplier.environmental_report_url:
+        environmental_report = {
+            "s3_key": supplier.environmental_report_url,
+            "file_name": supplier.environmental_report_url.rsplit("/", 1)[-1],
+        }
+
     return {
         "company_name": supplier.company_name,
         "provider_type": supplier.provider_type,
@@ -953,6 +975,7 @@ async def get_onboarding_prefill(db: AsyncSession, supplier_id: UUID) -> Optiona
         "address": address,
         "contact": contact,
         "business_reg_doc": business_reg_doc,
+        "environmental_report": environmental_report,
         "unverified": bool(supplier.is_unverified),
         "consent": consent,
     }
@@ -1093,48 +1116,62 @@ async def submit_onboarding(
         #   PIC+완성도)를 그대로 반복하되, 커밋은 이 트랜잭션 한 번으로 묶는다.
         invited_sub_suppliers: list[dict] = []
         for sub in body.sub_suppliers:
-            sub_supplier = await repository.create_supplier(db, {
-                "company_name": sub.company_name,
-                "provider_type": "manufacturer",  # STEP3 화면엔 유형 선택이 없어 기본값(원청이 추후 조정 가능)
-                "tenant_id": supplier.tenant_id,
-                "status": "supplier_pending",
-            })
-            db.add(SupplierRiskProfile(
-                supplier_id=sub_supplier.supplier_id,
-                overall_risk_score=0,
-                risk_level="low",
-                is_high_risk_flag=False,
-            ))
-            sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
-            db.add(SupplierOnboarding(
-                supplier_id=sub_supplier.supplier_id,
-                consent_status="consent_pending",
-                agreement_status="pending",
-                last_invited_at=datetime.now(timezone.utc),
-                sla_due_date=sub_sla_due,
-                reminder_count=0,
-            ))
-            await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
-                MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
-            ], [])
-            await recompute_completeness(db, sub_supplier.supplier_id)
-            # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
-            # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
-            await consent_repo.create(
-                db, tenant_id=supplier.tenant_id, requested_by=None,
-                body=ConsentCreateBody(
+            # 이미 같은 테넌트에 이름이 완전히 같은 협력사가 있으면(ERP/맵 시드 등으로 이미
+            # 알려진 협력사) 새로 만들지 않고 그 협력사를 재사용한다 — 안 그러면 이름은 같고
+            # ID만 다른 중복 협력사가 생겨 공급망 트리에 유령처럼 남는다.
+            existing = await repository.get_supplier_by_name(db, supplier.tenant_id, sub.company_name)
+            if existing is not None:
+                sub_supplier = existing
+            else:
+                sub_supplier = await repository.create_supplier(db, {
+                    "company_name": sub.company_name,
+                    "provider_type": "manufacturer",  # STEP3 화면엔 유형 선택이 없어 기본값(원청이 추후 조정 가능)
+                    "tenant_id": supplier.tenant_id,
+                    "status": "supplier_pending",
+                })
+            if await repository.get_risk_profile_by_supplier(db, sub_supplier.supplier_id) is None:
+                db.add(SupplierRiskProfile(
                     supplier_id=sub_supplier.supplier_id,
-                    data_scope=["company", "contacts", "factories", "carbon_epd", "origin"],
-                    purpose="EU_BATTERY",
-                    third_party_sharing=True,
-                    valid_from=datetime.now(timezone.utc).date(),
-                    form_version="v1.0",
-                ),
-            )
-            await submission_repo.create_data_request(db, DataRequestLog(
-                target_supplier_id=sub_supplier.supplier_id,
-                requested_data_type="general_info",
-            ))
+                    overall_risk_score=0,
+                    risk_level="low",
+                    is_high_risk_flag=False,
+                ))
+            sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
+            if await repository.get_onboarding_by_supplier(db, sub_supplier.supplier_id) is None:
+                db.add(SupplierOnboarding(
+                    supplier_id=sub_supplier.supplier_id,
+                    consent_status="consent_pending",
+                    agreement_status="pending",
+                    last_invited_at=datetime.now(timezone.utc),
+                    sla_due_date=sub_sla_due,
+                    reminder_count=0,
+                ))
+            # 아래(PIC 저장·동의서/자료요청 자동 생성)는 진짜 신규 협력사일 때만 한다.
+            # 재사용된 협력사(existing)는 이미 실제 담당자·이력이 따로 있을 수 있고,
+            # 특히 동의서를 여기서 미리 만들어버리면 원청이 STEP3에서 실제로 메일을
+            # 보내기도 전에 '이미 발송됨'으로 잘못 표시된다(차수 노출 게이트 오작동).
+            if existing is None:
+                await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
+                    MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
+                ], [])
+                await recompute_completeness(db, sub_supplier.supplier_id)
+                # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
+                # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
+                await consent_repo.create(
+                    db, tenant_id=supplier.tenant_id, requested_by=None,
+                    body=ConsentCreateBody(
+                        supplier_id=sub_supplier.supplier_id,
+                        data_scope=["company", "contacts", "factories", "carbon_epd", "origin"],
+                        purpose="EU_BATTERY",
+                        third_party_sharing=True,
+                        valid_from=datetime.now(timezone.utc).date(),
+                        form_version="v1.0",
+                    ),
+                )
+                await submission_repo.create_data_request(db, DataRequestLog(
+                    target_supplier_id=sub_supplier.supplier_id,
+                    requested_data_type="general_info",
+                ))
             invited_sub_suppliers.append({
                 "supplier_id": sub_supplier.supplier_id, "email": sub.email, "sla_due_date": sub_sla_due,
             })
