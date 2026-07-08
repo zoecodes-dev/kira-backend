@@ -461,9 +461,14 @@ class ProductRepository:
             active 버전이 없으면 None 반환 → service에서 404 처리.
 
         2단계 — WITH RECURSIVE CTE (depth < 5 상한)
-            bom_version_id 기준으로 루트 부품(parent_part_id IS NULL)을
-            앵커로 잡고, parent_part_id 관계를 따라 전 계층을 플랫하게 조회.
-            depth < 5 조건으로 최대 5계층 초과 무한 루프 방지.
+            bom_version_id 기준 bom_items에 선언된 부품 중 '로컬 루트'
+            (같은 버전에 부모가 함께 선언되지 않은 부품 — Pack이 선언 안 되는
+            버전이 많아 앵커가 보통 여러 개다)를 앵커로 잡고,
+            parent_part_id 관계를 따라 하위 계층을 조회한다.
+            재귀 단계도 bom_items 소속 여부로 필터링해야 한다 — 안 걸면
+            parts 전역 카탈로그 서브트리 전체가 끌려오고, 서로 다른
+            앵커의 서브트리가 같은 부품에서 다시 만나 중복 행이 생긴다.
+            depth < 5 조건은 그와 별개로 순환 참조 방어용 상한.
 
         3단계 — Python 트리 조립
             플랫한 rows를 part_id / parent_part_id 기반으로
@@ -515,9 +520,13 @@ class ProductRepository:
         #     'supplychain_confirmed' (confirmed 상태)
         #     'supplychain_declared'  (선언만 된 상태, unconfirmed)        
         #
+        # [중복 행 방지]
+        #   재귀 단계에 bom_items 소속 필터(:bom_version_id) 필수.
+        #   앵커가 로컬 루트 다건이라, 필터 없이는 다른 앵커 서브트리와
+        #   겹쳐 같은 부품이 여러 depth로 중복 조회된다.
+        #
         # [depth 상한]
-        #   depth < 5 조건 필수 — parts 자기참조 순환 참조 방어.
-        #   5계층(Pack=0 ~ 광물=4) 초과는 데이터 오염으로 간주.
+        #   depth < 5 조건 필수 — parts 자기참조 순환 참조 방어(중복 방지와는 별개).
         # ------------------------------------------------------------------
         # [결정 #2] link_status 필터 문자열 생성
         # scm.edge_id IS NULL 조건: supply_chain_map에 매핑이 없는 부품(직접 BOM 항목)도 포함.
@@ -561,6 +570,9 @@ class ProductRepository:
                 UNION ALL
 
                 -- 재귀: 직전 계층 부품의 자식 탐색 (depth < 5 상한)
+                -- bom_items 소속 필터 필수: 안 걸면 이 bom_version에 선언 안 된 부품까지
+                -- parts 전역 카탈로그를 타고 끌려오고, 앵커가 여러 개(로컬 루트 다건)라
+                -- 서로 다른 앵커 경로가 같은 부품에서 다시 만나 중복 행이 생긴다.
                 SELECT
                     p.part_id,
                     p.part_code,
@@ -571,15 +583,18 @@ class ProductRepository:
                     p.material_type,
                     p.function_purpose,
                     p.unit_price,
-                    NULL::numeric(15,4) AS required_quantity,
-                    NULL::varchar(20) AS required_quantity_unit,
-                    NULL::varchar(2) AS origin_country,
-                    NULL::numeric(15,4) AS direct_material_cost,
+                    bi.required_quantity,
+                    bi.required_quantity_unit,
+                    bi.origin_country,
+                    bi.direct_material_cost,
                     bt.depth + 1
-                FROM parts p   
+                FROM parts p
+                JOIN bom_items bi
+                   ON bi.part_id        = p.part_id
+                  AND bi.bom_version_id = :bom_version_id
                 JOIN bom_tree bt
                     ON p.parent_part_id  = bt.part_id
-                WHERE bt.depth < 5  
+                WHERE bt.depth < 5
 
             )
             SELECT * FROM bom_tree
