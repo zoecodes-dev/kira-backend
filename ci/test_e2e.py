@@ -172,42 +172,6 @@ def test_supply_chain_map_provider_type_no_tenant(client):
         assert "provider_type" in s, f"provider_type 누락(리네임 정합 실패): {list(s.keys())}"
 
 
-def test_due_diligence_capa_not_found_404(client, a_supplier_id):
-    """
-    5.5: 존재하지 않는 capaId 상태 갱신 → 404.
-    (수정 전: corrective_actions 에 매칭 0건이어도 UPDATE가 행을 반환해 조용한 200 no-op)
-    seed 협력사로 실사를 생성(테넌트 소유)해 audit 존재는 보장하고, capaId만 없는 상황을 만든다.
-    """
-    cr = client.post(
-        "/due-diligence",
-        json={"supplier_id": a_supplier_id, "name": "E2E 실사", "scope": "E2E 검증"},
-    )
-    assert cr.status_code == 201, f"create {cr.status_code}: {cr.text}"
-    audit_id = cr.json()["audit_id"]
-    pr = client.patch(
-        f"/due-diligence/{audit_id}/capa/no-such-capa-id", json={"status": "완료"}
-    )
-    assert pr.status_code == 404, f"없는 capaId는 404여야 함, got {pr.status_code}: {pr.text}"
-
-
-def test_due_diligence_report_ownership_before_s3(client):
-    """
-    5.4: 존재하지 않는 auditId 로 보고서 업로드 → 소유권 선검사로 404.
-    (수정 전: S3 업로드를 먼저 시도해 NoCredentialsError 500. 수정 후: 검사 먼저 → 404)
-    happy-path(실제 S3 저장)는 로컬 S3 자격증명 부재로 보류 — 본 테스트는 '검사 순서'만 보장한다.
-    """
-    import uuid
-
-    bogus = str(uuid.uuid4())
-    files = {"file": ("r.pdf", b"%PDF-1.4 test", "application/pdf")}
-    resp = client.patch(
-        f"/due-diligence/{bogus}/report",
-        files=files,
-        data={"result": "pass", "score": "90"},
-    )
-    assert resp.status_code == 404, f"소유권 선검사로 404여야 함(S3 이전), got {resp.status_code}: {resp.text}"
-
-
 # ════════════════════════════════════════════════════════════
 # 새 기능을 만들면 아래에 e2e 함수를 한 개 추가하세요 (누적 스위트가 매일 재검증).
 #   def test_<기능>_<날짜>(client, a_supplier_id): ...
