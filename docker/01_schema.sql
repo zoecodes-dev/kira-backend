@@ -73,7 +73,6 @@ CREATE TABLE suppliers (
     company_name_ko     VARCHAR(255),
     short_name_en       VARCHAR(100),
     short_name_ko       VARCHAR(100),
-    ceo_name            VARCHAR(100),
     business_reg_no     VARCHAR(50),
     corporate_reg_no    VARCHAR(50),
     duns_number         VARCHAR(20),
@@ -702,7 +701,6 @@ CREATE TABLE submission_documents (
             'smelter_identification', 'rmap_certificate', 'cmrt_declaration',
             'cbam_declaration', 'uflpa_documentation', 'material_composition', 'other'
         )),
-    file_hash     VARCHAR(64), -- SHA-256, document_integrity_rule(서류-폼 불일치) 대조용
     uploaded_by   UUID REFERENCES users(user_id),
     uploaded_at   TIMESTAMPTZ DEFAULT now()
 );
@@ -820,14 +818,10 @@ CREATE TABLE audit_trail (
     timestamp      TIMESTAMPTZ DEFAULT now(),
     node_type      VARCHAR(20) CONSTRAINT chk_audit_node_type CHECK (node_type IN ('agent', 'tool', 'human')),
     node_name      VARCHAR(100),
-    model_version  VARCHAR(50),
-    prompt_version VARCHAR(20),
     duration_ms    INT,
     input_hash     VARCHAR(64),
     output_hash    VARCHAR(64),
-    prev_hash      VARCHAR(64),
-    decision_text  TEXT,
-    citations      JSONB
+    prev_hash      VARCHAR(64)
 );
 
 -- [테이블 역할] 법령 개정 영향 범위 분석 결과서.
@@ -1006,7 +1000,6 @@ CREATE INDEX idx_doc_extraction_document ON document_extraction_results(document
 -- [신설] submission_documents 인덱스
 CREATE INDEX idx_submission_docs_request  ON submission_documents(request_id);
 CREATE INDEX idx_submission_docs_supplier ON submission_documents(supplier_id);
-CREATE INDEX idx_submission_docs_hash     ON submission_documents(file_hash); -- document_integrity_rule 대조용
 
 -- [신설] supplier_audit_records 워크플로우 컬럼 인덱스 (v_action_items 큐 조회 최적화)
 CREATE INDEX idx_audit_records_status     ON supplier_audit_records(audit_status) WHERE audit_status IN ('requested', 'assigned', 'in_progress');

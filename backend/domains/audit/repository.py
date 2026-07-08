@@ -216,13 +216,9 @@ async def list_package_trail(db: AsyncSession, package_id: UUID) -> list[dict]:
             timestamp,
             node_type,
             node_name,
-            model_version  AS model,
-            prompt_version,
             duration_ms,
             input_hash,
-            output_hash,
-            decision_text  AS decision,
-            COALESCE(citations, '[]'::jsonb) AS citations
+            output_hash
         FROM audit_trail
         WHERE batch_id = CAST(:package_id AS uuid)
         ORDER BY step_number ASC

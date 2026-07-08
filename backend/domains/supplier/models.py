@@ -46,7 +46,6 @@ class Supplier(Base):
     company_name_ko: Mapped[Optional[str]] = mapped_column(String(255))
     short_name_en: Mapped[Optional[str]] = mapped_column(String(100))
     short_name_ko: Mapped[Optional[str]] = mapped_column(String(100))
-    ceo_name: Mapped[Optional[str]] = mapped_column(String(100))
     business_reg_no: Mapped[Optional[str]] = mapped_column(String(50))
     corporate_reg_no: Mapped[Optional[str]] = mapped_column(String(50))
     duns_number: Mapped[Optional[str]] = mapped_column(String(20))
@@ -369,7 +368,6 @@ class SupplierDetailResponse(BaseModel):
     # 기업 기본정보 섹션용 — suppliers 테이블 컬럼(있으면 채움).
     company_name_en: Optional[str] = None
     company_name_ko: Optional[str] = None
-    ceo_name: Optional[str] = None
     business_reg_no: Optional[str] = None
     duns_number: Optional[str] = None
     website: Optional[str] = None
@@ -557,7 +555,6 @@ class MasterFormCompany(BaseModel):
     company_name_ko: Optional[str] = None
     short_name_en: Optional[str] = None
     short_name_ko: Optional[str] = None
-    ceo_name: Optional[str] = None
     business_reg_no: Optional[str] = None
     corporate_reg_no: Optional[str] = None
     duns_number: Optional[str] = None

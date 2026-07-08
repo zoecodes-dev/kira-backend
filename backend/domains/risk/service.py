@@ -7,10 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domains.risk.models import RiskProfile
 from backend.domains.risk.repository import RiskRepository
-from backend.domains.risk.state_machine import update_risk_profile_state, resolve_risk_profile
+from backend.domains.risk.state_machine import update_risk_profile_state
 from backend.infrastructure.event_bus import publish
 from backend.infrastructure.trace import trace_node
-from backend.events.types import RiskEscalatedEvent, RiskResolvedEvent
+from backend.events.types import RiskEscalatedEvent
 
 
 @trace_node(node_name="calculate_risk_score", node_type="agent")
@@ -83,44 +83,4 @@ async def calculate_risk_score(db: AsyncSession, batch_id: UUID, supplier_id: UU
         "overall_risk_score": final_score,
         "risk_level": final_level,
         "is_escalated": is_escalated
-    }
-
-
-async def resolve_risk(
-    db: AsyncSession,
-    *,
-    supplier_id: UUID,
-    resolved_by: UUID,
-    batch_id: UUID | None = None,
-    note: str | None = None,
-) -> dict:
-    """
-    협력사 리스크 종결(닫기). 가점식 점수를 0으로 리셋해 low 로 전이하고 고위험
-    플래그를 해제한 뒤 RiskResolved 이벤트를 발행한다(감사/후속 구독용).
-
-    RiskEscalated(오름)의 대칭 축 — 기존엔 리스크를 '닫는' 경로가 없었다.
-    """
-    profile = await RiskRepository.get_by_supplier_id(db, supplier_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail=f"리스크 프로필을 찾을 수 없습니다 (supplier_id={supplier_id}).")
-
-    resolve_risk_profile(profile, note)
-
-    # 커밋 전에 이벤트용 값 확보 (Session Expire 방어 — calculate_risk_score 와 동일 패턴)
-    final_score = profile.overall_risk_score
-    final_level = profile.risk_level
-    await db.commit()
-
-    event = RiskResolvedEvent(
-        batch_id=batch_id,
-        supplier_id=supplier_id,
-        resolved_by=resolved_by,
-    )
-    await publish("RiskResolved", dataclasses.asdict(event))
-
-    return {
-        "supplier_id": str(supplier_id),
-        "overall_risk_score": final_score,
-        "risk_level": final_level,
-        "resolved_by": str(resolved_by),
     }

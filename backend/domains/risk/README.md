@@ -29,8 +29,8 @@ KIRA 플랫폼에서 협력사 및 배치(Batch) 단위의 **규제 위반 리�
 }
 ```
 
-## 4. API 엔드포인트 스펙 (조회용)
-프론트엔드 대시보드의 리스크 actions 보드를 렌더링하기 위한 다차원 조회 API입니다.
-* **`GET /risk/scores`**: 전체 협력사 리스크 프로필 다건 조회. (쿼리 파라미터 `status`, `level` 로 위험 등급별 스캔 및 필터링 지원)
-* **`GET /risk/{batch_id_or_supplier_id}`**: 특정 협력사의 상세 리스크 정보(감점 사유 포함) 단건 조회.
-*(모든 조회 API는 `@trace_tool` 데코레이터를 통해 행위가 추적됩니다.)*
+## 4. HTTP 엔드포인트
+없음. `router.py`도 존재하지 않는다. `calculate_risk_score()`는 `backend/agents/automation.py`의
+`risk_scoring` 노드가 파이프라인 내부에서 직접 호출하는 것이 유일한 진입점이며, 프론트엔드가
+호출하는 리스크 전용 조회/종결 API는 없다(2026-07 전수조사로 `GET /risk/scores` 등 조회
+엔드포인트와 `POST /risk/{id}/resolve` 종결 엔드포인트 모두 제거).

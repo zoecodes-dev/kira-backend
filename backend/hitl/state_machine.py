@@ -4,7 +4,7 @@ from backend.hitl.models import HitlReview
 
 class HitlStateMachine:
     VALID_STATUSES = ['hitl_pending', 'hitl_in_review', 'hitl_resolved']
-    VALID_RESOLUTIONS = ['approve', 'reject', 'escalate']
+    VALID_RESOLUTIONS = ['approve', 'reject']
 
     @staticmethod
     def resolve_review(review: HitlReview, resolution: str, decision_text: str, user_id: uuid.UUID | None) -> HitlReview:
