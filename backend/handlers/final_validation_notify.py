@@ -76,7 +76,7 @@ async def notify_final_validation_ready(payload: dict) -> None:
 
         # 원청 담당자 조회 (역할은 하드코딩 상수 → 안전하게 인라인)
         roles_sql = ", ".join(f"'{r}'" for r in _PRIME_ROLES)
-        oem_users = (await db.execute(
+        prime_users = (await db.execute(
             text(f"""
                 SELECT user_id FROM users
                 WHERE tenant_id = :t AND role IN ({roles_sql}) AND is_active = TRUE
@@ -84,12 +84,12 @@ async def notify_final_validation_ready(payload: dict) -> None:
             {"t": tenant_id},
         )).fetchall()
 
-    if not oem_users:
+    if not prime_users:
         logger.warning("[final_validation] 원청 담당자 없음 (tenant=%s)", tenant_id)
         return
 
     scope = f"{product_id}:{bom_version_id or '-'}"
-    for r in oem_users:
+    for r in prime_users:
         uid = str(r[0])
         await enqueue(
             NOTIFICATION_QUEUE,
@@ -105,4 +105,4 @@ async def notify_final_validation_ready(payload: dict) -> None:
             dedup_key=f"final_validation:{scope}:{uid}",
             target=target,
         )
-    logger.info("[final_validation] 최종 검증 알림 enqueue product=%s users=%d", product_id, len(oem_users))
+    logger.info("[final_validation] 최종 검증 알림 enqueue product=%s users=%d", product_id, len(prime_users))

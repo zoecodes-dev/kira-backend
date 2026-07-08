@@ -304,8 +304,8 @@ async def get_master_form_prefill(db: AsyncSession, supplier_id: UUID) -> Option
     }
 
 
-# 원청(OEM, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
-_OEM_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
+# 원청(prime, tier0) 노드 — manufacturer지만 CTI 수집 대상 아님 → 점검 예외.
+_PRIME_SUPPLIER_ID = UUID("a0000000-0000-4000-8000-000000000000")
 
 # provider_type → 채워야 할 CTI relationship 속성명 매핑
 _CTI_ATTR_BY_TYPE = {
@@ -391,6 +391,7 @@ async def update_supplier_detail(
         "environmental_report_url": "environmental_report",
         "self_assessment_doc_url": "self_assessment",
         "material_composition_doc_url": "material_composition",
+        "carbon_footprint_doc_url": "carbon_footprint",
     }
     prev_doc_urls = {col: getattr(supplier, col, None) for col in doc_url_kinds}
     # 입력 양식 영속화 — 테이블별로 분배(보낸 필드만).
@@ -487,7 +488,7 @@ async def get_supplier_detail(
         return None
 
     expected_attr = _CTI_ATTR_BY_TYPE.get(supplier.provider_type)
-    if supplier_id != _OEM_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
+    if supplier_id != _PRIME_SUPPLIER_ID and expected_attr is not None and getattr(supplier, expected_attr, None) is None:
         print(
             f"[CTI 점검] supplier {supplier_id} type={supplier.provider_type} "
             f"이지만 {expected_attr} 미적재 (자료 미수집 가능)"
@@ -749,14 +750,17 @@ def _field_filled(field: str, snap: dict, handled_metals: set = frozenset()) -> 
         # 광산 공장(사이트) 중 하나라도 소재 구성(핵심광물 함량)이 1종 이상 있으면 충족.
         return any(_mineral_present(mf.get("core_minerals") or {}) for mf in snap.get("mining_factories") or [])
     if field == "materials.any":
-        return _mineral_present(cm)
+        # 소재구성은 회사 단위가 아니라 공장(사이트) 단위 — 활성 공장 중 하나라도
+        # 핵심광물 함량이 1종 이상 있으면 충족(§factories_minerals, 광산의 factories.mine_composition과 동일 패턴).
+        return any(_mineral_present(f.get("core_minerals") or {}) for f in snap.get("factories_minerals") or [])
     if field == "materials.handled_any":
-        # 취급 금속(공급망 도출) 중 최소 1개 입력이면 충족. 도출 실패(맵 미구축)면
-        #   '최소 1개 광물'로 폴백(순환 0/0=100% 방지).
+        # 취급 금속(공급망 도출) 중 최소 1개가 어느 공장에든 입력돼 있으면 충족. 도출 실패(맵
+        #   미구축)면 '공장 중 하나라도 최소 1종 광물'로 폴백(순환 0/0=100% 방지).
         metals = [m for m in _TRACKED_METALS if m in handled_metals]
+        factories = snap.get("factories_minerals") or []
         if metals:
-            return any(_val_present(cm.get(m)) for m in metals)
-        return _mineral_present(cm)
+            return any(_val_present((f.get("core_minerals") or {}).get(m)) for f in factories for m in metals)
+        return any(_mineral_present(f.get("core_minerals") or {}) for f in factories)
     if field.startswith("materials."):
         return _val_present(cm.get(field.split(".", 1)[1]))
     if field == "regulation.self_reported_risk_level":
@@ -1070,7 +1074,7 @@ async def submit_onboarding(
             db, supplier_id, "supplier_review", reason="온보딩 제출 — 원청 승인 대기"
         )
 
-        # 7) 활성 계정 생성 — tenant_id=초대한 OEM, role=supplier_ceo(결정 #3).
+        # 7) 활성 계정 생성 — tenant_id=초대한 원청, role=supplier_ceo(결정 #3).
         primary = next((c for c in body.contacts if c.is_primary), None)
         if primary is None and body.contacts:
             primary = body.contacts[0]

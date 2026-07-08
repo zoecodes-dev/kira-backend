@@ -62,6 +62,7 @@ class Supplier(Base):
     environmental_report_url: Mapped[Optional[str]] = mapped_column(String(500))  # 환경성적서(회원가입 수집) 업로드 URL
     self_assessment_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 실사 자가진단 보고서 업로드 URL
     material_composition_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 소재구성 문서 업로드 URL
+    carbon_footprint_doc_url: Mapped[Optional[str]] = mapped_column(String(500))  # 탄소발자국 신고서 업로드 URL
     is_unverified: Mapped[bool] = mapped_column(Boolean, default=False)  # 회원가입: 사업자등록증 미보유 '미확인 등록'
     parent_supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id")
@@ -112,7 +113,6 @@ class SupplierFactory(Base):
     destination: Mapped[Optional[str]] = mapped_column(String(10))   # EU / US / KR / BOTH
     destination_detail: Mapped[Optional[str]] = mapped_column(Text)
     applicable_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장별 차등 규제 배열
-    hidden_regulations: Mapped[Optional[dict]] = mapped_column(JSONB)
     supply_ratio_percent: Mapped[Optional[float]] = mapped_column(NUMERIC(5, 2))
     supply_quantity: Mapped[Optional[str]] = mapped_column(String(100))
     core_minerals: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장(사이트)별 소재 구성
@@ -339,6 +339,7 @@ class SupplierDetailUpdateRequest(BaseModel):
     environmental_report_url: Optional[str] = None   # 환경성적서
     self_assessment_doc_url: Optional[str] = None     # 실사 자가진단 보고서
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서
 
 
 # ----- CTI 상세 응답 DTO (목요일: provider type별 상세 노출) -----
@@ -383,6 +384,7 @@ class SupplierDetailResponse(BaseModel):
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL(확인용)
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL(확인용)
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서 업로드 URL(확인용)
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서 업로드 URL(확인용)
     status: str
     risk_level: str
     manufacturer_detail: Optional[ManufacturerDetailDTO] = None
@@ -569,6 +571,7 @@ class MasterFormCompany(BaseModel):
     environmental_report_url: Optional[str] = None  # 환경성적서 업로드 URL
     self_assessment_doc_url: Optional[str] = None  # 실사 자가진단 보고서 업로드 URL
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서 업로드 URL
+    carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서 업로드 URL
     established_year: Optional[int] = None
     employee_count: Optional[int] = None
 

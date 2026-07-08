@@ -34,6 +34,7 @@ _DOC_CATEGORY = {
     "environmental_report": "environmental_impact_assessment",
     "self_assessment": "dd_audit_report",
     "material_composition": "material_composition",
+    "carbon_footprint": "carbon_footprint_declaration",
 }
 
 # 확장자 → file_type (CHECK 제약: pdf/xlsx/csv/image/docx/other)
