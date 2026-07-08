@@ -42,7 +42,6 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     # 섹션 0 — 회사 (suppliers)
     "company_name":        ("company", "str", "회사 정식 상호"),
     "company_name_en":     ("company", "str", "영문 상호"),
-    "ceo_name":            ("company", "str", "대표자명"),
     "business_reg_no":     ("company", "str", "사업자등록번호"),
     "corporate_reg_no":    ("company", "str", "법인등록번호"),
     "duns_number":         ("company", "str", "DUNS 번호"),

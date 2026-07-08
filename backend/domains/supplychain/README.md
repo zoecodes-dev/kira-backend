@@ -70,10 +70,6 @@
 | `GET` | `/supply-chain/alternatives` | `part_id` | 특정 부품의 대체 공급사 풀 조회 | 대체 협력사 목록 |
 | `GET` | `/supply-chain/geo-risks` | 없음 | 지정학 공간 리스크(신장, 위장공장) 노출 목록 | xinjiang_adjacent, country_mismatch 목록 |
 
-## 12. 정형화된 factory_gps DTO 출력 레이아웃 (HITL 연동)
-HITL(Human-In-The-Loop) 검토 화면에서 지도에 핀을 꽂고 회색지대(Gray Zone)를 즉시 시각화할 수 있도록, PostGIS의 복잡한 GeoJSON 문자열을 파싱하여 정형화된 위경도 배열과 플래그를 포함하는 DTO로 서빙합니다.
-- **호출 메서드**: `SupplyChainService.get_hitl_geo_context(db)`
-
 ## 13. 자진신고(Self-Declaration) 기반 재검증 이벤트 토폴로지
 시스템이 단순 사후 적발(Sad Path)에 머무르는 것을 방지하기 위해, 협력사가 공급원 변경을 자진 신고하면 상위 가치사슬 전체를 다시 깨워 검증하는 비동기 이벤트 토폴로지가 설계되어 있습니다.
 - **트리거 및 경계 검증**: 협력사가 공급원 변경 신고 시 `evaluate_cross_entity_boundary`를 통해 법인 횡단 여부 판별.

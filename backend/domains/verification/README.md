@@ -14,4 +14,4 @@
 
 ## 비고
 - 별도 발행 이벤트 없음(구 Verification* 이벤트는 제거됨).
-- `router.py`는 현재 엔드포인트 없이 prefix만 등록된 상태.
+- `router.py`는 존재하지 않는다(HTTP 엔드포인트 없음) — `service.py`의 `get_compliance_history_dto`만 다른 도메인이 직접 import해 쓴다.

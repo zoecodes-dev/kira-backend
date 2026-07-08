@@ -138,7 +138,6 @@ class SubmissionDocument(Base):
     file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     file_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     doc_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
     uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 

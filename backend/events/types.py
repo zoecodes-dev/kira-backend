@@ -208,15 +208,6 @@ class RiskEscalatedEvent:
     occurred_at: datetime = field(default_factory=_now_utc)
 
 
-@dataclass
-class RiskResolvedEvent:
-    batch_id: Optional[UUID] = None
-    supplier_id: Optional[UUID] = None  # 리스크 프로필은 supplier당 1개 — 어느 협력사 리스크가 닫혔는지 (감사)
-    resolved_by: Optional[UUID] = None
-    event_name: str = "RiskResolved"
-    occurred_at: datetime = field(default_factory=_now_utc)
-
-
 # ============================================================
 # Compliance (C)
 # ============================================================

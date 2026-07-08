@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 
 from backend.infrastructure.database import Base
 from backend.domains.users.models import Tenant, User  # users 도메인이 User/Tenant의 SSOT
@@ -20,14 +20,10 @@ class AuditTrail(Base):
     timestamp      = Column(TIMESTAMP(timezone=True), nullable=True)
     node_type      = Column(String(20), nullable=True)            # agent / tool / human
     node_name      = Column(String(100), nullable=True)
-    model_version  = Column(String(50), nullable=True)            # LLM 미사용 노드는 NULL
-    prompt_version = Column(String(20), nullable=True)
     duration_ms    = Column(Integer, nullable=True)
     input_hash     = Column(String(64), nullable=True)
     output_hash    = Column(String(64), nullable=True)
     prev_hash      = Column(String(64), nullable=True)            # NULL = 첫 번째 step
-    decision_text  = Column(Text, nullable=True)
-    citations      = Column(JSONB, nullable=True)
 
 
 # === API 응답 스키마 (Pydantic) ===
@@ -41,14 +37,10 @@ class AuditTrailRow(BaseModel):
     timestamp: datetime | None
     node_type: str | None
     node_name: str | None
-    model_version: str | None
-    prompt_version: str | None
     duration_ms: int | None
     input_hash: str | None
     output_hash: str | None
     prev_hash: str | None
-    decision_text: str | None
-    citations: object | None
 
 
 class ChainBreakOut(BaseModel):
