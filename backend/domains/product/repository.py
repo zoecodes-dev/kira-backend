@@ -442,7 +442,7 @@ class ProductRepository:
     ) -> Optional[Dict[str, Any]]:
         """
         product_id에 해당하는 제품의 active BOM 버전 기준
-        5계층 BOM 트리를 반환한다.
+        BOM 트리(0~6계층, Pack~광산)를 반환한다.
 
         [파라미터]
         only_confirmed : bool = True
@@ -460,17 +460,20 @@ class ProductRepository:
             product_id로 제품 정보와 active BOM 버전을 가져온다.
             active 버전이 없으면 None 반환 → service에서 404 처리.
 
-        2단계 — WITH RECURSIVE CTE (depth < 5 상한)
+        2단계 — WITH RECURSIVE CTE (depth < 6 상한)
             bom_version_id 기준으로 루트 부품(parent_part_id IS NULL)을
             앵커로 잡고, parent_part_id 관계를 따라 전 계층을 플랫하게 조회.
-            depth < 5 조건으로 최대 5계층 초과 무한 루프 방지.
+            depth < 6 조건으로 tier_level 0(Pack)~6(광산) 7계층 초과
+            무한 루프 방지. (구 5계층 설계 — Pack~광물 — 는 W5에서
+            제련·정제/광산 2계층이 추가되며 7계층으로 재정의됨. 이 CTE의
+            상한도 depth < 5 → depth < 6으로 함께 갱신.)
 
         3단계 — Python 트리 조립
             플랫한 rows를 part_id / parent_part_id 기반으로
             children 배열 중첩 구조로 조립한다.
 
         [반환]
-        active BOM 버전이 존재하면 5계층 중첩 딕셔너리, 없으면 None.
+        active BOM 버전이 존재하면 중첩 딕셔너리(최대 7계층), 없으면 None.
         """
 
         # ------------------------------------------------------------------
@@ -516,8 +519,9 @@ class ProductRepository:
         #     'supplychain_declared'  (선언만 된 상태, unconfirmed)        
         #
         # [depth 상한]
-        #   depth < 5 조건 필수 — parts 자기참조 순환 참조 방어.
-        #   5계층(Pack=0 ~ 광물=4) 초과는 데이터 오염으로 간주.
+        #   depth < 6 조건 필수 — parts 자기참조 순환 참조 방어.
+        #   7계층(Pack=0 ~ 광산=6, docker/01_schema.sql:414 tier_level 정의 기준)
+        #   초과는 데이터 오염으로 간주.
         # ------------------------------------------------------------------
         # [결정 #2] link_status 필터 문자열 생성
         # scm.edge_id IS NULL 조건: supply_chain_map에 매핑이 없는 부품(직접 BOM 항목)도 포함.
@@ -560,7 +564,7 @@ class ProductRepository:
 
                 UNION ALL
 
-                -- 재귀: 직전 계층 부품의 자식 탐색 (depth < 5 상한)
+                -- 재귀: 직전 계층 부품의 자식 탐색 (depth < 6 상한)
                 SELECT
                     p.part_id,
                     p.part_code,
@@ -579,7 +583,7 @@ class ProductRepository:
                 FROM parts p   
                 JOIN bom_tree bt
                     ON p.parent_part_id  = bt.part_id
-                WHERE bt.depth < 5  
+                WHERE bt.depth < 6
 
             )
             SELECT * FROM bom_tree
