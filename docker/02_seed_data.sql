@@ -531,29 +531,6 @@ FROM regulations WHERE regulation_code = 'EU_BATTERY_ART7';
 
 
 -- ============================================================
--- 13-B. W5 C1 — 규제별 필수 필드 명세 시드 (regulation_required_fields)
--- ============================================================
--- EU_BATTERY_ART7 (Art.7 / Annex II — 탄소발자국)
-INSERT INTO regulation_required_fields (regulation_id, field_name, field_type, provider_type_applicable, is_mandatory)
-SELECT regulation_id, 'carbon_intensity', 'numeric', '["manufacturer"]'::jsonb, TRUE
-FROM regulations WHERE regulation_code = 'EU_BATTERY_ART7';
-
-INSERT INTO regulation_required_fields (regulation_id, field_name, field_type, provider_type_applicable, is_mandatory)
-SELECT regulation_id, 'factory_carbon_declarations', 'jsonb', '["manufacturer"]'::jsonb, TRUE
-FROM regulations WHERE regulation_code = 'EU_BATTERY_ART7';
-
--- EUDR (삼림벌채 — GPS)
-INSERT INTO regulation_required_fields (regulation_id, field_name, field_type, provider_type_applicable, is_mandatory)
-SELECT regulation_id, 'mine_coordinates', 'geojson', '["miner"]'::jsonb, TRUE
-FROM regulations WHERE regulation_code = 'EUDR';
-
--- UFLPA (강제노동 위험 플래그)
-INSERT INTO regulation_required_fields (regulation_id, field_name, field_type, provider_type_applicable, is_mandatory)
-SELECT regulation_id, 'geo_risk_flags', 'jsonb', '["miner"]'::jsonb, FALSE
-FROM regulations WHERE regulation_code = 'UFLPA';
-
-
--- ============================================================
 -- 14. 데이터 흐름 / Submission (영역 11)
 -- ============================================================
 INSERT INTO data_request_log (request_id, requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date, response_status, submission_status) VALUES
