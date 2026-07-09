@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domains.supplier import repository
@@ -99,16 +99,17 @@ async def create_supplier_and_invite(
         is_high_risk_flag=False,
     ))
 
-    # 1-c) 온보딩 row 동시 생성 + SLA 마감 자동 설정 (B-9: 등록과 동시에 sla_due_date)
+    # 1-c) 온보딩 row는 DB 트리거(trg_supplier_onboarding_autocreate)가 suppliers INSERT
+    #      직후 자동 생성한다(consent_status='consent_pending' 기본값) — seed/수동 SQL 등
+    #      애플리케이션을 거치지 않는 경로에서도 온보딩 row 누락(require_supplier_consent가
+    #      영구 CONSENT_REQUIRED로 막던 문제)이 없도록 트리거가 구조적으로 보장한다.
+    #      여기서는 그 위에 SLA 마감·초대 시각만 채운다(B-9: 등록과 동시에 sla_due_date).
     sla_due_date = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
-    db.add(SupplierOnboarding(
-        supplier_id=supplier.supplier_id,
-        consent_status="consent_pending",
-        agreement_status="pending",
-        last_invited_at=datetime.now(timezone.utc),
-        sla_due_date=sla_due_date,
-        reminder_count=0,
-    ))
+    await db.execute(
+        update(SupplierOnboarding)
+        .where(SupplierOnboarding.supplier_id == supplier.supplier_id)
+        .values(last_invited_at=datetime.now(timezone.utc), sla_due_date=sla_due_date)
+    )
 
     # 1-d) 하위 PIC(담당자 3명) 저장 — stub 과 같은 트랜잭션. 다음 화면 재표기용
     #      (supplier_contacts). 초대만 되고 아직 가입 전이어도 정보는 남는다.
@@ -1167,15 +1168,16 @@ async def submit_onboarding(
                     is_high_risk_flag=False,
                 ))
             sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
-            if await repository.get_onboarding_by_supplier(db, sub_supplier.supplier_id) is None:
-                db.add(SupplierOnboarding(
-                    supplier_id=sub_supplier.supplier_id,
-                    consent_status="consent_pending",
-                    agreement_status="pending",
-                    last_invited_at=datetime.now(timezone.utc),
-                    sla_due_date=sub_sla_due,
-                    reminder_count=0,
-                ))
+            if existing is None:
+                # 온보딩 row는 트리거(trg_supplier_onboarding_autocreate)가 create_supplier
+                # 시점에 이미 만들어놨다(consent_status='consent_pending' 기본값) — 여기서는
+                # SLA 마감·초대 시각만 채운다. 재사용된 협력사(existing)는 이미 자기 온보딩
+                # 이력이 있으므로 손대지 않는다(기존 동작 유지).
+                await db.execute(
+                    update(SupplierOnboarding)
+                    .where(SupplierOnboarding.supplier_id == sub_supplier.supplier_id)
+                    .values(last_invited_at=datetime.now(timezone.utc), sla_due_date=sub_sla_due)
+                )
             # 아래(PIC 저장·동의서/자료요청 자동 생성)는 진짜 신규 협력사일 때만 한다.
             # 재사용된 협력사(existing)는 이미 실제 담당자·이력이 따로 있을 수 있고,
             # 특히 동의서를 여기서 미리 만들어버리면 원청이 STEP3에서 실제로 메일을
