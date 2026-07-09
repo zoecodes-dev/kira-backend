@@ -33,6 +33,7 @@ from backend.domains.supplier.models import (
     SupplierRiskProfile,
 )
 from backend.events.types import (
+    MasterFormSubmittedEvent,
     RiskProfileUpdatedEvent,
     SupplierInvitedEvent,
     SupplierStatusChangedEvent,
@@ -250,6 +251,15 @@ async def submit_master_form(
         # 한 섹션이라도 실패하면 전체 롤백(부분 저장 방지). 원인은 그대로 올린다.
         await db.rollback()
         raise
+
+    # 커밋 성공 후에만 발행(규칙 #3) — 원청에 '협력사 제출' 알림(master_form_submitted_notify).
+    #   실제로 저장된 섹션이 있을 때만(빈 제출 방지). 대행 제출(on_behalf)도 대상 협력사
+    #   기준으로 알린다 — 원청은 누가 입력했는지보다 그 협력사 정보가 갱신됐는지가 중요하다.
+    if sections_saved:
+        await publish(
+            "MasterFormSubmitted",
+            dataclasses.asdict(MasterFormSubmittedEvent(supplier_id=supplier_id)),
+        )
 
     return {
         "supplier_id": supplier_id,
