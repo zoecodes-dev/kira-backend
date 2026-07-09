@@ -93,15 +93,43 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
 }
 
 # ── 고객사 국가 → 전송 언어 결정 ────────────────────────────────────────────
-# 기본 EN. 독일(DE)이면 DE 추가. country 미상이면 EN + country_known=False(사람이 선택).
+# 화면 미리보기 첫 화면은 항상 한국어(ko, 내부 검토 기본)가 먼저 온다. 그 뒤에 실제
+# 고객사 전송용 언어를 붙인다 — 기본 EN, 독일(DE)이면 DE 추가. country 미상이면
+# ko+EN만 내려주고 country_known=False(사람이 선택)로 신호한다.
 GERMANY = "DE"
 
 
 def resolve_outbound_locales(country: str | None) -> list[str]:
-    """고객사 country(ISO alpha-2) → 전송할 locale 목록. 독일이면 EN+DE, 그 외 EN."""
+    """고객사 country(ISO alpha-2) → 전송할 locale 목록. 0번째는 항상 ko(화면 기본 표시).
+    독일이면 ko+EN+DE, 그 외 ko+EN."""
     if country and country.strip().upper() == GERMANY:
-        return ["en", "de"]
-    return ["en"]
+        return ["ko", "en", "de"]
+    return ["ko", "en"]
+
+
+# ── 고객사 국가 → 공급망 납품처(destination) 리전 ───────────────────────────
+# 공장의 "납품처"는 자유 입력이 아니라, 그 공장이 속한 공급망 맵의 최상위 고객사
+# (products.customer_id → customers.country)로부터 자동 계산한다. 같은 맵(제품×BOM버전)
+# 안의 모든 노드는 같은 고객사로 흐르므로 리전도 동일하다 — 노드별 계산이 필요 없다.
+_EU_COUNTRIES = {
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+    "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+    "SI", "ES", "SE",
+}
+
+
+def resolve_destination_region(country: str | None) -> str | None:
+    """고객사 country(ISO alpha-2) → 납품처 리전(EU/US/KR). 매핑 밖 국가는 None(미분류)."""
+    if not country:
+        return None
+    code = country.strip().upper()
+    if code == "US":
+        return "US"
+    if code == "KR":
+        return "KR"
+    if code in _EU_COUNTRIES:
+        return "EU"
+    return None
 
 
 def _pick(locale: str) -> Dict[str, str]:

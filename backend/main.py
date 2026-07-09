@@ -65,6 +65,10 @@ async def _register_subscriptions() -> None:
     from backend.handlers.submission_submitted_notify import notify_supplier_submission
     await subscribe("SubmissionCompleted", notify_supplier_submission)
 
+    # ── P4c: 협력사 마스터폼(자가진단) 제출 시 원청에 '검토 요청' 알림 (협력사 상세 딥링크) ──
+    from backend.handlers.master_form_submitted_notify import notify_master_form_submission
+    await subscribe("MasterFormSubmitted", notify_master_form_submission)
+
     # ── E: 협력사 온보딩(제3자 동의서) 제출 시 원청에 STEP4 수신확인 알림 ──
     from backend.handlers.onboarding_review_notify import notify_onboarding_review_needed
     await subscribe("SupplierStatusChanged", notify_onboarding_review_needed)

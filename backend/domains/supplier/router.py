@@ -354,3 +354,21 @@ async def get_supplier_carbon_declarations_endpoint(
     if data is None:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return data
+
+
+@router.get("/{supplier_id}/documents/{doc_kind}/url")
+async def get_supplier_document_url_endpoint(
+    supplier_id: UUID,
+    doc_kind: str,
+    _auth: UUID = Depends(authorized_supplier),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    필요문서(사업자등록증/환경성적서 등) presigned 다운로드 URL 발급.
+    doc_kind: business_reg | environmental_report | self_assessment | material_composition | carbon_footprint
+    잘못된 doc_kind·문서 미업로드 모두 404(구분해 노출할 필요 없음). 내 테넌트 소유만.
+    """
+    data = await service.get_document_url(db, supplier_id, doc_kind)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return data

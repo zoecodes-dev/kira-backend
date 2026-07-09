@@ -65,6 +65,19 @@ class RiskProfileUpdatedEvent:
 
 
 @dataclass
+class MasterFormSubmittedEvent:
+    """
+    협력사가 마스터폼(자가진단/기업정보 표준 양식, check-info)을 제출했을 때 발행.
+    발행: B(supplier.submit_master_form, 커밋 성공 후) → 수신: 원청 알림(master_form_submitted_notify).
+    특정 data_request_log(정식 자료요청 회차)에 매이지 않는 상시 자가진단 제출이라
+    request_id가 없다 — SubmissionCompleted(정식 요청·응답 흐름)와는 별개 이벤트.
+    """
+    supplier_id: Optional[UUID] = None
+    event_name: str = "MasterFormSubmitted"
+    occurred_at: datetime = field(default_factory=_now_utc)
+
+
+@dataclass
 class SupplierDocumentUploadedEvent:
     """
     협력사가 필요문서(*_doc_url)를 새로 업로드(S3 키 변경)했을 때 발행.
