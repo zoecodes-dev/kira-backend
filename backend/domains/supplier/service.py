@@ -875,12 +875,22 @@ async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict
 
 
 async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """공급 품목 — 이 협력사가 공급망 맵에서 공급하는 부품 distinct."""
+    """공급 품목 — 이 협력사가 공급망 맵에서 공급하는 부품 distinct.
+    맵(제품×BOM버전)마다 destination(EU/US/KR)을 그 맵 최상위 고객사 국가로부터 자동 계산해
+    동봉한다 — 협력사가 자유 입력하던 "납품처"를 대체(§FactoryCards 화면). 같은 맵의 모든 행은
+    같은 고객사로 흐르므로 destination도 동일하다."""
     if await repository.get_supplier_by_id(db, supplier_id) is None:
         return None
+    items = await repository.get_supplied_items(db, supplier_id)
+    # 동기 조회 read(순수 함수, DB 미접근) — supplychain 도메인 재사용. resolve_outbound_locales와
+    # 동일한 "고객사 country → ..." 계열 매핑이라 그 옆에 둔다(PROJECT_CORE 5-1 도메인격리 예외 ①).
+    from backend.domains.supplychain.risk_summary_templates import resolve_destination_region
+
+    for item in items:
+        item["destination"] = resolve_destination_region(item.get("customer_country"))
     return {
         "supplier_id": supplier_id,
-        "items": await repository.get_supplied_items(db, supplier_id),
+        "items": items,
     }
 
 

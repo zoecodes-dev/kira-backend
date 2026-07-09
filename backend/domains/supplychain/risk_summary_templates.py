@@ -107,6 +107,31 @@ def resolve_outbound_locales(country: str | None) -> list[str]:
     return ["ko", "en"]
 
 
+# ── 고객사 국가 → 공급망 납품처(destination) 리전 ───────────────────────────
+# 공장의 "납품처"는 자유 입력이 아니라, 그 공장이 속한 공급망 맵의 최상위 고객사
+# (products.customer_id → customers.country)로부터 자동 계산한다. 같은 맵(제품×BOM버전)
+# 안의 모든 노드는 같은 고객사로 흐르므로 리전도 동일하다 — 노드별 계산이 필요 없다.
+_EU_COUNTRIES = {
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+    "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+    "SI", "ES", "SE",
+}
+
+
+def resolve_destination_region(country: str | None) -> str | None:
+    """고객사 country(ISO alpha-2) → 납품처 리전(EU/US/KR). 매핑 밖 국가는 None(미분류)."""
+    if not country:
+        return None
+    code = country.strip().upper()
+    if code == "US":
+        return "US"
+    if code == "KR":
+        return "KR"
+    if code in _EU_COUNTRIES:
+        return "EU"
+    return None
+
+
 def _pick(locale: str) -> Dict[str, str]:
     """지원: ko/en/de. 그 외 locale은 default(ko)로 fallback."""
     return TEMPLATES.get(locale) or TEMPLATES[DEFAULT_LOCALE]
