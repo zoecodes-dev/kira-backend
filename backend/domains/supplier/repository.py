@@ -598,6 +598,7 @@ async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> List[dict]:
                pr.model_name,
                pr.product_name,
                c.customer_name,
+               c.country AS customer_country,
                scm.hop_level,
                sr.factory_id,
                COALESCE(scm.core_minerals, s.core_minerals) AS core_minerals

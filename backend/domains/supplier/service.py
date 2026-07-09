@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domains.supplier import repository
@@ -33,12 +33,13 @@ from backend.domains.supplier.models import (
     SupplierRiskProfile,
 )
 from backend.events.types import (
+    MasterFormSubmittedEvent,
     RiskProfileUpdatedEvent,
     SupplierInvitedEvent,
     SupplierStatusChangedEvent,
     SupplierDocumentUploadedEvent,
 )
-from backend.infrastructure import geocode
+from backend.infrastructure import geocode, storage
 from backend.infrastructure.event_bus import publish
 from backend.infrastructure.trace import trace_node
 # AP: 추출결과 read는 E 제공(submission repository), 마스터폼 prefill 변환은 B(supplier)
@@ -98,16 +99,17 @@ async def create_supplier_and_invite(
         is_high_risk_flag=False,
     ))
 
-    # 1-c) 온보딩 row 동시 생성 + SLA 마감 자동 설정 (B-9: 등록과 동시에 sla_due_date)
+    # 1-c) 온보딩 row는 DB 트리거(trg_supplier_onboarding_autocreate)가 suppliers INSERT
+    #      직후 자동 생성한다(consent_status='consent_pending' 기본값) — seed/수동 SQL 등
+    #      애플리케이션을 거치지 않는 경로에서도 온보딩 row 누락(require_supplier_consent가
+    #      영구 CONSENT_REQUIRED로 막던 문제)이 없도록 트리거가 구조적으로 보장한다.
+    #      여기서는 그 위에 SLA 마감·초대 시각만 채운다(B-9: 등록과 동시에 sla_due_date).
     sla_due_date = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
-    db.add(SupplierOnboarding(
-        supplier_id=supplier.supplier_id,
-        consent_status="consent_pending",
-        agreement_status="pending",
-        last_invited_at=datetime.now(timezone.utc),
-        sla_due_date=sla_due_date,
-        reminder_count=0,
-    ))
+    await db.execute(
+        update(SupplierOnboarding)
+        .where(SupplierOnboarding.supplier_id == supplier.supplier_id)
+        .values(last_invited_at=datetime.now(timezone.utc), sla_due_date=sla_due_date)
+    )
 
     # 1-d) 하위 PIC(담당자 3명) 저장 — stub 과 같은 트랜잭션. 다음 화면 재표기용
     #      (supplier_contacts). 초대만 되고 아직 가입 전이어도 정보는 남는다.
@@ -248,6 +250,15 @@ async def submit_master_form(
         # 한 섹션이라도 실패하면 전체 롤백(부분 저장 방지). 원인은 그대로 올린다.
         await db.rollback()
         raise
+
+    # 커밋 성공 후에만 발행(규칙 #3) — 원청에 '협력사 제출' 알림(master_form_submitted_notify).
+    #   실제로 저장된 섹션이 있을 때만(빈 제출 방지). 대행 제출(on_behalf)도 대상 협력사
+    #   기준으로 알린다 — 원청은 누가 입력했는지보다 그 협력사 정보가 갱신됐는지가 중요하다.
+    if sections_saved:
+        await publish(
+            "MasterFormSubmitted",
+            dataclasses.asdict(MasterFormSubmittedEvent(supplier_id=supplier_id)),
+        )
 
     return {
         "supplier_id": supplier_id,
@@ -405,6 +416,7 @@ async def update_supplier_detail(
             fields.pop("country")
     manuf = {k: fields.pop(k) for k in ("carbon_intensity", "energy_source") if k in fields}
     self_risk = fields.pop("self_reported_risk_level", None)
+    submitted = fields.pop("submitted", None)  # suppliers 컬럼 아님 — 원청 알림 트리거 신호만
     # 탄소발자국 문서 — suppliers에 대응 컬럼이 없으므로(스키마 무수정) update로 보내지 않고
     # 커밋 후 파싱 이벤트만 발행한다(핸들러가 doc_category=carbon_footprint_declaration로 매핑).
     carbon_doc = fields.pop("carbon_footprint_doc_url", None)
@@ -444,6 +456,14 @@ async def update_supplier_detail(
                 file_name=carbon_doc.rsplit("/", 1)[-1] if "/" in carbon_doc else carbon_doc,
                 doc_kind="carbon_footprint",
             )),
+        )
+
+    # AI 처리 확인(ExtractionTable) "원청사로 제출" — submitted=True로 명시했을 때만
+    # 원청에 알림(submit_master_form과 동일 이벤트/수신자 로직 재사용).
+    if submitted:
+        await publish(
+            "MasterFormSubmitted",
+            dataclasses.asdict(MasterFormSubmittedEvent(supplier_id=supplier_id)),
         )
 
     return await get_supplier_detail(db, supplier_id, tenant_id)
@@ -873,12 +893,22 @@ async def get_completeness(db: AsyncSession, supplier_id: UUID) -> Optional[dict
 
 
 async def get_supplied_items(db: AsyncSession, supplier_id: UUID) -> Optional[dict]:
-    """공급 품목 — 이 협력사가 공급망 맵에서 공급하는 부품 distinct."""
+    """공급 품목 — 이 협력사가 공급망 맵에서 공급하는 부품 distinct.
+    맵(제품×BOM버전)마다 destination(EU/US/KR)을 그 맵 최상위 고객사 국가로부터 자동 계산해
+    동봉한다 — 협력사가 자유 입력하던 "납품처"를 대체(§FactoryCards 화면). 같은 맵의 모든 행은
+    같은 고객사로 흐르므로 destination도 동일하다."""
     if await repository.get_supplier_by_id(db, supplier_id) is None:
         return None
+    items = await repository.get_supplied_items(db, supplier_id)
+    # 동기 조회 read(순수 함수, DB 미접근) — supplychain 도메인 재사용. resolve_outbound_locales와
+    # 동일한 "고객사 country → ..." 계열 매핑이라 그 옆에 둔다(PROJECT_CORE 5-1 도메인격리 예외 ①).
+    from backend.domains.supplychain.risk_summary_templates import resolve_destination_region
+
+    for item in items:
+        item["destination"] = resolve_destination_region(item.get("customer_country"))
     return {
         "supplier_id": supplier_id,
-        "items": await repository.get_supplied_items(db, supplier_id),
+        "items": items,
     }
 
 
@@ -890,6 +920,36 @@ async def get_carbon_declarations(db: AsyncSession, supplier_id: UUID) -> Option
         "supplier_id": supplier_id,
         "declarations": await repository.get_carbon_declarations(db, supplier_id),
     }
+
+
+# doc_kind(URL 경로) → suppliers 컬럼명. update_supplier_detail의 doc_url_kinds(컬럼→kind)와 역방향 짝.
+_DOC_KIND_TO_COLUMN = {
+    "business_reg": "business_reg_doc_url",
+    "environmental_report": "environmental_report_url",
+    "self_assessment": "self_assessment_doc_url",
+    "material_composition": "material_composition_doc_url",
+    "carbon_footprint": "carbon_footprint_doc_url",
+}
+
+
+async def get_document_url(db: AsyncSession, supplier_id: UUID, doc_kind: str) -> Optional[dict]:
+    """
+    필요문서(사업자등록증/환경성적서 등) presigned 다운로드 URL 발급.
+    잘못된 doc_kind·협력사 없음·문서 미업로드(컬럼 빈값) 모두 None(라우터가 404로 변환).
+    """
+    column = _DOC_KIND_TO_COLUMN.get(doc_kind)
+    if column is None:
+        return None
+    supplier = await repository.get_supplier_by_id(db, supplier_id)
+    if supplier is None:
+        return None
+    key = getattr(supplier, column, None)
+    if not key:
+        return None
+    file_name = supplier.business_reg_doc_name if column == "business_reg_doc_url" else None
+    if not file_name:
+        file_name = key.rstrip("/").rsplit("/", 1)[-1]
+    return {"url": await storage.generate_presigned_url(key), "file_name": file_name}
 
 
 # ============================================================
@@ -1136,17 +1196,20 @@ async def submit_onboarding(
                     is_high_risk_flag=False,
                 ))
             sub_sla_due = datetime.now(timezone.utc) + timedelta(days=SUPPLIER_SLA_DAYS)
-            if await repository.get_onboarding_by_supplier(db, sub_supplier.supplier_id) is None:
-                db.add(SupplierOnboarding(
-                    supplier_id=sub_supplier.supplier_id,
-                    consent_status="consent_pending",
-                    agreement_status="pending",
-                    last_invited_at=datetime.now(timezone.utc),
-                    sla_due_date=sub_sla_due,
-                    reminder_count=0,
-                ))
-            # PIC 저장은 진짜 신규 협력사일 때만 한다 — 재사용된 협력사(existing)는 이미
-            # 실제 담당자가 따로 있을 수 있어 덮어쓰지 않는다.
+            if existing is None:
+                # 온보딩 row는 트리거(trg_supplier_onboarding_autocreate)가 create_supplier
+                # 시점에 이미 만들어놨다(consent_status='consent_pending' 기본값) — 여기서는
+                # SLA 마감·초대 시각만 채운다. 재사용된 협력사(existing)는 이미 자기 온보딩
+                # 이력이 있으므로 손대지 않는다(기존 동작 유지).
+                await db.execute(
+                    update(SupplierOnboarding)
+                    .where(SupplierOnboarding.supplier_id == sub_supplier.supplier_id)
+                    .values(last_invited_at=datetime.now(timezone.utc), sla_due_date=sub_sla_due)
+                )
+            # 아래(PIC 저장·동의서/자료요청 자동 생성)는 진짜 신규 협력사일 때만 한다.
+            # 재사용된 협력사(existing)는 이미 실제 담당자·이력이 따로 있을 수 있고,
+            # 특히 동의서를 여기서 미리 만들어버리면 원청이 STEP3에서 실제로 메일을
+            # 보내기도 전에 '이미 발송됨'으로 잘못 표시된다(차수 노출 게이트 오작동).
             if existing is None:
                 await repository.write_master_form_contacts(db, sub_supplier.supplier_id, [
                     MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),

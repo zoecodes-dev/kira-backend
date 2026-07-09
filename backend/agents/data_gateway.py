@@ -59,7 +59,7 @@ _PROVIDER_CATEGORY_MAP: dict[str, frozenset] = {
     "manufacturer": frozenset({
         "business_registration", "dd_audit_report",
         "product_spec", "manufacturing_process_doc", "carbon_footprint_declaration",
-        "recycled_content_report",
+        "recycled_content_report", "material_composition",
     }),
     "miner": frozenset({
         "business_registration", "origin_certificate", "dd_audit_report",
