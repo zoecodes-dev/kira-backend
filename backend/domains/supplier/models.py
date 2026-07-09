@@ -339,6 +339,11 @@ class SupplierDetailUpdateRequest(BaseModel):
     self_assessment_doc_url: Optional[str] = None     # 실사 자가진단 보고서
     material_composition_doc_url: Optional[str] = None  # 소재구성 문서
     carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 문서(대응 suppliers 컬럼 없음 — 파싱 이벤트 트리거용)
+    # AI 추출값 확정 "원청사로 제출"(ExtractionTable) 전용 신호 — suppliers 컬럼 아님.
+    #   True일 때만 MasterFormSubmitted 발행(원청 알림). 단순 문서 업로드 PATCH
+    #   (Material/SelfAssessment/CarbonFootprintDocPanel)는 이 필드를 안 보내 알림이 안 뜬다
+    #   — 문서 첨부 자체는 "제출 완료"가 아니라 그 뒤 확인 후 이 버튼을 눌러야 제출이다.
+    submitted: Optional[bool] = None
 
 
 # ----- CTI 상세 응답 DTO (목요일: provider type별 상세 노출) -----
