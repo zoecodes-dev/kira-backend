@@ -2656,3 +2656,55 @@ INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_i
 ('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
 ('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31')
 ON CONFLICT (edge_id) DO NOTHING;
+
+-- ============================================================
+-- 33. 실 iX3(d1111111/e1111111) 공급망 STEP4 완비 처리 — '자료 수집·보완 검토' 화면에서
+--   모든 협력사가 '입력 완비' + '제출 자료'(문제없음)로 뜨도록 한다. 실제 문서 업로드/파싱
+--   없이 DB 레코드만 채운다(요청 배경: 데모에서 STEP4가 항상 완비 상태로 보여야 함).
+-- ============================================================
+
+-- 33-1. Xiangtan Mn Refinery — 이 체인에서 '입력 현황' 갭의 유일한 원인이 동의서 미보유였음.
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients, valid_from, valid_to, revocable,
+   status, requested_at, returned_at, agreed_at, signer_name, signer_title, signer_email, signature_method, form_version, form_data, agreement_hash)
+VALUES
+  ('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+   '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE, '["BMW AG"]'::jsonb,
+   '2026-01-01', '2027-12-31', TRUE, 'agreed', now() - interval '20 days', now() - interval '14 days', now() - interval '13 days',
+   '담당자', '팀장', 'contact@xiangtan-mn.demo', 'email_form', 'v1.0',
+   '{"data_subject":"Xiangtan Mn Refinery"}'::jsonb, 'xiangtanmn0001')
+ON CONFLICT DO NOTHING;
+
+-- 33-2. 나머지 13개 협력사(한양셀 제외 — 이미 32번 이전에 자료요청 1건 보유) — 제출 자료
+--   (AI 추출결과) 0건이라 DataReviewModal에서 '제출 대기'로 뜨는 걸, 문제없는 빈 추출결과로
+--   채워 '제출 자료'로 전환한다. confidence_map/unparsed_fields를 비워두면 docStat.problem
+--   판정(신뢰도<0.7·미파싱 필드·HITL 미승인)에 전혀 안 걸린다.
+WITH targets(supplier_id) AS (
+  VALUES
+    ('a2222222-2222-4000-8000-000000000002'::uuid),  -- 동성머티리얼(주)
+    ('63111111-0000-4000-8000-000000000001'::uuid),  -- 동신전구체(주)
+    ('66111111-0000-4000-8000-000000000001'::uuid),  -- 한빛음극재(주)
+    ('a3333333-3333-4000-8000-000000000003'::uuid),  -- 호주리튬광업
+    ('66333333-0000-4000-8000-000000000003'::uuid),  -- Balama Graphite Mining SA
+    ('65666666-0000-4000-8000-000000000006'::uuid),  -- Kalahari Manganese Mine
+    ('65333333-0000-4000-8000-000000000003'::uuid),  -- Western Australia Nickel Mine Pty Ltd
+    ('65444444-0000-4000-8000-000000000004'::uuid),  -- Zambia Copperbelt Cobalt Mine
+    ('aaaaaaaa-aaaa-4000-8000-00000000000a'::uuid),  -- 한중제련(주)
+    ('64333333-0000-4000-8000-000000000003'::uuid),  -- AusRef Processing Pty Ltd
+    ('66222222-0000-4000-8000-000000000002'::uuid),  -- Qingdao Spherical Graphite Co.
+    ('64666666-0000-4000-8000-000000000006'::uuid),  -- Xiangtan Mn Refinery
+    ('64444444-0000-4000-8000-000000000004'::uuid)   -- Zambia Copper & Cobalt Refinery
+),
+new_requests AS (
+  INSERT INTO data_request_log
+    (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date, response_status, submission_status)
+  SELECT '11111111-0000-4000-8000-000000000002', supplier_id, 'material_composition',
+         now() - interval '10 days', now() - interval '3 days', 'response_responded', 'submission_approved'
+  FROM targets
+  RETURNING request_id, target_supplier_id
+)
+INSERT INTO document_extraction_results
+  (request_id, parsed_fields, confidence_map, unparsed_fields, detected_document_type, evidence_summary)
+SELECT request_id, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, '자재 사양서',
+       '공급망 데모용 자동 완비 처리 — 실제 문서 업로드 없이 생성.'
+FROM new_requests;
