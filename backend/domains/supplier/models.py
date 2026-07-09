@@ -493,6 +493,8 @@ class SuppliedItemDTO(BaseModel):
     hop_level: Optional[int] = None        # 이 맵에서 협력사 차수
     factory_id: Optional[uuid.UUID] = None # 이 맵(엣지)에서 대는 공장 — map 탭에서 공장 필터용
     core_minerals: Optional[dict] = None   # 이 맵(엣지)의 핵심광물 함량 %; 없으면 회사값 폴백
+    # 이 맵 최상위 고객사 국가로부터 자동 계산한 납품처 리전(EU/US/KR). 매핑 밖 국가면 None.
+    destination: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
