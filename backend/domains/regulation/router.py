@@ -28,6 +28,8 @@ backend/domains/regulation/router.py  (담당: 팀원 C — 은지)
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
