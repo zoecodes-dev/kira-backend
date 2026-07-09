@@ -158,7 +158,16 @@ INSERT INTO supplier_contacts (supplier_id, factory_id, name, name_en, role, dep
 INSERT INTO supplier_onboarding (supplier_id, consent_status, consent_signed_at, agreement_status, last_invited_at, sla_due_date, reminder_count) VALUES
 ('a1111111-1111-4000-8000-000000000001', 'consent_agreed',  now() - interval '20 days', 'agreed',  now() - interval '21 days', now() - interval '7 days', 0),
 ('a4444444-4444-4000-8000-000000000004', 'consent_agreed',  now() - interval '5 days',  'agreed',  now() - interval '6 days',  now() + interval '8 days', 1),
-('abababab-abab-4000-8000-0000000000ab', 'consent_pending', NULL,                        'pending', now() - interval '22 days', now() - interval '8 days', 3);
+('abababab-abab-4000-8000-0000000000ab', 'consent_pending', NULL,                        'pending', now() - interval '22 days', now() - interval '8 days', 3)
+-- [trg_supplier_onboarding_autocreate] suppliers INSERT 시 트리거가 이미 기본값 행을 만들어놔서,
+-- 여기서 실제 값으로 덮어써야 한다(단순 INSERT면 UNIQUE(supplier_id) 위반).
+ON CONFLICT (supplier_id) DO UPDATE SET
+    consent_status     = EXCLUDED.consent_status,
+    consent_signed_at  = EXCLUDED.consent_signed_at,
+    agreement_status   = EXCLUDED.agreement_status,
+    last_invited_at    = EXCLUDED.last_invited_at,
+    sla_due_date       = EXCLUDED.sla_due_date,
+    reminder_count     = EXCLUDED.reminder_count;
 
 
 -- ============================================================
@@ -748,7 +757,15 @@ INSERT INTO supplier_onboarding (supplier_id, consent_status, consent_signed_at,
 ('61444444-0000-4000-8000-000000000004', 'consent_agreed',  now() - interval '10 days', 'agreed',  now() - interval '11 days', now() + interval '3 days',  1),
 ('61555555-0000-4000-8000-000000000005', 'consent_agreed',  now() - interval '35 days', 'agreed',  now() - interval '36 days', now() - interval '22 days', 0),
 ('61666666-0000-4000-8000-000000000006', 'consent_agreed',  now() - interval '15 days', 'agreed',  now() - interval '16 days', now() - interval '2 days',  0),
-('61777777-0000-4000-8000-000000000007', 'consent_pending', NULL,                        'pending', now() - interval '3 days',  now() + interval '11 days', 0);
+('61777777-0000-4000-8000-000000000007', 'consent_pending', NULL,                        'pending', now() - interval '3 days',  now() + interval '11 days', 0)
+-- [trg_supplier_onboarding_autocreate] 트리거가 만든 기본값 행을 실제 값으로 덮어쓴다.
+ON CONFLICT (supplier_id) DO UPDATE SET
+    consent_status     = EXCLUDED.consent_status,
+    consent_signed_at  = EXCLUDED.consent_signed_at,
+    agreement_status   = EXCLUDED.agreement_status,
+    last_invited_at    = EXCLUDED.last_invited_at,
+    sla_due_date       = EXCLUDED.sla_due_date,
+    reminder_count     = EXCLUDED.reminder_count;
 
 INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, last_risk_review_at) VALUES
 ('61111111-0000-4000-8000-000000000001', 8,  'low', 'low', FALSE, now() - interval '5 days'),
@@ -2098,7 +2115,15 @@ INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodolo
 INSERT INTO supplier_onboarding (supplier_id, consent_status, consent_signed_at, agreement_status, last_invited_at, sla_due_date, reminder_count) VALUES
 ('66111111-0000-4000-8000-000000000001', 'consent_agreed', now() - interval '18 days', 'agreed', now() - interval '19 days', now() - interval '5 days', 0),
 ('66222222-0000-4000-8000-000000000002', 'consent_agreed', now() - interval '14 days', 'agreed', now() - interval '15 days', now() - interval '1 days', 0),
-('66333333-0000-4000-8000-000000000003', 'consent_agreed', now() - interval '12 days', 'agreed', now() - interval '13 days', now() + interval '1 days', 0);
+('66333333-0000-4000-8000-000000000003', 'consent_agreed', now() - interval '12 days', 'agreed', now() - interval '13 days', now() + interval '1 days', 0)
+-- [trg_supplier_onboarding_autocreate] 트리거가 만든 기본값 행을 실제 값으로 덮어쓴다.
+ON CONFLICT (supplier_id) DO UPDATE SET
+    consent_status     = EXCLUDED.consent_status,
+    consent_signed_at  = EXCLUDED.consent_signed_at,
+    agreement_status   = EXCLUDED.agreement_status,
+    last_invited_at    = EXCLUDED.last_invited_at,
+    sla_due_date       = EXCLUDED.sla_due_date,
+    reminder_count     = EXCLUDED.reminder_count;
 
 INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
 ('66111111-0000-4000-8000-000000000001', 11, 'low',    'low', FALSE, NULL, now() - interval '6 days'),
