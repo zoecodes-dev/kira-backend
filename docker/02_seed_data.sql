@@ -2611,8 +2611,8 @@ ON CONFLICT DO NOTHING;
 --   STEP2(Pool 확정)·STEP4(수신확인)를 실제로 클릭해서 진행해야 하는 상태로 시작한다.
 
 -- 32-1. 1차 협력사(한양셀 변형) — 환경성적서 + 사업자등록증 DB 보유(핵심 요건).
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
-('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', 'Kim CEO', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단남로117번길 71', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
+('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단남로117번길 71', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
 
 -- 32-1b. 담당자(PIC) — building 상태로 바뀌면서 STEP3(메일 발송)을 실제로 거치므로,
@@ -2648,10 +2648,10 @@ ON CONFLICT (bom_version_id) DO NOTHING;
 --   unverified로 시작 — PM테스트협력사 hop0 시드와 동일한 패턴.
 --   hop1(한양배터리셀)은 link_status='supplychain_declared'(Pool 미확정) +
 --   verification_status='unverified'(수신 미확인)로 시작해 STEP2·STEP4를 직접 진행해야 한다.
---   hop2(한양테스트하위)는 PM02와 동일하게 엣지만 있고 동의서/자료요청은 안 만든다 —
---   그래야 노출됐을 때 STEP3(메일 발송)이 미완료로 잡혀 실제로 메일을 보내야 한다.
+--   2차(하위) 협력사는 더 이상 시드로 미리 심지 않는다 — "캐스케이드 초대로 등록하면
+--   실제로 트리에 나타난다"는 시나리오를 보여주려면 미리 심어두면 안 된다(증명이 안 됨).
+--   대신 backend/handlers/supplier_invited.py의 자동연결 기능이 라이브 등록 시 엣지를 만든다.
 INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
 ('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
-('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
-('55511111-0000-4000-8000-000000000012', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2025-01-01', '2025-12-31')
+('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31')
 ON CONFLICT (edge_id) DO NOTHING;

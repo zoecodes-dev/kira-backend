@@ -192,8 +192,28 @@ async def submit_data_request_endpoint(request_id: uuid.UUID, req: SubmitDataReq
     협력사가 작성을 마치고 최종 제출을 확정합니다.
     batch를 자동 생성하고 파이프라인 큐에 적재합니다.
     """
+    # [FIX] batches.bom_version_id/tenant_id를 채워서 생성 — 안 채우면 compliance.py의
+    # "JOIN supply_chain_map ON scm.bom_version_id = b.bom_version_id" 판정 쿼리가 항상
+    # 0건을 반환한다(NULL은 아무 값과도 안 같음). bom_version_id는 이 제출 요청(data_request_log)
+    # 자체에 이미 있고, tenant_id는 그 제품(products)에서 derive한다.
+    from sqlalchemy import text as _text
+    req_log_for_batch = await submission_repo.get_data_request(db, request_id)
+    bom_version_id = (
+        str(req_log_for_batch.bom_version_id)
+        if req_log_for_batch and req_log_for_batch.bom_version_id else None
+    )
+    tenant_row = await db.execute(
+        _text("SELECT tenant_id FROM products WHERE product_id = :pid"),
+        {"pid": str(req.product_id)},
+    )
+    tenant_id_value = tenant_row.scalar()
+    tenant_id = str(tenant_id_value) if tenant_id_value else None
+
     try:
-        batch_id_str = await create_batch(db, str(req.product_id), req.destination)
+        batch_id_str = await create_batch(
+            db, str(req.product_id), req.destination,
+            bom_version_id=bom_version_id, tenant_id=tenant_id,
+        )
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"배치 생성 실패: {e}")

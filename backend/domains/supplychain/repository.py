@@ -6,6 +6,7 @@ domains/supplychain/repository.py  (담당: 팀원 D · 영수)
 """
 import re
 import unicodedata
+import uuid
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -249,7 +250,7 @@ class SupplyChainRepository:
                  -- 차수: 루트(부모 없음)=0, 자식=부모 엣지 hop_level+1.
                  -- 설정 안 하면 NULL → n-tier 재귀 CTE(scm.hop_level=parent+1)에서 누락된다.
                  CASE
-                     WHEN :parent_supplier_id IS NULL THEN 0
+                     WHEN CAST(:parent_supplier_id AS uuid) IS NULL THEN 0
                      ELSE COALESCE((SELECT scm2.hop_level + 1
                                     FROM supply_chain_map scm2
                                     WHERE scm2.child_supplier_id = :parent_supplier_id
@@ -270,6 +271,118 @@ class SupplyChainRepository:
         })
         await self.session.flush()
         return dict(result.first()._mapping)
+
+    @trace_tool("supply_chain_get_or_create_child_part")
+    async def get_or_create_child_part(
+        self,
+        bom_version_id: str,
+        parent_supplier_id: str,
+        child_supplier_id: str,
+    ) -> str:
+        """캐스케이드 초대로 생성됐지만 맵에 미연결인 협력사를 연결할 때, 그 협력사가
+        공급하는 부품(parts) row가 없으면 부모 부품의 하위 tier로 하나 만들어 재사용한다.
+        """
+        parent_part_q = text("""
+            SELECT p.part_id, p.tier_level
+            FROM supply_chain_map scm
+            JOIN parts p ON p.part_id = scm.part_id
+            WHERE scm.bom_version_id = :bom_version_id
+              AND scm.child_supplier_id = :parent_supplier_id
+            ORDER BY scm.created_at DESC
+            LIMIT 1
+        """)
+        parent_row = (await self.session.execute(parent_part_q, {
+            "bom_version_id": bom_version_id,
+            "parent_supplier_id": parent_supplier_id,
+        })).mappings().first()
+
+        parent_part_id = parent_row["part_id"] if parent_row else None
+        parent_tier = parent_row["tier_level"] if parent_row and parent_row["tier_level"] is not None else -1
+
+        child_name_q = text("SELECT company_name FROM suppliers WHERE supplier_id = :sid")
+        child_name_row = (await self.session.execute(child_name_q, {"sid": child_supplier_id})).mappings().first()
+        child_company_name = (child_name_row or {}).get("company_name") or "미상 협력사"
+        part_name = f"{child_company_name} 공급 부품"
+
+        existing_q = text("""
+            SELECT part_id FROM parts
+            WHERE part_name = :part_name
+              AND parent_part_id IS NOT DISTINCT FROM :parent_part_id
+            LIMIT 1
+        """)
+        existing = (await self.session.execute(existing_q, {
+            "part_name": part_name,
+            "parent_part_id": parent_part_id,
+        })).mappings().first()
+        if existing:
+            return str(existing["part_id"])
+
+        part_code = f"AUTO-{uuid.uuid4().hex[:12].upper()}"
+        insert_q = text("""
+            INSERT INTO parts (part_code, part_name, tier_level, parent_part_id, source_system)
+            VALUES (:part_code, :part_name, :tier_level, :parent_part_id, 'MANUAL_CONNECT')
+            RETURNING part_id
+        """)
+        result = await self.session.execute(insert_q, {
+            "part_code": part_code,
+            "part_name": part_name,
+            "tier_level": parent_tier + 1,
+            "parent_part_id": parent_part_id,
+        })
+        await self.session.flush()
+        return str(result.scalar_one())
+
+    @trace_tool("supply_chain_lock_and_check_edge")
+    async def lock_and_check_edge_exists(
+        self,
+        bom_version_id: str,
+        parent_supplier_id: str,
+        child_supplier_id: str,
+    ) -> bool:
+        """(bom_version, parent, child) 키로 트랜잭션 어드바이저리 락을 잡고 엣지 존재 여부를
+        반환한다. 커밋/롤백 시 자동 해제(xact) — SupplierInvited는 uvicorn 멀티 워커 각각의
+        LISTEN 커넥션이 동시에 수신해 동일 엣지를 중복 INSERT할 수 있어(경합), 두 번째
+        트랜잭션이 첫 번째 커밋을 기다렸다가 '이미 있음'을 보고 스킵하게 한다.
+        """
+        lock_q = text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
+        key = f"{bom_version_id}:{parent_supplier_id}:{child_supplier_id}"
+        await self.session.execute(lock_q, {"key": key})
+
+        check_q = text("""
+            SELECT 1 FROM supply_chain_map
+            WHERE bom_version_id = :bom_version_id
+              AND parent_supplier_id = :parent_supplier_id
+              AND child_supplier_id = :child_supplier_id
+            LIMIT 1
+        """)
+        result = await self.session.execute(check_q, {
+            "bom_version_id": bom_version_id,
+            "parent_supplier_id": parent_supplier_id,
+            "child_supplier_id": child_supplier_id,
+        })
+        return result.first() is not None
+
+    @trace_tool("supply_chain_get_unconnected_parent_edges")
+    async def get_unconnected_parent_bom_versions(
+        self,
+        parent_supplier_id: str,
+        child_supplier_id: str,
+    ) -> List[str]:
+        """초대(SupplierInvited) 자동 편입용: parent_supplier_id가 child로 연결된 모든
+        bom_version_id 중, child_supplier_id가 아직 그 bom_version에 엣지가 없는 것만 반환.
+        """
+        q = text("""
+            SELECT DISTINCT parent_edge.bom_version_id
+            FROM supply_chain_map parent_edge
+            WHERE parent_edge.child_supplier_id = :parent_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM supply_chain_map child_edge
+                  WHERE child_edge.bom_version_id = parent_edge.bom_version_id
+                    AND child_edge.child_supplier_id = :child_id
+              )
+        """)
+        result = await self.session.execute(q, {"parent_id": parent_supplier_id, "child_id": child_supplier_id})
+        return [str(row[0]) for row in result]
 
     @trace_tool("supply_chain_declare_source")
     async def declare_new_source(
