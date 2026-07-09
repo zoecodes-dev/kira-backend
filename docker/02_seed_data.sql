@@ -2842,6 +2842,9 @@ ON CONFLICT (bom_version_id) DO NOTHING;
 --   unverified로 시작 — PM테스트협력사 hop0 시드와 동일한 패턴.
 --   hop1(한양배터리셀)은 link_status='supplychain_declared'(Pool 미확정) +
 --   verification_status='unverified'(수신 미확인)로 시작해 STEP2·STEP4를 직접 진행해야 한다.
+--   2차(하위) 협력사는 더 이상 시드로 미리 심지 않는다 — "캐스케이드 초대로 등록하면
+--   실제로 트리에 나타난다"는 시나리오를 보여주려면 미리 심어두면 안 된다(증명이 안 됨).
+--   대신 backend/handlers/supplier_invited.py의 자동연결 기능이 라이브 등록 시 엣지를 만든다.
 INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
 ('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
 ('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31')
