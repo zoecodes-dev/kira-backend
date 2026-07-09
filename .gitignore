@@ -45,7 +45,3 @@ ci/report.md
 ci/pytest-results.xml
 kira-architecture.html
 interaction.html
-
-# Repomix output
-repomix-output.txt
-repomix-output.xml
