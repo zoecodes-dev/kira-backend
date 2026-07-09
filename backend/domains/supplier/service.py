@@ -38,7 +38,7 @@ from backend.events.types import (
     SupplierStatusChangedEvent,
     SupplierDocumentUploadedEvent,
 )
-from backend.infrastructure import geocode
+from backend.infrastructure import geocode, storage
 from backend.infrastructure.event_bus import publish
 from backend.infrastructure.trace import trace_node
 # AP: 추출결과 read는 E 제공(submission repository), 마스터폼 prefill 변환은 B(supplier)
@@ -891,6 +891,36 @@ async def get_carbon_declarations(db: AsyncSession, supplier_id: UUID) -> Option
         "supplier_id": supplier_id,
         "declarations": await repository.get_carbon_declarations(db, supplier_id),
     }
+
+
+# doc_kind(URL 경로) → suppliers 컬럼명. update_supplier_detail의 doc_url_kinds(컬럼→kind)와 역방향 짝.
+_DOC_KIND_TO_COLUMN = {
+    "business_reg": "business_reg_doc_url",
+    "environmental_report": "environmental_report_url",
+    "self_assessment": "self_assessment_doc_url",
+    "material_composition": "material_composition_doc_url",
+    "carbon_footprint": "carbon_footprint_doc_url",
+}
+
+
+async def get_document_url(db: AsyncSession, supplier_id: UUID, doc_kind: str) -> Optional[dict]:
+    """
+    필요문서(사업자등록증/환경성적서 등) presigned 다운로드 URL 발급.
+    잘못된 doc_kind·협력사 없음·문서 미업로드(컬럼 빈값) 모두 None(라우터가 404로 변환).
+    """
+    column = _DOC_KIND_TO_COLUMN.get(doc_kind)
+    if column is None:
+        return None
+    supplier = await repository.get_supplier_by_id(db, supplier_id)
+    if supplier is None:
+        return None
+    key = getattr(supplier, column, None)
+    if not key:
+        return None
+    file_name = supplier.business_reg_doc_name if column == "business_reg_doc_url" else None
+    if not file_name:
+        file_name = key.rstrip("/").rsplit("/", 1)[-1]
+    return {"url": await storage.generate_presigned_url(key), "file_name": file_name}
 
 
 # ============================================================

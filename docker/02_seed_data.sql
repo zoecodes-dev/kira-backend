@@ -193,9 +193,11 @@ INSERT INTO bom_versions (bom_version_id, product_id, version_number, production
 -- ============================================================
 -- 제조 탄소집약도 (EU 배터리법 Art.7)
 INSERT INTO supplier_manufacturer_details (supplier_id, manufacturing_process, energy_source, capacity, carbon_intensity) VALUES
--- [작업①] 한양(데모 협력사): 규제 필드는 '서류 업로드→AI 파싱 후에만' 채워지도록 초기 빈칸.
---   energy_source·carbon_intensity NULL (자가진단도 아래 risk_profiles에서 unknown).
-('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', NULL, '10GWh/yr', NULL),
+-- [작업①→STEP4 완비 처리] 한양(데모 협력사): carbon_intensity는 STEP4 gap 판정(EU_BATTERY_ART7
+--   mandatory 필드)의 유일한 미보유 항목이라 factory_carbon_declarations(2.34, f1111111)와
+--   동일 값으로 직접 채워 gap을 닫는다 — 실제 문서 업로드/파싱 없이도 완비로 표시.
+--   energy_source는 gap 판정 대상이 아니라 NULL 유지(자가진단도 risk_profiles에서 unknown 유지).
+('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', NULL, '10GWh/yr', 2.3400),
 ('a7777777-7777-4000-8000-000000000007', 'Prismatic NCM Cell Assembly', 'renewable', '8GWh/yr', 2.5100),
 ('a2222222-2222-4000-8000-000000000002', 'CAM Sintering (NCM811)', 'mixed', '5GWh/yr', 3.1000),
 -- 대성정밀: energy_source NULL (저신뢰 파싱 원인 — Gray)
@@ -2338,7 +2340,7 @@ WHERE s.provider_type = 'miner'
 
 -- 28-1. 신규 망간(Mn) 제련소 + 광산 (기존에 Mn 노드 부재 — 트리 완성용)
 INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
-('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'smelter', '{"Mn":32.5}'::jsonb, 'CN', 'Hunan, Xiangtan Manganese Industrial Zone, China', 's3://kira-docs/suppliers/64666666/biz_reg.pdf', NULL, 74, 'supplier_verified', 'low'),
+('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Xiangtan Mn Refinery', 'Xiangtan Mn Refinery', 'smelter', '{"Mn":32.5}'::jsonb, 'CN', 'Hunan, Xiangtan Manganese Industrial Zone, China', 's3://kira-docs/suppliers/64666666/biz_reg.pdf', 's3://kira-docs/suppliers/64666666/env_report.pdf', 74, 'supplier_verified', 'low'),
 ('65666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kalahari Manganese Mine', 'Kalahari Manganese Mine', 'miner', '{"Mn":38.0}'::jsonb, 'ZA', 'Northern Cape, Kalahari Manganese Field, South Africa', 's3://kira-docs/suppliers/65666666/biz_reg.pdf', NULL, 60, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
 UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id = '64666666-0000-4000-8000-000000000006';
@@ -2467,6 +2469,148 @@ FROM data_provision_consents dc
 WHERE dr.target_supplier_id = dc.supplier_id
   AND dc.status = 'agreed'
   AND dr.response_status <> 'response_responded';
+
+-- 28-6. iX3 bom_items 보강 — tier3(CAM/ANO) 다음이 트리에 안 보이던 버그 수정.
+--   get_bom_tree 재귀 CTE·프론트 supply-chain-map 병합 모두 "이 bom_version의 bom_items에
+--   등록된 부품"만 부모-자식으로 연결한다. 28-2가 supply_chain_map 엣지는 tier4~6까지 늘렸지만
+--   bom_items는 그대로 6건(CELL/CAM/ANO/REF-NI/MIN-NI/MIN-LI)이라 중간 마디가 비어 있었다:
+--     · PRE-NCM(004)·LIOH(005) — CAM(006)의 실제 tier4 자식인데 bom_items 미등록이라
+--       CAM이 리프로 끊기고, 그 아래 REF-NI(011)·MIN-LI(00b)는 부모가 없는 로컬 루트로 붕 떴다
+--       (backend/domains/product/repository.py:661-675 조사노트의 iX3 forest 사례).
+--     · REF-CO(012)/MIN-CO(009), REF-MN(013)/MIN-MN(00a), PROC-GRAPHITE(014)/MIN-GRAPHITE(015)
+--       — 28-2에서 새로 연결한 코발트·망간·흑연 가지도 동일하게 bom_items 미등록.
+--   direct_material_cost는 다른 제품들과 동일하게 parts.unit_price 그대로 사용. 수량/비중은
+--   i4·IX·i6 등 같은 part_id를 이미 쓰는 제품들의 비례(상위 tier 대비 질량비)를 따랐다.
+INSERT INTO bom_items (bom_version_id, part_id, required_quantity, required_quantity_unit, percentage, direct_material_cost, origin_country, source_system, external_id) VALUES
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000004', 26, 'kg', 15.00, 40.0000, 'KR', 'ERP_PLM', 'ERP-BI-IX3-PRE'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000005', 14, 'kg',  4.00, 84.0000, 'KR', 'ERP_PLM', 'ERP-BI-IX3-LIOH'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000012',  3, 'kg',  1.00, 36.0000, 'ZM', 'ERP_PLM', 'ERP-BI-IX3-REFCO'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000009',  4, 'kg',  0.50, 32.0000, 'ZM', 'ERP_PLM', 'ERP-BI-IX3-CO'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000013',  3, 'kg',  1.00,  6.0000, 'CN', 'ERP_PLM', 'ERP-BI-IX3-REFMN'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-00000000000a',  4, 'kg',  0.50,  4.0000, 'ZA', 'ERP_PLM', 'ERP-BI-IX3-MN'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000014', 32, 'kg',  5.00, 14.0000, 'CN', 'ERP_PLM', 'ERP-BI-IX3-PROCGR'),
+('e1111111-0000-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000015', 40, 'kg',  3.00,  6.0000, 'MZ', 'ERP_PLM', 'ERP-BI-IX3-MINGR');
+
+-- 28-7. 신규 Mn 협력사(28-1) 리스크 프로파일 — 다른 모든 협력사는 예외 없이 supplier_risk_profiles
+--   행을 갖는데 28-1에서 신설한 Xiangtan Mn Refinery·Kalahari Manganese Mine만 누락돼 있었다
+--   (self_reported_risk_level 미기재 → 완성도 계산에서 blocking 미충족으로 잡힘). status='supplier_verified'
+--   /risk_level='low' 피어(AusRef 64333333, Kalgoorlie/Niquelândia 65333333·65555555)와 동일한
+--   '검증완료·저위험' 패턴으로 채운다.
+INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
+('64666666-0000-4000-8000-000000000006', 11, 'low', 'low', FALSE, NULL, now() - interval '7 days'),
+('65666666-0000-4000-8000-000000000006', 13, 'low', 'low', FALSE, NULL, now() - interval '7 days');
+
+-- 28-8. 신규 Mn 협력사(28-1) 탄소 선언(factory_carbon_declarations) — STEP4 최종검증 화면의
+--   "환경성적서(탄소발자국)" 배지가 suppliers.environmental_report_url이 아니라 이 테이블
+--   (공장 단위 EPD 선언) 존재 여부로 판정돼(frontend/components/supply-chain/MapManageModal.tsx
+--   epdStatusOf), 28-1에서 공장만 만들고 선언을 안 넣어 Xiangtan이 '미제출'로 떴다. 4차 제련소
+--   배치(74111111~74555555)·5차 광산 배치(75111111~75555555)는 전부 이 테이블에 행이 있는 게
+--   기본 패턴이라 그대로 맞춘다(값은 같은 배치의 smelter/miner 범위 안에서 산정).
+INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source) VALUES
+('74666666-0000-4000-8000-000000000006', 3.4000, 'PEF', '2025-01-01', '2025-01-01', 'supplier_declared'),
+('75666666-0000-4000-8000-000000000006', 0.6000, 'PEF', '2025-01-01', '2025-01-01', 'supplier_declared');
+
+-- 28-9. Xiangtan/Kalahari(28-1) 담당자 누락 보강 — 다른 모든 협력사는 supplier_contacts가
+--   최소 1건씩 있는데 28-1에서 빠졌다(협력사 상세 "담당자" 탭 공란 원인).
+INSERT INTO supplier_contacts (supplier_id, factory_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('64666666-0000-4000-8000-000000000006', '74666666-0000-4000-8000-000000000006', 'Wei Chen',    'Wei Chen',    'Compliance Manager', 'Compliance', 'w.chen@xiangtanmn.demo',   '+86-731-666-6001', TRUE, 'en'),
+('65666666-0000-4000-8000-000000000006', '75666666-0000-4000-8000-000000000006', 'Thabo Nkosi', 'Thabo Nkosi', 'Mine Manager',        'Operations', 't.nkosi@kalaharimn.demo',  '+27-53-666-6002',  TRUE, 'en');
+
+-- 28-10. iX3 전용 저위험 대체 협력사 3곳 — Co 제련/광산·흑연광산을 기존 공유 협력사
+--   (Zambia Copper&Cobalt Refinery/Mine, Balama Graphite Mining — 전부 risk_level='medium',
+--   다른 제품(i6·e8888888)의 '위험 시나리오' 데모로 이미 쓰이는 중) 대신 iX3 전용 신규
+--   저위험 협력사로 교체한다. risk_level이 엣지가 아니라 협력사 전역 속성이라 기존 협력사를
+--   재사용하면 iX3에도 '주의' 배지가 같이 뜬다(사용자 확인 후 결정 — 기존 공유 협력사는 안 건드림).
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, provider_type, core_minerals, country, address, business_reg_doc_url, environmental_report_url, completeness_score, status, risk_level) VALUES
+('64777777-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kokkola Cobalt Oy', 'Kokkola Cobalt Oy', 'smelter', '{"Co":99.8}'::jsonb, 'FI', 'Kokkola Industrial Park, Finland', 's3://kira-docs/suppliers/64777777/biz_reg.pdf', 's3://kira-docs/suppliers/64777777/env_report.pdf', 82, 'supplier_verified', 'low'),
+('65777777-0000-4000-8000-000000000007', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Queensland Cobalt Mine Pty Ltd', 'Queensland Cobalt Mine Pty Ltd', 'miner', '{"Co":2.0}'::jsonb, 'AU', 'Queensland, Mount Isa Mining District, Australia', 's3://kira-docs/suppliers/65777777/biz_reg.pdf', NULL, 66, 'supplier_verified', 'low'),
+('66444444-0000-4000-8000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Munglinup Graphite Mine Pty Ltd', 'Munglinup Graphite Mine Pty Ltd', 'miner', '{"graphite_natural":11.0}'::jsonb, 'AU', 'Munglinup, Western Australia, Australia', 's3://kira-docs/suppliers/66444444/biz_reg.pdf', NULL, 63, 'supplier_verified', 'low')
+ON CONFLICT (supplier_id) DO NOTHING;
+UPDATE suppliers SET smelter_type = 'private' WHERE supplier_id = '64777777-0000-4000-8000-000000000007';
+
+INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_name_en, address, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent) VALUES
+('74777777-0000-4000-8000-000000000007', '64777777-0000-4000-8000-000000000007', 'Kokkola Refinery',          'Kokkola Refinery',          'Kokkola, Finland',                 'FI', 'Ostrobothnia',       ST_SetSRID(ST_MakePoint(23.130, 63.840), 4326),   'processing', 'BOTH', '["CRMA","EU_BATTERY"]'::jsonb, 100.00),
+('75777777-0000-4000-8000-000000000007', '65777777-0000-4000-8000-000000000007', 'Mount Isa Cobalt Mine',     'Mount Isa Cobalt Mine',     'Queensland, Australia',            'AU', 'Queensland',         ST_SetSRID(ST_MakePoint(139.490, -20.720), 4326), 'mining',     'BOTH', '["CRMA"]'::jsonb, 100.00),
+('76444444-0000-4000-8000-000000000004', '66444444-0000-4000-8000-000000000004', 'Munglinup Graphite Mine',   'Munglinup Graphite Mine',   'Munglinup, Western Australia',     'AU', 'Western Australia',  ST_SetSRID(ST_MakePoint(120.620, -33.680), 4326), 'mining',     'BOTH', '["CRMA","EUDR"]'::jsonb, 100.00)
+ON CONFLICT (factory_id) DO NOTHING;
+
+INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from)
+SELECT '65777777-0000-4000-8000-000000000007', 'Mount Isa Cobalt Mine', 'open_pit', 25000.00, ST_SetSRID(ST_MakePoint(139.490, -20.720), 4326), '2016-01-01'
+WHERE NOT EXISTS (SELECT 1 FROM supplier_miner_details WHERE supplier_id = '65777777-0000-4000-8000-000000000007');
+INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from)
+SELECT '66444444-0000-4000-8000-000000000004', 'Munglinup Graphite Mine', 'open_pit', 28000.00, ST_SetSRID(ST_MakePoint(120.620, -33.680), 4326), '2019-01-01'
+WHERE NOT EXISTS (SELECT 1 FROM supplier_miner_details WHERE supplier_id = '66444444-0000-4000-8000-000000000004');
+
+INSERT INTO supplier_contacts (supplier_id, factory_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
+('64777777-0000-4000-8000-000000000007', '74777777-0000-4000-8000-000000000007', 'Mikko Laine',  'Mikko Laine',  'ESG Manager',  'ESG',        'm.laine@kokkolacobalt.demo', '+358-6-777-7001', TRUE, 'en'),
+('65777777-0000-4000-8000-000000000007', '75777777-0000-4000-8000-000000000007', 'Emily Clarke', 'Emily Clarke', 'Mine Manager', 'Operations', 'e.clarke@qldcobalt.demo',    '+61-7-777-7002',  TRUE, 'en'),
+('66444444-0000-4000-8000-000000000004', '76444444-0000-4000-8000-000000000004', 'Daniel Foster','Daniel Foster','Mine Manager', 'Operations', 'd.foster@munglinupgraphite.demo', '+61-8-777-7003', TRUE, 'en');
+
+INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
+('64777777-0000-4000-8000-000000000007', 9,  'low', 'low', FALSE, NULL, now() - interval '7 days'),
+('65777777-0000-4000-8000-000000000007', 12, 'low', 'low', FALSE, NULL, now() - interval '7 days'),
+('66444444-0000-4000-8000-000000000004', 10, 'low', 'low', FALSE, NULL, now() - interval '7 days');
+
+INSERT INTO data_completeness_status (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields)
+SELECT 'supplier', sid::uuid, 0, 0, 100.00, '[]'::jsonb
+FROM (VALUES ('65777777-0000-4000-8000-000000000007'), ('66444444-0000-4000-8000-000000000004')) AS v(sid)
+WHERE NOT EXISTS (SELECT 1 FROM data_completeness_status d WHERE d.entity_type='supplier' AND d.entity_id=v.sid::uuid);
+
+INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source) VALUES
+('74777777-0000-4000-8000-000000000007', 1.9000, 'PEF', '2025-01-01', '2025-01-01', 'third_party_verified'),
+('75777777-0000-4000-8000-000000000007', 0.4800, 'PEF', '2025-01-01', '2025-01-01', 'supplier_declared'),
+('76444444-0000-4000-8000-000000000004', 0.5200, 'PEF', '2025-01-01', '2025-01-01', 'supplier_declared');
+
+-- 28-11. iX3 엣지 재배선 — REF-CO/MIN-CO/MIN-GRAPHITE를 신규 저위험 협력사로.
+--   edge_id·part_id·hop_level·core_minerals(28-3)는 그대로, parent/child_supplier_id만 교체.
+UPDATE supply_chain_map SET child_supplier_id = '64777777-0000-4000-8000-000000000007'
+  WHERE edge_id = '5b111111-0000-4000-8000-000000000004';  -- REF-CO: Zambia → Kokkola
+UPDATE supply_chain_map SET parent_supplier_id = '64777777-0000-4000-8000-000000000007',
+                             child_supplier_id  = '65777777-0000-4000-8000-000000000007'
+  WHERE edge_id = '5b111111-0000-4000-8000-000000000005';  -- MIN-CO: Zambia → Mount Isa
+UPDATE supply_chain_map SET child_supplier_id = '66444444-0000-4000-8000-000000000004'
+  WHERE edge_id = '5b111111-0000-4000-8000-00000000000a';  -- MIN-GRAPHITE: Balama → Munglinup
+
+-- bom_items(28-6) origin_country도 새 협력사 국가에 맞춰 정정.
+UPDATE bom_items SET origin_country = 'FI' WHERE bom_version_id = 'e1111111-0000-4000-8000-000000000001' AND part_id = 'b1111111-0000-4000-8000-000000000012'; -- REF-CO
+UPDATE bom_items SET origin_country = 'AU' WHERE bom_version_id = 'e1111111-0000-4000-8000-000000000001' AND part_id = 'b1111111-0000-4000-8000-000000000009'; -- MIN-CO
+UPDATE bom_items SET origin_country = 'AU' WHERE bom_version_id = 'e1111111-0000-4000-8000-000000000001' AND part_id = 'b1111111-0000-4000-8000-000000000015'; -- MIN-GRAPHITE
+
+-- 28-12. 동의서/자료요청 백필 재실행(28-4/28-5와 동일 로직) — 28-10 신규 협력사는 28-4보다
+--   파일에서 뒤에 있어 그때는 안 잡혔다. 광산(65777777·66444444)은 입력 주체가 아니라
+--   그대로 제외(WHERE s.provider_type <> 'miner').
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients,
+   valid_from, valid_to, revocable, status, requested_at, returned_at, agreed_at,
+   signer_name, signer_title, signer_email, signature_method, form_version, form_data, agreement_hash)
+SELECT DISTINCT ON (s.supplier_id)
+  s.supplier_id, s.tenant_id,
+  '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE,
+  CASE WHEN cu.customer_name IS NOT NULL THEN jsonb_build_array(cu.customer_name) END,
+  '2026-01-01'::date, '2027-12-31'::date, TRUE, 'agreed',
+  now() - interval '21 days', now() - interval '14 days', now() - interval '13 days',
+  c.name, c.role, c.email, 'email_form', 'v1.0',
+  jsonb_build_object('data_subject', s.company_name, 'sub_supplier_consent', true, 'retention_years', 7),
+  substr(md5(s.supplier_id::text), 1, 12)
+FROM suppliers s
+JOIN supply_chain_map scm ON scm.child_supplier_id = s.supplier_id
+  AND scm.hop_level > 0 AND scm.verification_status = 'verified'
+JOIN bom_versions bv ON bv.bom_version_id = scm.bom_version_id
+JOIN products p      ON p.product_id = bv.product_id
+LEFT JOIN customers cu ON cu.customer_id = p.customer_id
+LEFT JOIN supplier_contacts c ON c.supplier_id = s.supplier_id AND c.is_primary
+WHERE s.provider_type <> 'miner'
+  AND NOT EXISTS (SELECT 1 FROM data_provision_consents dc WHERE dc.supplier_id = s.supplier_id)
+ORDER BY s.supplier_id, scm.hop_level;
+
+INSERT INTO data_request_log
+  (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date,
+   response_status, submission_status)
+SELECT
+  NULL, dc.supplier_id, 'general_info', dc.requested_at, dc.requested_at + interval '14 days',
+  'response_responded', 'submission_approved'
+FROM data_provision_consents dc
+WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id = dc.supplier_id);
 
 
 -- ============================================================
@@ -2598,21 +2742,21 @@ ON CONFLICT DO NOTHING;
 
 
 -- ============================================================
--- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형) + 2차(하위 협력사) 데모
+-- 32. 데모 시현용 — iX3 복제 제품 + 1차(한양셀 변형). 2차는 데모 중 초대로 라이브 생성.
 -- ============================================================
--- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유) + 2차 협력사 1곳"
---   구성의 공급망을 보여주기 위한 전용 데이터셋. 실 iX3(d1111111)는 안 건드리고
---   복제 제품을 새로 만든다. 실 데이터와 유사하되 이름만 살짝 변형(한양셀 제조(주)
---   → 한양배터리셀(주)). 2차(한양테스트하위)는 PM테스트협력사02와 동일한 패턴
---   (엣지만 있고 동의서/자료요청은 미리 만들지 않음)으로 심어 STEP3(메일 발송)·
---   STEP4(수신 확인)를 실제로 거쳐야 노출되게 한다.
+-- 목적: PM 데모에서 "1차 협력사 1곳(환경성적서·사업자등록증 보유)"까지만 미리 보여주고,
+--   2차(하위 협력사)는 데모 중 실제로 "캐스케이드 초대" 버튼을 눌러 그 자리에서 생성되는
+--   과정 자체를 시연하기 위한 전용 데이터셋. 그래서 2차 협력사는 의도적으로 시드에
+--   넣지 않는다 — 초대 전인데 스텁이 이미 있으면 초대 로직을 보여줄 게 없어진다.
+--   실 iX3(d1111111)는 안 건드리고 복제 제품을 새로 만든다. 실 데이터와 유사하되
+--   이름만 살짝 변형(한양셀 제조(주) → 한양배터리셀(주)).
 --   [PM테스트협력사와 동일하게 미검증 시작 단계로 통일] 맵 status='building' + 엣지
 --   link_status='supplychain_declared' + verification_status='unverified' —
---   STEP2(Pool 확정)·STEP4(수신확인)를 실제로 클릭해서 진행해야 하는 상태로 시작한다.
+--   STEP2(Pool 확정)를 실제로 클릭해야 하는 상태로 시작한다.
 
 -- 32-1. 1차 협력사(한양셀 변형) — 환경성적서 + 사업자등록증 DB 보유(핵심 요건).
-INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, ceo_name, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
-('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', 'Kim CEO', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단남로117번길 71', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
+INSERT INTO suppliers (supplier_id, tenant_id, company_name, company_name_en, company_name_ko, business_reg_no, provider_type, core_minerals, country, address, business_reg_doc_url, business_reg_doc_name, environmental_report_url, completeness_score, status, risk_level) VALUES
+('a5111111-1111-4000-8000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '한양배터리셀(주)', 'Hanyang Battery Cell', '한양배터리셀(주)', '119-86-51001', 'manufacturer', '{"Li":7.1,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb, 'KR', '경상북도 포항시 북구 흥해읍 영일만산단남로117번길 71', 's3://kira-docs/suppliers/a5111111/biz_reg.pdf', '한양배터리셀_사업자등록증.pdf', 's3://kira-docs/suppliers/a5111111/env_report.pdf', 90, 'supplier_verified', 'low')
 ON CONFLICT (supplier_id) DO NOTHING;
 
 -- 32-1b. 담당자(PIC) — building 상태로 바뀌면서 STEP3(메일 발송)을 실제로 거치므로,
@@ -2643,15 +2787,66 @@ INSERT INTO supply_chain_maps (map_id, bom_version_id, product_id, status) VALUE
 ('55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'd5111111-0000-4000-8000-000000000001', 'building')
 ON CONFLICT (bom_version_id) DO NOTHING;
 
--- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀) → hop2(한양테스트하위).
+-- 32-6. 맵 엣지 — hop0(원청 KIRA) → hop1(한양배터리셀)까지만. 2차(Cell 파트, b1111111-...003)는
+--   의도적으로 엣지를 안 만든다 — 데모에서 한양배터리셀의 "하위협력사 캐스케이드 초대"를
+--   실제로 눌러서 그 결과로 2차 협력사 stub + 이 엣지가 생성되는 걸 보여준다.
 --   hop0(원청 자신)은 link_status만 confirmed(=원청은 Pool 확정 대상이 아님), verification은
 --   unverified로 시작 — PM테스트협력사 hop0 시드와 동일한 패턴.
 --   hop1(한양배터리셀)은 link_status='supplychain_declared'(Pool 미확정) +
 --   verification_status='unverified'(수신 미확인)로 시작해 STEP2·STEP4를 직접 진행해야 한다.
---   hop2(한양테스트하위)는 PM02와 동일하게 엣지만 있고 동의서/자료요청은 안 만든다 —
---   그래야 노출됐을 때 STEP3(메일 발송)이 미완료로 잡혀 실제로 메일을 보내야 한다.
 INSERT INTO supply_chain_map (edge_id, map_id, bom_version_id, parent_supplier_id, child_supplier_id, part_id, hop_level, link_status, source_system, verification_status, supply_period_from, supply_period_to) VALUES
 ('55511111-0000-4000-8000-000000000010', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', NULL,                                     'a0000000-0000-4000-8000-000000000000', 'b1111111-0000-4000-8000-000000000001', 0, 'supplychain_confirmed', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
-('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31'),
-('55511111-0000-4000-8000-000000000012', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000001', 'a5111111-1111-4000-8000-000000000002', 'b1111111-0000-4000-8000-000000000003', 2, 'supplychain_declared', 'SUPPLIER_DECLARED', 'unverified', '2025-01-01', '2025-12-31')
+('55511111-0000-4000-8000-000000000011', '55511111-0000-4000-8000-000000000001', 'e5111111-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000000', 'a5111111-1111-4000-8000-000000000001', 'b1111111-0000-4000-8000-000000000002', 1, 'supplychain_declared', 'ERP', 'unverified', '2025-01-01', '2025-12-31')
 ON CONFLICT (edge_id) DO NOTHING;
+
+-- ============================================================
+-- 33. 실 iX3(d1111111/e1111111) 공급망 STEP4 완비 처리 — '자료 수집·보완 검토' 화면에서
+--   모든 협력사가 '입력 완비' + '제출 자료'(문제없음)로 뜨도록 한다. 실제 문서 업로드/파싱
+--   없이 DB 레코드만 채운다(요청 배경: 데모에서 STEP4가 항상 완비 상태로 보여야 함).
+-- ============================================================
+
+-- 33-1. Xiangtan Mn Refinery — 이 체인에서 '입력 현황' 갭의 유일한 원인이 동의서 미보유였음.
+INSERT INTO data_provision_consents
+  (supplier_id, tenant_id, data_scope, purpose, third_party_sharing, allowed_recipients, valid_from, valid_to, revocable,
+   status, requested_at, returned_at, agreed_at, signer_name, signer_title, signer_email, signature_method, form_version, form_data, agreement_hash)
+VALUES
+  ('64666666-0000-4000-8000-000000000006', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+   '["company","contacts","factories","carbon_epd","origin"]'::jsonb, 'EU_BATTERY', TRUE, '["BMW AG"]'::jsonb,
+   '2026-01-01', '2027-12-31', TRUE, 'agreed', now() - interval '20 days', now() - interval '14 days', now() - interval '13 days',
+   '담당자', '팀장', 'contact@xiangtan-mn.demo', 'email_form', 'v1.0',
+   '{"data_subject":"Xiangtan Mn Refinery"}'::jsonb, 'xiangtanmn0001')
+ON CONFLICT DO NOTHING;
+
+-- 33-2. 나머지 13개 협력사(한양셀 제외 — 이미 32번 이전에 자료요청 1건 보유) — 제출 자료
+--   (AI 추출결과) 0건이라 DataReviewModal에서 '제출 대기'로 뜨는 걸, 문제없는 빈 추출결과로
+--   채워 '제출 자료'로 전환한다. confidence_map/unparsed_fields를 비워두면 docStat.problem
+--   판정(신뢰도<0.7·미파싱 필드·HITL 미승인)에 전혀 안 걸린다.
+WITH targets(supplier_id) AS (
+  VALUES
+    ('a2222222-2222-4000-8000-000000000002'::uuid),  -- 동성머티리얼(주)
+    ('63111111-0000-4000-8000-000000000001'::uuid),  -- 동신전구체(주)
+    ('66111111-0000-4000-8000-000000000001'::uuid),  -- 한빛음극재(주)
+    ('a3333333-3333-4000-8000-000000000003'::uuid),  -- 호주리튬광업
+    ('66333333-0000-4000-8000-000000000003'::uuid),  -- Balama Graphite Mining SA
+    ('65666666-0000-4000-8000-000000000006'::uuid),  -- Kalahari Manganese Mine
+    ('65333333-0000-4000-8000-000000000003'::uuid),  -- Western Australia Nickel Mine Pty Ltd
+    ('65444444-0000-4000-8000-000000000004'::uuid),  -- Zambia Copperbelt Cobalt Mine
+    ('aaaaaaaa-aaaa-4000-8000-00000000000a'::uuid),  -- 한중제련(주)
+    ('64333333-0000-4000-8000-000000000003'::uuid),  -- AusRef Processing Pty Ltd
+    ('66222222-0000-4000-8000-000000000002'::uuid),  -- Qingdao Spherical Graphite Co.
+    ('64666666-0000-4000-8000-000000000006'::uuid),  -- Xiangtan Mn Refinery
+    ('64444444-0000-4000-8000-000000000004'::uuid)   -- Zambia Copper & Cobalt Refinery
+),
+new_requests AS (
+  INSERT INTO data_request_log
+    (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date, response_status, submission_status)
+  SELECT '11111111-0000-4000-8000-000000000002', supplier_id, 'material_composition',
+         now() - interval '10 days', now() - interval '3 days', 'response_responded', 'submission_approved'
+  FROM targets
+  RETURNING request_id, target_supplier_id
+)
+INSERT INTO document_extraction_results
+  (request_id, parsed_fields, confidence_map, unparsed_fields, detected_document_type, evidence_summary)
+SELECT request_id, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, '자재 사양서',
+       '공급망 데모용 자동 완비 처리 — 실제 문서 업로드 없이 생성.'
+FROM new_requests;
