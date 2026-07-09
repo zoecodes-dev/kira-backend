@@ -2001,6 +2001,12 @@ UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12500.0 WHERE edge_id
 UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7200.0 WHERE edge_id = '51111111-0000-4000-8000-000000000005' AND factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13';
 UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0 WHERE edge_id = '54444444-0000-4000-8000-000000000004' AND factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13';
 
+-- [FIX] iX3 50(51111111-...005) 비율 합 100% 미달 보정.
+--   위 upd_secondary(2001줄)가 하드코딩 factory_id(e3ae46e6)를 참조해 실제 온산 제2제련소 row를 못 찾아 40%에서 안 내려감(50+40+20=110%, 100% 아님).
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7200.0
+WHERE edge_id = '51111111-0000-4000-8000-000000000005'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a' AND factory_name = '온산 제2제련소');
+
 -- Brazil Nickel Refining SA (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
   INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
