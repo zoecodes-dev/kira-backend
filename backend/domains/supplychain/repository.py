@@ -973,11 +973,27 @@ class SupplyChainRepository:
             params["bom_version_id"] = bom_version_id
 
         query = text(f"""
-            WITH RECURSIVE edge_ratio AS (
+            WITH RECURSIVE edge_ratio_source AS (
+                -- 엣지별 공장 분할 원천. supply_ratio(엣지 전용 입력)가 있으면 그걸 쓰고,
+                -- 없는 엣지는 협력사가 '내 기업 정보 > 공장정보'에서 입력한
+                -- supplier_factories.supply_ratio_percent 로 대체한다(§고객사 다운로드 엑셀과
+                -- 동일 값 — 지금까지 이 폴백이 없어 트리에서만 0%/미표시로 보였다).
+                SELECT edge_id, factory_id, ratio_percentage FROM supply_ratio
+
+                UNION ALL
+
+                SELECT scm.edge_id, sf.factory_id, sf.supply_ratio_percent
+                FROM supply_chain_map scm
+                JOIN supplier_factories sf
+                    ON sf.supplier_id = scm.child_supplier_id AND sf.is_active = TRUE
+                WHERE sf.supply_ratio_percent IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM supply_ratio sr WHERE sr.edge_id = scm.edge_id)
+            ),
+            edge_ratio AS (
                 -- 엣지별 자기 공장 분할 합(비재귀, 보통 100) — 재귀 전파는 이 값 하나만 사용해
                 -- 조상의 공장 분할이 자손 쪽으로 곱셈 중복(fan-out)되지 않게 한다.
                 SELECT edge_id, SUM(ratio_percentage) AS total_ratio
-                FROM supply_ratio
+                FROM edge_ratio_source
                 GROUP BY edge_id
             ),
             sc_cum AS (
@@ -1031,8 +1047,8 @@ class SupplyChainRepository:
                     4
                 ) AS cumulative_contribution
             FROM sc_cum sc
-            LEFT JOIN edge_ratio er   ON er.edge_id = sc.map_id
-            LEFT JOIN supply_ratio sr ON sr.edge_id = sc.map_id
+            LEFT JOIN edge_ratio er          ON er.edge_id = sc.map_id
+            LEFT JOIN edge_ratio_source sr   ON sr.edge_id = sc.map_id
             WHERE NOT sc.is_cycle
             ORDER BY sc.hop_level, sc.map_id;
         """)
