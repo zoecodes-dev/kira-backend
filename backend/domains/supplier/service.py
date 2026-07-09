@@ -417,6 +417,7 @@ async def update_supplier_detail(
             fields.pop("country")
     manuf = {k: fields.pop(k) for k in ("carbon_intensity", "energy_source") if k in fields}
     self_risk = fields.pop("self_reported_risk_level", None)
+    submitted = fields.pop("submitted", None)  # suppliers 컬럼 아님 — 원청 알림 트리거 신호만
     # 탄소발자국 문서 — suppliers에 대응 컬럼이 없으므로(스키마 무수정) update로 보내지 않고
     # 커밋 후 파싱 이벤트만 발행한다(핸들러가 doc_category=carbon_footprint_declaration로 매핑).
     carbon_doc = fields.pop("carbon_footprint_doc_url", None)
@@ -456,6 +457,14 @@ async def update_supplier_detail(
                 file_name=carbon_doc.rsplit("/", 1)[-1] if "/" in carbon_doc else carbon_doc,
                 doc_kind="carbon_footprint",
             )),
+        )
+
+    # AI 처리 확인(ExtractionTable) "원청사로 제출" — submitted=True로 명시했을 때만
+    # 원청에 알림(submit_master_form과 동일 이벤트/수신자 로직 재사용).
+    if submitted:
+        await publish(
+            "MasterFormSubmitted",
+            dataclasses.asdict(MasterFormSubmittedEvent(supplier_id=supplier_id)),
         )
 
     return await get_supplier_detail(db, supplier_id, tenant_id)
