@@ -175,8 +175,29 @@ CREATE TABLE supplier_onboarding (
     last_invited_at     TIMESTAMPTZ,
     last_reminded_at    TIMESTAMPTZ,
     sla_due_date        TIMESTAMPTZ,
-    reminder_count      INT DEFAULT 0
+    reminder_count      INT DEFAULT 0,
+
+    -- 협력사당 온보딩 레코드는 1개(아래 자동생성 트리거의 ON CONFLICT 대상 키).
+    CONSTRAINT uq_supplier_onboarding_supplier UNIQUE (supplier_id)
 );
+
+-- [구조적 안전장치] suppliers에 행이 생기면(애플리케이션 경유든 seed/수동 SQL이든 무관하게)
+--   supplier_onboarding이 반드시 함께 생기도록 트리거로 보장한다. require_supplier_consent
+--   (infrastructure/auth.py)가 이 테이블에 행이 아예 없으면 CONSENT_REQUIRED로 막는데,
+--   raw INSERT로 만들어진 협력사(seed 등)는 이 행이 누락되기 쉬웠다 — 트리거로 원천 차단.
+--   기본값은 'consent_pending'(미동의) — 실제 동의 완료는 각자 흐름대로 갱신되어야 한다.
+CREATE OR REPLACE FUNCTION fn_supplier_onboarding_autocreate() RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO supplier_onboarding (supplier_id, consent_status, agreement_status, reminder_count)
+    VALUES (NEW.supplier_id, 'consent_pending', 'pending', 0)
+    ON CONFLICT (supplier_id) DO NOTHING;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_supplier_onboarding_autocreate
+AFTER INSERT ON suppliers
+FOR EACH ROW EXECUTE FUNCTION fn_supplier_onboarding_autocreate();
 
 -- [테이블 역할] 제3자 정보제공 동의서 = 데이터 계약(Data Contract). [담당: 은지/supplier]
 --   원청(consumer)이 협력사(provider)에게 동의서를 메일 발송 → 일정 양식으로 회신 → DB 영속.
