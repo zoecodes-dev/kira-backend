@@ -213,8 +213,18 @@ async def _ensure_graph():
     return graph
 
 
-async def create_batch(db, product_id: str, destination: str) -> str:
-    batch = Batch(product_id=UUID(product_id), destination=destination)
+async def create_batch(
+    db, product_id: str, destination: str,
+    bom_version_id: str | None = None, tenant_id: str | None = None,
+) -> str:
+    """bom_version_id/tenant_id를 안 채우면 compliance.py의 batches↔supply_chain_map
+    JOIN(bom_version_id 기준)이 항상 0건이 된다 — 호출부(submission)가 넘겨주는 값을 그대로 저장."""
+    batch = Batch(
+        product_id=UUID(product_id),
+        destination=destination,
+        bom_version_id=UUID(bom_version_id) if bom_version_id else None,
+        tenant_id=UUID(tenant_id) if tenant_id else None,
+    )
     db.add(batch)
     await db.flush()
     await db.commit()
