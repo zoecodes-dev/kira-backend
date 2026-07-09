@@ -193,7 +193,17 @@ async def submit_data_request_endpoint(request_id: uuid.UUID, req: SubmitDataReq
     batch를 자동 생성하고 파이프라인 큐에 적재합니다.
     """
     try:
-        batch_id_str = await create_batch(db, str(req.product_id), req.destination)
+        # 배치 생성 시 bom_version_id/tenant_id를 함께 채운다 — 미채움이면 EU_BATTERY_ART7
+        # 탄소집약도 판정 쿼리(compliance.py)의 supply_chain_map INNER JOIN이 항상 0행을
+        # 반환하는 문제가 있었음(2026-07-09 DB 설계 보고서 작성 중 발견, 지혜/차윤 확인 후 반영).
+        data_request = await submission_repo.get_data_request(db, request_id)
+        bom_version_id = str(data_request.bom_version_id) if data_request and data_request.bom_version_id else None
+        tenant_id = await submission_repo.get_product_tenant_id(db, req.product_id)
+        batch_id_str = await create_batch(
+            db, str(req.product_id), req.destination,
+            bom_version_id=bom_version_id,
+            tenant_id=str(tenant_id) if tenant_id else None,
+        )
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"배치 생성 실패: {e}")

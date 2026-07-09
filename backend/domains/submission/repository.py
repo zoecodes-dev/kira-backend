@@ -32,6 +32,21 @@ _suppliers_tbl = Table(
     Column("company_name", String(255)),
 )
 
+# products도 product 도메인 소유 테이블이라 같은 이유로 최소 Table 매핑만 둔다.
+# submit_data_request_endpoint에서 batch 생성 시 tenant_id를 채우기 위한 동기 조회 전용.
+_products_tbl = Table(
+    "products", _supplier_meta,
+    Column("product_id", PG_UUID(as_uuid=True), primary_key=True),
+    Column("tenant_id", PG_UUID(as_uuid=True)),
+)
+
+async def get_product_tenant_id(db: AsyncSession, product_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """[SELECT] product_id로 products.tenant_id만 조회한다 (batch 생성 시 tenant_id 채움용)."""
+    stmt = select(_products_tbl.c.tenant_id).where(_products_tbl.c.product_id == product_id)
+    result = await db.execute(stmt)
+    row = result.first()
+    return row[0] if row else None
+
 async def create_data_request(db: AsyncSession, log_record: DataRequestLog) -> DataRequestLog:
     """
     [INSERT] 새로운 공급망 데이터 요청(DataRequestLog) 마스터 기록을 DB에 삽입합니다.

@@ -733,7 +733,6 @@ class SupplyChainRepository:
         period_from: str | None = None,
         period_to: str | None = None,
         factory_id: str | None = None,
-        po_number: str | None = None,
     ) -> Dict[str, Any]:
         """
         제품 공급망 맵 조회 (10.2a).
@@ -749,9 +748,6 @@ class SupplyChainRepository:
         if bom_version_id:
             filters.append("bv.bom_version_id = :bom_version_id")
             params["bom_version_id"] = bom_version_id
-        if po_number:
-            filters.append("scm.po_number = :po_number")
-            params["po_number"] = po_number
         if period_from:
             filters.append("scm.supply_period_from >= :period_from")
             params["period_from"] = period_from

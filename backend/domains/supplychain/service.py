@@ -342,7 +342,6 @@ class SupplyChainService:
         period_from: str | None = None,
         period_to: str | None = None,
         factory_id: str | None = None,
-        po_number: str | None = None,
     ) -> dict:
         return await self.repository.get_supply_chain_map(
             product_id=product_id,
@@ -351,7 +350,6 @@ class SupplyChainService:
             period_from=period_from,
             period_to=period_to,
             factory_id=factory_id,
-            po_number=po_number,
         )
 
     async def confirm_supply_chain_map(
