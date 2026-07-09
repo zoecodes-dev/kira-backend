@@ -1016,7 +1016,10 @@ class SupplyChainRepository:
                 UNION ALL
 
                 -- 재귀: 부모 child = 자식 parent, 같은 bom_version, hop_level +1 연속.
-                -- 공장 단위가 아니라 엣지 단위(edge_ratio)로만 곱해 fan-out을 막는다.
+                -- 공장 단위가 아니라 엣지 단위(edge_ratio)로만 곱해 fan-out을 막는다. 다중소싱(같은
+                -- parent+part를 여러 child가 나눠 공급) 시 원청 기준 분담률은 별도 축이 필요 없다 —
+                -- 형제 엣지 각각의 supply_ratio 합 자체가 이미 parent 대비 절대 비중(예: 40/60)으로
+                -- 입력되므로, 그 값을 그대로 쓰면 자동으로 원청 기준이 된다.
                 SELECT
                     scm.edge_id AS map_id, scm.bom_version_id, scm.parent_supplier_id,
                     scm.child_supplier_id, scm.part_id, scm.hop_level, scm.link_status,
