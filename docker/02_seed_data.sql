@@ -148,6 +148,21 @@ INSERT INTO supplier_factories (factory_id, supplier_id, factory_name, factory_n
 -- Global Mining 신장 광산 [Sad tier7 — 위반 핵심 노드]
 ('f5555555-0000-4000-8000-000000000005', 'a5555555-5555-4000-8000-000000000005', 'Xinjiang NCM Mine A', 'Xinjiang NCM Mine A', 'CN', 'Xinjiang', ST_SetSRID(ST_MakePoint(86.000, 41.000), 4326), 'mining', 'US', '["UFLPA"]'::jsonb, 100.00);
 
+-- [일반리뷰 완성도 100%] 소재구성(핵심광물)은 회사 단위가 아니라 공장(사이트) 단위로 판정되는데
+--   (materials.any — supplier/service.py _field_filled), 두 공장 다 core_minerals가 비어 있었다.
+--   회사 단위 core_minerals(suppliers.core_minerals)와 동일 조성으로 채운다.
+UPDATE supplier_factories SET core_minerals = '{"Li":7.0,"Ni":80.0,"Co":10.0,"Mn":10.0}'::jsonb
+WHERE factory_id = 'f1111111-0000-4000-8000-000000000001';
+UPDATE supplier_factories SET core_minerals = '{"Ni":60.0,"Co":20.0,"Mn":20.0}'::jsonb
+WHERE factory_id = 'f4444444-0000-4000-8000-000000000004';
+
+-- [일반리뷰 완성도 100%] 대성정밀: business_reg_no/environmental_report_url이 원래 INSERT에
+--   아예 없어 NULL이었다(Gray/review 상태 데모 의도였을 수 있음 — 요청에 따라 채움).
+UPDATE suppliers SET
+    business_reg_no = '107-86-40004',
+    environmental_report_url = 's3://kira-docs/suppliers/a4444444/env_report.pdf'
+WHERE supplier_id = 'a4444444-4444-4000-8000-000000000004';
+
 -- 연락 담당자 (주요 3사)
 INSERT INTO supplier_contacts (supplier_id, factory_id, name, name_en, role, department, email, phone, is_primary, language) VALUES
 ('a1111111-1111-4000-8000-000000000001', 'f1111111-0000-4000-8000-000000000001', '김담당', 'Mr. Kim', 'ESG Manager', 'Sustainability', 'kim@hanyang.demo', '+82-54-000-0001', TRUE, 'ko'),
@@ -205,12 +220,15 @@ INSERT INTO supplier_manufacturer_details (supplier_id, manufacturing_process, e
 -- [작업①→STEP4 완비 처리] 한양(데모 협력사): carbon_intensity는 STEP4 gap 판정(EU_BATTERY_ART7
 --   mandatory 필드)의 유일한 미보유 항목이라 factory_carbon_declarations(2.34, f1111111)와
 --   동일 값으로 직접 채워 gap을 닫는다 — 실제 문서 업로드/파싱 없이도 완비로 표시.
---   energy_source는 gap 판정 대상이 아니라 NULL 유지(자가진단도 risk_profiles에서 unknown 유지).
-('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', NULL, '10GWh/yr', 2.3400),
+--   [일반리뷰 완성도 100%] energy_source도 채움 — 기존엔 STEP4 gap 판정 대상이 아니라는
+--   이유로 NULL 유지했었는데, 그러면 supplier/service.py의 별도 완성도(_compute_completeness)가
+--   100%가 안 돼서 요청에 따라 채웠다. STEP4 gap 데모엔 원래도 영향 없던 필드.
+('a1111111-1111-4000-8000-000000000001', 'NCM811 Cell Assembly', 'mixed', '10GWh/yr', 2.3400),
 ('a7777777-7777-4000-8000-000000000007', 'Prismatic NCM Cell Assembly', 'renewable', '8GWh/yr', 2.5100),
 ('a2222222-2222-4000-8000-000000000002', 'CAM Sintering (NCM811)', 'mixed', '5GWh/yr', 3.1000),
--- 대성정밀: energy_source NULL (저신뢰 파싱 원인 — Gray)
-('a4444444-4444-4000-8000-000000000004', 'NCM 양극재/활물질 가공', NULL, '2GWh/yr', NULL);
+-- [일반리뷰 완성도 100%] 대성정밀: 원래 Gray(저신뢰 파싱) 데모용으로 energy_source/carbon_intensity를
+--   비워뒀으나, 요청에 따라 채움 — Gray 시나리오가 필요해지면 이 값을 다시 NULL로 되돌릴 것.
+('a4444444-4444-4000-8000-000000000004', 'NCM 양극재/활물질 가공', 'grid', '2GWh/yr', 4.2000);
 
 -- 신장 광산 상세 (Sad — Ni/Co/Mn/Li 원광) + 신장 좌표
 INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extraction_volume, mine_coordinates, active_period_from) VALUES
@@ -225,7 +243,7 @@ INSERT INTO supplier_miner_details (supplier_id, mine_name, mining_method, extra
 INSERT INTO supplier_risk_profiles (supplier_id, overall_risk_score, risk_level, self_reported_risk_level, is_high_risk_flag, high_risk_reasons, last_risk_review_at) VALUES
 -- 원청 (tier0 루트) — 트리 루트 노드 색상/리스크 NULL 방지용 최소 프로필
 ('a0000000-0000-4000-8000-000000000000', 0,  'low',      'low',     FALSE, NULL, now() - interval '7 days'),
-('a1111111-1111-4000-8000-000000000001', 10, 'low',      'unknown', FALSE, NULL, now() - interval '7 days'),  -- [작업①] 자가진단 빈칸(업로드 후 채움)
+('a1111111-1111-4000-8000-000000000001', 10, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),  -- [일반리뷰 완성도 100%] 자가진단 채움
 ('a7777777-7777-4000-8000-000000000007', 10, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
 ('a2222222-2222-4000-8000-000000000002', 15, 'low',      'low',     FALSE, NULL, now() - interval '7 days'),
 -- Global Mining: critical (신장 인접 광산 / UFLPA)
@@ -586,9 +604,14 @@ INSERT INTO submission_status_history (request_id, from_status, to_status, actor
 ('da111111-0000-4000-8000-000000000001', 'submission_submitted', 'submission_approved', '11111111-0000-4000-8000-000000000002', '검토 통과'),
 ('da444444-0000-4000-8000-000000000004', 'submission_review',    'submission_rework',  '11111111-0000-4000-8000-000000000002', '자료 보완 요청');
 
+-- [정합성] 과거 하드코딩값이 필드 분류 로직 변경을 못 따라가 12/11/91.67%·missing=[]로 굳어
+--   있었다(required 개수부터 실제 로직(manufacturer=10개)과 안 맞았음). supplier/service.py의
+--   _compute_completeness() 라이브 계산과 실측 대조해 맞췄고, 위에서 두 협력사의 나머지
+--   미비 필드(energy_source·자가진단·소재구성·business_reg_no·환경성적서)를 전부 채워
+--   일반리뷰 완성도가 100%가 되도록 했다.
 INSERT INTO data_completeness_status (entity_type, entity_id, required_field_count, filled_field_count, completion_rate, missing_fields, last_updated_by) VALUES
-('supplier', 'a1111111-1111-4000-8000-000000000001', 12, 11, 91.67, '[]'::jsonb, '11111111-0000-4000-8000-000000000002'),
-('supplier', 'a4444444-4444-4000-8000-000000000004', 12, 7,  58.33, '["energy_source","cert"]'::jsonb, '11111111-0000-4000-8000-000000000002');
+('supplier', 'a1111111-1111-4000-8000-000000000001', 10, 10, 100.00, '[]'::jsonb, '11111111-0000-4000-8000-000000000002'),
+('supplier', 'a4444444-4444-4000-8000-000000000004', 10, 10, 100.00, '[]'::jsonb, '11111111-0000-4000-8000-000000000002');
 
 INSERT INTO notifications (user_id, channel, notification_type, subject, body, status, dedup_key) VALUES
 ('11111111-0000-4000-8000-000000000005', 'email', 'sla_warning', 'SLA 임박', '원산지 증빙 제출 기한이 지났습니다', 'pending', 'sla_reminder:daababab:2026-05-29');
@@ -2875,3 +2898,40 @@ INSERT INTO document_extraction_results
 SELECT request_id, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, '자재 사양서',
        '공급망 데모용 자동 완비 처리 — 실제 문서 업로드 없이 생성.'
 FROM new_requests;
+
+-- ============================================================
+-- 34. iX3 Co·흑연 대체 협력사(28-10) STEP4 완비 처리 — 33번은 대체 전 협력사
+--   (Zambia Copper&Cobalt, Balama Graphite 등) 기준이라, 28-11에서 엣지를 새 저위험
+--   협력사로 옮긴 뒤 이 3곳은 누락됐다. 33-2와 동일 패턴(빈 추출결과로 '제출 자료' 전환).
+--   Kokkola(64777777)는 28-12 동의서 백필이 이미 general_info 요청을 만들어놔서
+--   (target_supplier_id 존재) 새 요청 대신 그 기존 요청에 추출결과만 채운다 — 그래서
+--   "요청 없으면 생성" + "요청 있는데 추출결과 없으면 채움" 둘 다 커버해야 한다.
+-- ============================================================
+WITH targets(supplier_id) AS (
+  VALUES
+    ('64777777-0000-4000-8000-000000000007'::uuid),  -- Kokkola Cobalt Oy
+    ('65777777-0000-4000-8000-000000000007'::uuid),  -- Queensland Cobalt Mine Pty Ltd
+    ('66444444-0000-4000-8000-000000000004'::uuid)   -- Munglinup Graphite Mine Pty Ltd
+),
+new_requests_34 AS (
+  INSERT INTO data_request_log
+    (requester_user_id, target_supplier_id, requested_data_type, requested_at, due_date, response_status, submission_status)
+  SELECT '11111111-0000-4000-8000-000000000002', supplier_id, 'material_composition',
+         now() - interval '10 days', now() - interval '3 days', 'response_responded', 'submission_approved'
+  FROM targets
+  WHERE NOT EXISTS (SELECT 1 FROM data_request_log dr WHERE dr.target_supplier_id = targets.supplier_id)
+  RETURNING request_id
+),
+requests_needing_extraction_34 AS (
+  SELECT request_id FROM new_requests_34
+  UNION
+  SELECT dr.request_id
+  FROM data_request_log dr
+  JOIN targets t ON t.supplier_id = dr.target_supplier_id
+  WHERE NOT EXISTS (SELECT 1 FROM document_extraction_results der WHERE der.request_id = dr.request_id)
+)
+INSERT INTO document_extraction_results
+  (request_id, parsed_fields, confidence_map, unparsed_fields, detected_document_type, evidence_summary)
+SELECT request_id, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, '자재 사양서',
+       '공급망 데모용 자동 완비 처리 — 실제 문서 업로드 없이 생성.'
+FROM requests_needing_extraction_34;
