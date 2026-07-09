@@ -86,6 +86,16 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
     # [W6 정리] 재활용(recycling)·원산지(origin)·지분FEOC(ownership) 섹션은 master-form에서
     # 제거됨(연관 테이블 삭제) → 저장 위치가 없는 필드는 AI 추출 대상에서도 제외한다.
     # (원산지는 위 origin_country로 suppliers.country를 재사용해 예외적으로 추출한다.)
+
+    # 섹션 3 — 소재 구성(핵심광물 함량). 저장 위치: supplier_factories.core_minerals(JSONB,
+    #   공장 단위). 프론트(FactoryCards의 소재구성 문서 업로드·AiParsingView의 MATERIAL_DOC_CATALOG)는
+    #   이미 이 필드명으로 파싱 결과를 기대하고 있었으나, 카탈로그에 없어 추출이 항상 비어 있었다.
+    "li_content":                 ("materials", "float", "Li(리튬) 함량(%)"),
+    "co_content":                 ("materials", "float", "Co(코발트) 함량(%)"),
+    "ni_content":                 ("materials", "float", "Ni(니켈) 함량(%)"),
+    "mn_content":                 ("materials", "float", "Mn(망간) 함량(%)"),
+    "natural_graphite_content":   ("materials", "float", "천연흑연 함량(%)"),
+    "synthetic_graphite_content": ("materials", "float", "인조흑연(인조흑연/artificial graphite) 함량(%)"),
 }
 
 
