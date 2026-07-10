@@ -69,6 +69,10 @@ async def _register_subscriptions() -> None:
     from backend.handlers.master_form_submitted_notify import notify_master_form_submission
     await subscribe("MasterFormSubmitted", notify_master_form_submission)
 
+    # ── P4d: 소재구성·탄소발자국·SAQ 3종 AI 처리 종합 완료 시 협력사 본인 + 원청 알림 ──
+    from backend.handlers.supplier_ai_synthesis_notify import notify_ai_synthesis_ready
+    await subscribe("SupplierAiSynthesisReady", notify_ai_synthesis_ready)
+
     # ── E: 협력사 온보딩(제3자 동의서) 제출 시 원청에 STEP4 수신확인 알림 ──
     from backend.handlers.onboarding_review_notify import notify_onboarding_review_needed
     await subscribe("SupplierStatusChanged", notify_onboarding_review_needed)

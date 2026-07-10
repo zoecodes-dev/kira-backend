@@ -5,7 +5,8 @@ SupplierDocumentUploaded 이벤트를 수신해 업로드된 문서를 파싱 �
   1) data_request_log 행 생성 (target_supplier_id, requested_data_type='self_upload:<kind>')
      → AI 추출 결과(document_extraction_results)가 ai-extractions 조회(INNER JOIN)에
        걸리려면 request_id가 필요하다. 'self_upload:' 접두어로 식별·일괄정리 가능.
-  2) submission_documents 행 생성 (file_url=S3 키, file_type 파생, doc_category 매핑)
+  2) submission_documents 행 생성 (file_url=S3 키, file_type 파생, doc_category 매핑,
+     factory_id=귀속 공장 — 소재구성 문서만. prefill이 공장별로 광물값을 나눌 근거가 된다)
   3) document_parse 큐에 enqueue → 워커가 data_gateway로 S3에서 읽어 파싱
 
 멱등성: 같은 S3 키로 이미 submission_documents 행이 있으면 스킵(중복 행/중복 파싱 방지).
@@ -57,6 +58,8 @@ async def on_supplier_document_uploaded(payload: dict) -> None:
     s3_key = payload.get("s3_key")
     file_name = payload.get("file_name")
     doc_kind = payload.get("doc_kind") or "other"
+    # 공장 단위 문서(소재구성)만 채워져 온다. 협력사 단위 문서는 None → factory_id NULL.
+    factory_id = payload.get("factory_id")
 
     if not supplier_id or not s3_key:
         logger.warning("[doc_ingest] supplier_id/s3_key 누락 — 스킵: %s", payload)
@@ -73,11 +76,12 @@ async def on_supplier_document_uploaded(payload: dict) -> None:
             target_supplier_id=uuid.UUID(str(supplier_id)),
             requested_data_type=f"self_upload:{doc_kind}",
         ))
-        # 2) submission_documents (file_url = S3 키)
+        # 2) submission_documents (file_url = S3 키, factory_id = 귀속 공장)
         doc = await create_submission_document(
             db,
             request_id=req.request_id,
             supplier_id=uuid.UUID(str(supplier_id)),
+            factory_id=uuid.UUID(str(factory_id)) if factory_id else None,
             file_url=s3_key,
             file_name=file_name,
             file_type=_derive_file_type(file_name),

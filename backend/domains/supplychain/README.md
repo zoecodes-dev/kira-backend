@@ -80,7 +80,7 @@
 
 | # | Method | Path | 설명 | 응답 |
 | :--- | :--- | :--- | :--- | :--- |
-| 10.2a | `GET` | `/products/{productId}/supply-chain-map` | 제품 공급망 맵 조회. 필터: `bom_version_id`/`period_from`/`period_to`/`factory_id`/`po_number` | `{ supplyChainMap[], supplyChainRatios[], suppliers[], supplierFactories[] }` |
+| 10.2a | `GET` | `/products/{productId}/supply-chain-map` | 제품 공급망 맵 조회. 필터: `bom_version_id`/`period_from`/`period_to`/`factory_id` | `{ supplyChainMap[], supplyChainRatios[], suppliers[], supplierFactories[] }` |
 | 10.2b | `POST` | `/supply-chain/maps/{mapId}/confirm` | 맵 노드 확정. `link_status` → `supplychain_confirmed` | `{ mapId, status:"confirmed" }` |
 
 - **10.2a 응답 계약**(snake_case → 프론트 snakeToCamel):
