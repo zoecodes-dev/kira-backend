@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional, List
@@ -51,6 +52,8 @@ from backend.infrastructure.queue import (
     DOCUMENT_PARSE_QUEUE,
     BATCH_PIPELINE_QUEUE,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/data-requests", tags=["Submission"])
 
@@ -192,18 +195,28 @@ async def submit_data_request_endpoint(request_id: uuid.UUID, req: SubmitDataReq
     협력사가 작성을 마치고 최종 제출을 확정합니다.
     batch를 자동 생성하고 파이프라인 큐에 적재합니다.
     """
+    # 배치 생성 시 bom_version_id/tenant_id를 함께 채운다 — 미채움이면 EU_BATTERY_ART7
+    # 탄소집약도 판정 쿼리(compliance.py)의 supply_chain_map INNER JOIN이 항상 0행을
+    # 반환하고, 선언이 멀쩡히 있어도 compliance_reject로 떨어진다.
+    # (2026-07-09 DB 설계 보고서 작성 중 발견, 지혜/차윤 확인 후 반영.)
+    data_request = await submission_repo.get_data_request(db, request_id)
+    if data_request is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="요청을 찾을 수 없습니다.")
+
+    # data_request_log.bom_version_id는 '회사 단위 요청'이면 정상적으로 NULL이다(§models.py).
+    # 하지만 batch는 언제나 특정 제품·BOM에 속하므로, 비어 있으면 제품의 active BOM에서 유도한다.
+    bom_version_id = data_request.bom_version_id or await submission_repo.get_active_bom_version_id(db, req.product_id)
+    if bom_version_id is None:
+        logger.warning(
+            "[submit] product_id=%s의 active BOM을 특정할 수 없어 batch.bom_version_id를 비운다 "
+            "— 이 배치는 탄소집약도 판정에서 compliance_reject가 된다.", req.product_id,
+        )
+    tenant_id = await submission_repo.get_product_tenant_id(db, req.product_id)
+
     try:
-        # 배치 생성 시 bom_version_id/tenant_id를 함께 채운다 — 미채움이면 EU_BATTERY_ART7
-        # 탄소집약도 판정 쿼리(compliance.py)의 supply_chain_map INNER JOIN이 항상 0행을
-        # 반환한다(NULL은 아무 값과도 같지 않다). bom_version_id는 이 제출 요청(data_request_log)
-        # 자체에 있고, tenant_id는 그 제품(products)에서 derive한다.
-        # (2026-07-09 DB 설계 보고서 작성 중 발견, 지혜/차윤 확인 후 반영.)
-        data_request = await submission_repo.get_data_request(db, request_id)
-        bom_version_id = str(data_request.bom_version_id) if data_request and data_request.bom_version_id else None
-        tenant_id = await submission_repo.get_product_tenant_id(db, req.product_id)
         batch_id_str = await create_batch(
             db, str(req.product_id), req.destination,
-            bom_version_id=bom_version_id,
+            bom_version_id=str(bom_version_id) if bom_version_id else None,
             tenant_id=str(tenant_id) if tenant_id else None,
         )
     except Exception as e:

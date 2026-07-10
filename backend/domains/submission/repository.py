@@ -40,12 +40,33 @@ _products_tbl = Table(
     Column("tenant_id", PG_UUID(as_uuid=True)),
 )
 
+# bom_versions도 product 도메인 소유 — 같은 이유로 최소 Table 매핑만.
+_bom_versions_tbl = Table(
+    "bom_versions", _supplier_meta,
+    Column("bom_version_id", PG_UUID(as_uuid=True), primary_key=True),
+    Column("product_id", PG_UUID(as_uuid=True)),
+    Column("status", String(20)),
+)
+
 async def get_product_tenant_id(db: AsyncSession, product_id: uuid.UUID) -> Optional[uuid.UUID]:
     """[SELECT] product_id로 products.tenant_id만 조회한다 (batch 생성 시 tenant_id 채움용)."""
     stmt = select(_products_tbl.c.tenant_id).where(_products_tbl.c.product_id == product_id)
     result = await db.execute(stmt)
     row = result.first()
     return row[0] if row else None
+
+
+async def get_active_bom_version_id(db: AsyncSession, product_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """[SELECT] 제품의 active BOM 버전. 없으면 None. (batch 생성 시 bom_version_id 유도용)
+
+    제품당 active는 하나라는 전제 — 여럿이면 어느 쪽이 옳은지 알 수 없으므로 채우지 않는다
+    (추측 저장 금지). 호출부가 None을 경고 로그로 남긴다."""
+    stmt = select(_bom_versions_tbl.c.bom_version_id).where(
+        _bom_versions_tbl.c.product_id == product_id,
+        _bom_versions_tbl.c.status == "active",
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return rows[0] if len(rows) == 1 else None
 
 async def create_data_request(db: AsyncSession, log_record: DataRequestLog) -> DataRequestLog:
     """

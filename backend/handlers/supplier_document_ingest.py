@@ -10,6 +10,9 @@ SupplierDocumentUploaded 이벤트를 수신해 업로드된 문서를 파싱 �
   3) document_parse 큐에 enqueue → 워커가 data_gateway로 S3에서 읽어 파싱
 
 멱등성: 같은 S3 키로 이미 submission_documents 행이 있으면 스킵(중복 행/중복 파싱 방지).
+  SELECT 검사만으론 동시 실행 시 둘 다 통과하므로, file_url UNIQUE 제약이 최종 방어선이다
+  (제약 위반 = 다른 처리자가 먼저 등록 = 스킵). 이벤트 자체의 중복 수신은 event_bus 의
+  LISTEN 리더 선출이 막는다.
 
 도메인 경계: 이 핸들러(슬롯)는 submission 도메인 소유 테이블에만 쓴다.
   supplier 도메인은 SupplierDocumentUploaded 이벤트만 발행하고 직접 쓰지 않는다.
@@ -17,6 +20,8 @@ SupplierDocumentUploaded 이벤트를 수신해 업로드된 문서를 파싱 �
 """
 import uuid
 import logging
+
+from sqlalchemy.exc import IntegrityError
 
 from backend.infrastructure.database import AsyncSessionLocal
 from backend.infrastructure.queue import enqueue, DOCUMENT_PARSE_QUEUE
@@ -87,7 +92,13 @@ async def on_supplier_document_uploaded(payload: dict) -> None:
             file_type=_derive_file_type(file_name),
             doc_category=_DOC_CATEGORY.get(doc_kind, "other"),
         )
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # file_url UNIQUE 위반 = 다른 처리자가 먼저 등록했다. 요청 행도 함께 롤백된다.
+            await db.rollback()
+            logger.info("[doc_ingest] 동시 등록 감지(s3_key=%s) — 스킵", s3_key)
+            return
         request_id, document_id = str(req.request_id), str(doc.document_id)
 
     # 3) 커밋 후 파싱 큐 enqueue (멱등 키: document_id)
