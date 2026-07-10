@@ -65,8 +65,6 @@ class SupplyChainMap(Base):
     part_id = Column(UUID(as_uuid=True), ForeignKey("parts.part_id"))
     hop_level = Column(Integer, comment="차수(원청 0 기준 경로 순번). n-tier 재귀 CTE 조인 키")
 
-    po_number = Column(String(50))
-    invoice_number = Column(String(50))
     supply_period_from = Column(Date)
     supply_period_to = Column(Date)
     core_minerals = Column(
