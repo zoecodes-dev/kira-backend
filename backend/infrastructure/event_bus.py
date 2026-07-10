@@ -32,6 +32,13 @@ _subscribers: Dict[str, List[Callable[[dict], Awaitable[None]]]] = {}
 _listen_task: Optional[asyncio.Task] = None
 _listen_conn: Optional["asyncpg.Connection"] = None
 
+# LISTEN 리더 선출용 advisory lock 키 ('KIRA' ASCII). 이 키를 잡은 프로세스만 LISTEN 한다.
+_LISTENER_LOCK_ID = 0x4B495241
+# 리더가 아닌 프로세스가 락을 다시 노리는 주기(초). 리더 사망 시 인수 지연의 상한.
+_LEADER_RETRY_SEC = 15
+# 리더의 LISTEN 커넥션 생존 확인 주기(초).
+_HEARTBEAT_SEC = 30
+
 
 async def publish(event_name: str, payload: dict) -> None:
     """
@@ -97,36 +104,58 @@ async def _listen_loop() -> None:
     메인 async 세션 풀과 분리된 전용 asyncpg 커넥션을 열어 NOTIFY 를 수신한다.
     add_listener 콜백은 동기 컨텍스트라 곧장 await 할 수 없으므로,
     asyncio.create_task 로 _dispatch 를 비동기 스케줄한다.
+
+    [리더 선출 — 핸들러 중복 실행 방지]
+      NOTIFY 는 큐가 아니라 pub/sub 브로드캐스트라, 채널을 LISTEN 하는 모든 커넥션이
+      사본을 하나씩 받는다. uvicorn --workers N 으로 app 프로세스가 여러 개면 핸들러가
+      N 번 실행된다(중복 행·중복 파싱). advisory lock 을 잡은 프로세스 하나만 LISTEN 하고,
+      나머지는 주기적으로 락을 노리다가 리더가 죽으면 인수한다.
+      락은 세션 스코프라 커넥션이 끊기면 자동 해제된다.
     """
     global _listen_conn
 
     # SQLAlchemy DATABASE_URL(예: postgresql+asyncpg://)에서 asyncpg 가 이해할
     # 순수 DSN 으로 정리한다. asyncpg 는 드라이버 접두어를 모른다.
     dsn = config.DATABASE_URL.replace("+asyncpg", "")
-    _listen_conn = await asyncpg.connect(dsn=dsn)
 
     def _on_notify(_conn, _pid, _channel, payload_raw: str) -> None:
         asyncio.create_task(_dispatch(payload_raw))
 
-    await _listen_conn.add_listener(config.KIRA_EVENT_CHANNEL, _on_notify)
-    print(f"[EVENT LISTEN] 구독 시작 -> {config.KIRA_EVENT_CHANNEL}")
+    while True:
+        conn = await asyncpg.connect(dsn=dsn)
 
-    try:
-        # asyncpg 는 백그라운드에서 NOTIFY 를 수신하므로 루프는 살아만 있으면 된다.
-        while True:
-            await asyncio.sleep(3600)
-    except asyncio.CancelledError:
-        # 앱 종료 시 lifespan 이 task.cancel() → 여기로 진입
-        raise
-    finally:
-        if _listen_conn is not None:
+        if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", _LISTENER_LOCK_ID):
+            # 다른 프로세스가 이미 리더다. 커넥션을 놓고 다음 기회를 기다린다.
+            await conn.close()
             try:
-                await _listen_conn.remove_listener(config.KIRA_EVENT_CHANNEL, _on_notify)
-                await _listen_conn.close()
-            except Exception as exc:
-                print(f"[EVENT WARN] LISTEN 커넥션 정리 실패: {exc}")
-            _listen_conn = None
-        print("[EVENT LISTEN] 구독 종료")
+                await asyncio.sleep(_LEADER_RETRY_SEC)
+            except asyncio.CancelledError:
+                raise
+            continue
+
+        _listen_conn = conn
+        try:
+            await conn.add_listener(config.KIRA_EVENT_CHANNEL, _on_notify)
+            print(f"[EVENT LISTEN] 리더 확보 — 구독 시작 -> {config.KIRA_EVENT_CHANNEL}")
+
+            # asyncpg 는 백그라운드에서 NOTIFY 를 수신한다. 루프는 커넥션 생존만 확인한다.
+            while True:
+                await asyncio.sleep(_HEARTBEAT_SEC)
+                await conn.fetchval("SELECT 1")
+        except asyncio.CancelledError:
+            # 앱 종료 시 lifespan 이 task.cancel() → 여기로 진입
+            raise
+        except Exception as exc:
+            # 커넥션 유실 등. 락도 함께 풀렸으므로 재선출 루프로 돌아간다.
+            print(f"[EVENT WARN] LISTEN 커넥션 끊김 — 재선출 시도: {exc}")
+        finally:
+            if _listen_conn is not None:
+                try:
+                    await _listen_conn.close()
+                except Exception as exc:
+                    print(f"[EVENT WARN] LISTEN 커넥션 정리 실패: {exc}")
+                _listen_conn = None
+            print("[EVENT LISTEN] 구독 종료")
 
 
 async def start_event_listener() -> None:
