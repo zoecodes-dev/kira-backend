@@ -106,6 +106,12 @@ CREATE TABLE suppliers (
     risk_level          VARCHAR(20) DEFAULT 'low'
         CONSTRAINT chk_supplier_risk CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
 
+    -- [AI 종합 진단] 소재구성·탄소발자국·SAQ 3종 AI 처리가 모두 갖춰지면 1회 생성되는
+    --   한국어 결론(domains/supplier/ai_synthesis.py). generated_at이 NULL이 아니면
+    --   이미 생성된 것으로 보고 재생성하지 않는다(멱등 가드).
+    ai_compliance_summary            TEXT,
+    ai_compliance_summary_generated_at TIMESTAMPTZ,
+
     created_at          TIMESTAMPTZ DEFAULT now(),
     updated_at          TIMESTAMPTZ DEFAULT now()
 );
@@ -134,6 +140,10 @@ CREATE TABLE supplier_factories (
     -- 공장별 소재 구성(핵심광물 함량, suppliers.core_minerals와 동일 셰이프) — 광산(mining)은 사이트마다
     -- 채굴 광물이 달라 회사 단위가 아니라 공장 단위로 관리한다.
     core_minerals         JSONB,
+    -- 소재구성 문서(핵심광물 함량 근거) — 공장 단위. suppliers.material_composition_doc_url은
+    -- 협력사 단위라 공장이 여럿이면 어느 공장의 근거인지 구분되지 않는다. 문서를 올린 공장에
+    -- 귀속시켜 AI 추출값(core_minerals)이 그 공장 칸에만 채워지게 한다.
+    material_composition_doc_url VARCHAR(500),
     -- 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분해 factory_manager_* 로 명명
     factory_manager_name  VARCHAR(100),   -- 공장 담당자 이름
     factory_manager_role  VARCHAR(100),   -- 직책
@@ -705,6 +715,10 @@ CREATE TABLE submission_documents (
     document_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     request_id    UUID REFERENCES data_request_log(request_id) ON DELETE CASCADE,
     supplier_id   UUID REFERENCES suppliers(supplier_id) ON DELETE CASCADE,
+    -- 문서를 올린 공장(있으면). 소재구성 문서처럼 추출값이 공장 단위 컬럼(core_minerals)으로
+    -- 가는 문서는 이 값으로 귀속 공장을 판별한다. 협력사 단위 문서(사업자등록증 등)는 NULL.
+    -- 공장이 지워져도 문서/추출결과는 남겨야 하므로 SET NULL(CASCADE 아님).
+    factory_id    UUID REFERENCES supplier_factories(factory_id) ON DELETE SET NULL,
     file_url      VARCHAR(500) NOT NULL,
     file_name     VARCHAR(255),
     file_type     VARCHAR(30)
@@ -1020,6 +1034,7 @@ CREATE INDEX idx_doc_extraction_document ON document_extraction_results(document
 -- [신설] submission_documents 인덱스
 CREATE INDEX idx_submission_docs_request  ON submission_documents(request_id);
 CREATE INDEX idx_submission_docs_supplier ON submission_documents(supplier_id);
+CREATE INDEX idx_submission_docs_factory  ON submission_documents(factory_id); -- prefill 공장별 그룹핑
 
 -- [신설] supplier_audit_records 워크플로우 컬럼 인덱스 (v_action_items 큐 조회 최적화)
 CREATE INDEX idx_audit_records_status     ON supplier_audit_records(audit_status) WHERE audit_status IN ('requested', 'assigned', 'in_progress');

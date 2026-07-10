@@ -78,6 +78,20 @@ class MasterFormSubmittedEvent:
 
 
 @dataclass
+class SupplierAiSynthesisReadyEvent:
+    """
+    소재구성·탄소발자국·SAQ(dd_audit_report) 3종 AI 처리 결과가 한 협력사에게 전부
+    갖춰져 종합 결론(suppliers.ai_compliance_summary)이 생성됐을 때 발행.
+    발행: B(workers.document_parse_worker, ai_synthesis.maybe_synthesize_compliance_summary
+    성공 후 커밋 성공 시점) → 수신: 협력사 본인 + 원청 알림(supplier_ai_synthesis_notify).
+    3종 중 하나라도 없거나 이미 생성된 적 있으면(멱등) 발행되지 않는다.
+    """
+    supplier_id: Optional[UUID] = None
+    event_name: str = "SupplierAiSynthesisReady"
+    occurred_at: datetime = field(default_factory=_now_utc)
+
+
+@dataclass
 class SupplierDocumentUploadedEvent:
     """
     협력사가 필요문서(*_doc_url)를 새로 업로드(S3 키 변경)했을 때 발행.
@@ -85,11 +99,15 @@ class SupplierDocumentUploadedEvent:
 
     s3_key: files 버킷 내 키(영구 URL 아님). data_gateway가 이 키로 바이트를 읽어 파싱한다.
     doc_kind: 'business_reg' | 'environmental_report' | 'self_assessment' | 'material_composition'
+    factory_id: 공장 단위 문서(소재구성)일 때만 채운다. 협력사 단위 문서는 None.
+      추출값이 supplier_factories.core_minerals로 가는 문서라, 어느 공장의 근거인지
+      여기서 넘겨야 prefill이 공장별로 값을 나눠줄 수 있다.
     """
     supplier_id: Optional[UUID] = None
     s3_key: Optional[str] = None
     file_name: Optional[str] = None
     doc_kind: Optional[str] = None
+    factory_id: Optional[UUID] = None
     event_name: str = "SupplierDocumentUploaded"
     occurred_at: datetime = field(default_factory=_now_utc)
 

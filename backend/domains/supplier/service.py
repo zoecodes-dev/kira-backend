@@ -278,39 +278,80 @@ async def get_master_form_prefill(db: AsyncSession, supplier_id: UUID) -> Option
     여러 문서에 같은 필드가 있으면 '신뢰도 높은 값'을 채택한다. 신뢰도 임계치 미만
     필드는 prefill에 채우되 low_confidence_fields로 함께 반환해 협력사 확인을 유도한다.
 
+    materials 섹션만 저장 위치가 공장 단위(supplier_factories.core_minerals)라, 협력사 단위
+    prefill과 별도로 factory_prefill(공장별 광물 함량)을 함께 반환한다. 문서가 어느 공장의
+    근거인지는 submission_documents.factory_id(업로드 시 귀속)로 판별한다.
+
     반환: prefill 초안 dict. 없는 supplier_id면 None(→ router 404).
           추출결과가 0건이면 prefill은 비고 document_count=0(업로드 전 정상 상태).
     """
     if await repository.get_supplier_by_id(db, supplier_id) is None:
         return None
 
-    results = await submission_repo.list_extraction_results_by_suppliers(db, [supplier_id])
+    results = await submission_repo.list_extraction_results_with_factory(db, supplier_id)
+    factories = await repository.get_factories(db, supplier_id)
+
+    def _conf_of(cmap: dict, key: str) -> float:
+        try:
+            return float(cmap.get(key, 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _merge_best(fields: dict, confs: dict, key: str, value, conf: float) -> None:
+        """같은 필드가 여러 문서에 → 더 높은 신뢰도 값으로 갱신(최선값 채택)."""
+        if key not in confs or conf > confs[key]:
+            fields[key] = value
+            confs[key] = conf
 
     merged_fields: dict = {}
     merged_conf: dict = {}
+    # 공장별 광물 버킷 — {factory_id: (fields, confs)}. 귀속 공장이 없는 문서는 _unattributed.
+    by_factory: dict[UUID, tuple[dict, dict]] = {}
+    unattributed: tuple[dict, dict] = ({}, {})
     unconfirmed = 0
-    for record, _provider_type, _sid in results:
+
+    for record, factory_id in results:
         parsed = record.parsed_fields or {}
         cmap = record.confidence_map or {}
         for key, value in parsed.items():
-            try:
-                conf = float(cmap.get(key, 0.0))
-            except (TypeError, ValueError):
-                conf = 0.0
-            # 같은 필드가 여러 문서에 → 더 높은 신뢰도 값으로 갱신(최선값 채택).
-            if key not in merged_conf or conf > merged_conf[key]:
-                merged_fields[key] = value
-                merged_conf[key] = conf
+            conf = _conf_of(cmap, key)
+            _merge_best(merged_fields, merged_conf, key, value, conf)
+            if masterform_prefill.section_of(key) != masterform_prefill.MATERIALS_SECTION:
+                continue
+            bucket = by_factory.setdefault(factory_id, ({}, {})) if factory_id else unattributed
+            _merge_best(bucket[0], bucket[1], key, value, conf)
         if not record.supplier_confirmed:
             unconfirmed += 1
 
+    # 귀속 공장이 없는 소재구성 추출결과(공장 귀속 도입 이전 문서·시드)는 공장이 정확히 하나일
+    # 때만 그 공장 것으로 본다. 공장이 여럿이면 어느 쪽 근거인지 알 수 없어 버린다(추측 저장 금지).
+    if unattributed[0] and len(factories) == 1:
+        only_id = factories[0]["factory_id"]
+        bucket = by_factory.setdefault(only_id, ({}, {}))
+        for key, value in unattributed[0].items():
+            _merge_best(bucket[0], bucket[1], key, value, unattributed[1][key])
+
     assembled = masterform_prefill.to_master_form_prefill(merged_fields, merged_conf)
+
+    factory_prefill = []
+    for factory_id, (fields, confs) in by_factory.items():
+        one = masterform_prefill.to_master_form_prefill(fields, confs)
+        materials = one["prefill"].get(masterform_prefill.MATERIALS_SECTION, {})
+        if not materials:
+            continue
+        factory_prefill.append({
+            "factory_id": factory_id,
+            "materials": materials,
+            "low_confidence_fields": one["low_confidence_fields"],
+        })
+
     return {
         "supplier_id": supplier_id,
         "document_count": len(results),
         "unconfirmed_documents": unconfirmed,
         "prefill": assembled["prefill"],
         "low_confidence_fields": assembled["low_confidence_fields"],
+        "factory_prefill": factory_prefill,
     }
 
 
@@ -467,6 +508,50 @@ async def update_supplier_detail(
         )
 
     return await get_supplier_detail(db, supplier_id, tenant_id)
+
+
+async def update_factory_material_doc(
+    db: AsyncSession,
+    supplier_id: UUID,
+    factory_id: UUID,
+    s3_key: str,
+    tenant_id: Optional[UUID] = None,
+) -> Optional[dict]:
+    """
+    공장 단위 소재구성 문서 업로드 — supplier_factories.material_composition_doc_url 갱신 후
+    SupplierDocumentUploaded(factory_id 포함)를 발행해 파싱 파이프라인을 태운다.
+
+    협력사 단위 컬럼(suppliers.material_composition_doc_url)과 달리, 추출된 광물 함량이
+    어느 공장의 core_minerals로 가야 하는지 구분된다(공장이 여럿일 때 필수).
+
+    반환: 갱신된 공장 목록 dict. supplier/factory 소유가 아니면 None(→ router 404).
+    """
+    if await repository.get_supplier_by_id(db, supplier_id, tenant_id) is None:
+        return None
+    factory = await repository.get_factory(db, supplier_id, factory_id)
+    if factory is None:
+        return None
+
+    prev = factory.material_composition_doc_url
+    await repository.set_factory_material_doc(db, factory_id, s3_key)
+    await db.commit()
+
+    # ── 커밋 성공 후 발행 (아키텍처 규칙 3) ──
+    # 같은 S3 키 재전송은 재파싱하지 않는다(ingest 핸들러도 file_url 멱등 가드가 있지만,
+    # 불필요한 큐 적재 자체를 여기서 막는다 — update_supplier_detail의 doc_url 루프와 동일 규칙).
+    if s3_key and s3_key != prev:
+        await publish(
+            "SupplierDocumentUploaded",
+            dataclasses.asdict(SupplierDocumentUploadedEvent(
+                supplier_id=supplier_id,
+                factory_id=factory_id,
+                s3_key=s3_key,
+                file_name=s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key,
+                doc_kind="material_composition",
+            )),
+        )
+
+    return await get_factories(db, supplier_id)
 
 
 async def promote_extraction_to_details(
