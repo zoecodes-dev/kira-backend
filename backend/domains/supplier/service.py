@@ -45,7 +45,6 @@ from backend.infrastructure.trace import trace_node
 # AP: 추출결과 read는 E 제공(submission repository), 마스터폼 prefill 변환은 B(supplier)
 #   masterform_prefill. 둘 다 무거운 LLM 스택을 끌어오지 않는 가벼운 호출이다.
 from backend.domains.submission import repository as submission_repo
-from backend.domains.submission.models import DataRequestLog
 from backend.domains.supplier import masterform_prefill
 # [회원가입 — 결정 #4] 온보딩 제출은 "제출→즉시 로그인 / 중복 즉시 409"라 이벤트가 아니라
 #   동기 처리한다. 도메인 격리는 users repository '재사용 + 단일 커밋'으로 지킨다(새 계정
@@ -57,7 +56,7 @@ from backend.infrastructure.security import get_password_hash
 #   '재사용 + 온보딩 단일 커밋'으로 처리(새 트랜잭션·커밋을 열지 않는다).
 import hashlib
 from backend.domains.data_consent import repository as consent_repo
-from backend.domains.data_consent.models import ConsentCreateBody, ConsentUpdateBody
+from backend.domains.data_consent.models import ConsentUpdateBody
 
 # ── 정책 상수 ───────────────────────────────────────────────
 # 협력사 온보딩 SLA. PROJECT_CORE: 14일 미응답 → Reminder, 21일 → Escalation.
@@ -1216,23 +1215,12 @@ async def submit_onboarding(
                     MasterFormContact(name=sub.name, email=sub.email, phone=sub.phone, is_primary=True),
                 ], [])
                 await recompute_completeness(db, sub_supplier.supplier_id)
-                # 제3자 정보제공 동의 요청(데이터 계약 '오퍼') — STEP3 메일 발송과 동일 계약으로
-                # 미리 생성해, 초대 링크 접속 시 바로 '정보 입력 시작'이 열리게 한다.
-                await consent_repo.create(
-                    db, tenant_id=supplier.tenant_id, requested_by=None,
-                    body=ConsentCreateBody(
-                        supplier_id=sub_supplier.supplier_id,
-                        data_scope=["company", "contacts", "factories", "carbon_epd", "origin"],
-                        purpose="EU_BATTERY",
-                        third_party_sharing=True,
-                        valid_from=datetime.now(timezone.utc).date(),
-                        form_version="v1.0",
-                    ),
-                )
-                await submission_repo.create_data_request(db, DataRequestLog(
-                    target_supplier_id=sub_supplier.supplier_id,
-                    requested_data_type="general_info",
-                ))
+            # [FIX] 동의서/자료요청은 여기서 미리 만들지 않는다(신규·재사용 공통) — 미리
+            # 만들면 이 하위 협력사가 맵에 노출되자마자 '이미 메일 발송됨'으로 잘못 표시돼
+            # STEP3(원청이 실제로 메일을 보내야 하는 단계)→STEP4 차수 노출 게이트가 깨진다.
+            # 온보딩 폼 자체의 '정보 입력 시작' 게이트는 supplier_onboarding.consent_status
+            # 컬럼(항상 생성됨)만 보므로 이걸 안 만들어도 캐스케이드 협력사는 그대로 온보딩
+            # 진행이 가능하다 — 원청이 STEP3에서 메일을 보내야 동의서·자료요청이 생긴다.
             invited_sub_suppliers.append({
                 "supplier_id": sub_supplier.supplier_id, "email": sub.email, "sla_due_date": sub_sla_due,
             })

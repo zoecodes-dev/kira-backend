@@ -65,6 +65,40 @@ class SupplyChainService:
         await self.repository.session.commit()
         return result
 
+    async def connect_child_supplier(
+        self,
+        bom_version_id: str,
+        parent_supplier_id: str,
+        child_supplier_id: str,
+    ) -> Dict[str, Any]:
+        """캐스케이드 초대로 생성됐지만 맵(supply_chain_map)에 미연결인 협력사(고아 노드)를
+        상위 협력사가 이미 연결된 bom_version에 자동으로 편입시킨다. 연결에 필요한 part가
+        없으면 자동 생성한다.
+        """
+        if parent_supplier_id == child_supplier_id:
+            raise ValueError("parent_supplier_id와 child_supplier_id가 동일할 수 없습니다.")
+
+        if await self.repository.would_create_cycle(parent_supplier_id, child_supplier_id):
+            raise SupplyChainCycleError("해당 관계는 공급망에 순환 참조를 발생시킵니다.")
+
+        # 동시 호출(예: SupplierInvited를 여러 워커가 동시 수신) 시 중복 엣지 방지.
+        already_connected = await self.repository.lock_and_check_edge_exists(
+            bom_version_id, parent_supplier_id, child_supplier_id
+        )
+        if already_connected:
+            await self.repository.session.commit()
+            return {"status": "already_connected"}
+
+        part_id = await self.repository.get_or_create_child_part(
+            bom_version_id, parent_supplier_id, child_supplier_id
+        )
+        result = await self.repository.create_supply_relation(
+            bom_version_id, parent_supplier_id, child_supplier_id, part_id,
+            discovered_via=parent_supplier_id,
+        )
+        await self.repository.session.commit()
+        return result
+
     async def get_alternatives(
         self, product_id: str, part_id: str
     ) -> List[Dict[str, Any]]:

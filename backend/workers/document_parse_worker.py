@@ -20,7 +20,17 @@ document_extraction_results에 적재한다. (spec 3-5 라이프사이클 1~2단
   GET /suppliers/{id}/master-form/prefill 로 섹션별 prefill 초안을 받아
   검토·정정 후 제출한다. 즉 '문서 업로드만으로 마스터폼 필드가 채워지는' 경로의
   적재 단계가 이 워커다(변환·노출은 supplier.service.get_master_form_prefill).
+
+[SAQ 리스크등급 자동 반영]
+  doc_category='dd_audit_report'(실사 자가진단)로 분류된 문서는 parsed_fields.saq_risk_level
+  (low/medium/high/critical)을 supplier_risk_profiles.self_reported_risk_level에 그대로
+  동기화한다. 예전엔 이 컬럼이 마스터폼의 수동 드롭다운으로만 채워져서, SAQ 문서를 올려
+  AI 진단까지 '이상 없음'으로 나와도 완성도 화면엔 계속 '미입력'으로 남는 불일치가 있었다
+  (SAQ 카드 표시용 파싱과 완성도 게이트용 컬럼이 서로 다른 경로였음). 값이 enum 밖이거나
+  없으면 손대지 않는다(추측 저장 금지 — 기존 unknown 유지).
 """
+import uuid
+
 from arq.connections import RedisSettings
 from arq.cron import cron
 from sqlalchemy import text
@@ -28,8 +38,11 @@ from sqlalchemy import text
 from backend.core.config import config
 from backend.agents.data_gateway import parse_document
 from backend.domains.submission import repository as submission_repo
+from backend.domains.supplier import repository as supplier_repo
 from backend.infrastructure.database import AsyncSessionLocal
 from backend.infrastructure.queue import DOCUMENT_PARSE_QUEUE, enqueue
+
+_SELF_RISK_LEVELS = {"low", "medium", "high", "critical"}
 
 
 async def process_document_parse(ctx, document_id: str, request_id: str | None = None) -> bool:
@@ -89,6 +102,16 @@ async def process_document_parse(ctx, document_id: str, request_id: str | None =
                 detected_document_type=result.get("detected_document_type") or None,
                 evidence_summary=result.get("evidence_summary") or None,
             )
+
+            if result.get("doc_category") == "dd_audit_report":
+                saq_level = str((result.get("parsed_fields") or {}).get("saq_risk_level") or "").strip().lower()
+                if saq_level in _SELF_RISK_LEVELS:
+                    req = await submission_repo.get_data_request(db, uuid.UUID(str(rid)))
+                    if req is not None and req.target_supplier_id is not None:
+                        await supplier_repo.set_self_reported_risk_level(
+                            db, req.target_supplier_id, saq_level
+                        )
+
             await submission_repo.mark_job_done(db, idempotency_key=idempotency_key)
             await db.commit()   # 워커가 트랜잭션 경계 소유 (claim+적재+done 원자 커밋)
 
