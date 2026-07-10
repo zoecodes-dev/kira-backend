@@ -23,25 +23,39 @@ async def process_notification(
     body: str,
     dedup_key: str,
     target: Optional[Dict[str, Any]] = None,
+    resurface: bool = False,
 ) -> str:
     """
     [Notification Queue Worker]
     알림 1건을 notifications 테이블에 적재한다.
-    dedup_key UNIQUE + ON CONFLICT DO NOTHING 으로 중복 발송 방어(멱등).
+    dedup_key UNIQUE + ON CONFLICT 로 중복 발송 방어(멱등). 기본은 DO NOTHING
+    (해당 dedup_key로 평생 1건 — 최종검증/온보딩리뷰/자료제출 완료 등 대부분의 알림).
+
+    resurface=True 인 호출부(현재는 master_form_submitted_notify만)는 DO UPDATE로
+    바꿔, 같은 dedup_key(협력사+수신자+날짜)로 재제출이 들어오면 이미 읽은 알림도
+    다시 미확인(pending)으로 돌려놓는다 — "그날 여러 번 제출해도 1건으로 묶되,
+    매 제출마다 다시 확인시키고 싶다"는 요구용. 다른 알림들은 dedup_key에 날짜가
+    없고 "이 사건당 평생 1회"가 계약이라 resurface를 켜면 안 된다(재점등되면
+    이미 확인한 알림이 파이프라인 재실행 등으로 다시 안 읽음이 될 수 있음).
 
     channel='email' 이면 적재 후 수신자(users.email)를 해석해 SES 로 실제 발송하고
     status 를 pending→sent/failed 로 전이한다(MAIL_ENABLED=False 면 발송 생략→pending 유지).
     channel='in-app' 은 적재만 하고 끝(프론트가 폴링/조회).
     """
+    conflict_clause = (
+        "ON CONFLICT (dedup_key) DO UPDATE SET status = 'pending', read_at = NULL, created_at = now()"
+        if resurface
+        else "ON CONFLICT (dedup_key) DO NOTHING"
+    )
     async with AsyncSessionLocal() as db:
         try:
             inserted = await db.execute(
-                text("""
+                text(f"""
                     INSERT INTO notifications
                         (user_id, channel, notification_type, subject, body, status, dedup_key, target)
                     VALUES
                         (:user_id, :channel, :ntype, :subject, :body, 'pending', :dedup_key, CAST(:target AS JSONB))
-                    ON CONFLICT (dedup_key) DO NOTHING
+                    {conflict_clause}
                     RETURNING notification_id
                 """),
                 {

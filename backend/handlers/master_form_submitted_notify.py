@@ -11,8 +11,10 @@ focusSupplierId만 채운다 — 프론트 buildMapDeepLink가 productId 없이 
 있으면 /suppliers/check-info?supplierId=...(협력사 상세 리뷰)로 보낸다.
 
 멱등: dedup_key(master_form_submitted:{supplier_id}:{user}:{날짜}) — 같은 날 여러 번
-     제출(재저장 등)해도 알림은 하루 1건으로 묶는다 — 알림 워커의 notifications.dedup_key
-     UNIQUE가 중복 INSERT를 막는다.
+     제출(재저장 등)해도 알림 row는 하루 1건으로 묶는다. 단 resurface=True로 enqueue해,
+     재제출 때마다(같은 dedup_key라도) 알림 워커가 DO UPDATE로 status를 pending으로
+     되돌린다 — 원청이 이미 읽은 뒤에도 재제출이 있으면 다시 미확인으로 뜬다
+     (workers/notification_worker.py process_notification 참고).
 """
 import logging
 from datetime import date
@@ -74,5 +76,6 @@ async def notify_master_form_submission(payload: dict) -> None:
             body=f"{label}가 자가진단/기업정보를 제출했습니다. 협력사 상세에서 내용을 검토해 주세요.",
             dedup_key=f"master_form_submitted:{supplier_id}:{uid}:{today}",
             target=target,
+            resurface=True,
         )
     logger.info("[master_form_submitted] 제출 알림 enqueue supplier=%s users=%d", supplier_id, len(recipients))

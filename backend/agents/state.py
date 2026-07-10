@@ -54,8 +54,10 @@ class BatchState(TypedDict, total=False):
 
     # HITL interrupt 발동 여부
     hitl_required: bool
-    # 저신뢰/회색지대 사유 — "low_confidence" | "gray_zone" | None
-    #   data_gateway 노드가 저신뢰 시 "low_confidence" 세팅 → Supervisor가 supplier_reverify 라우팅
+    # HITL 진입 사유 — "low_confidence" | "geographical_risk" | "risk_escalated" | None
+    #   data_gateway(저신뢰) / geo_audit(지리 위험) / automation(리스크 임계 초과)가 각각 세팅.
+    #   None이면 정상 통과. graph.py의 _HITL_REASON_BY_ERROR가 이 값을 hitl_reviews.reason으로
+    #   매핑하며, 매핑되지 않는 값은 기본값 "gray_zone"으로 기록된다(= error_reason 자체 값은 아님).
     error_reason: Optional[str]
 
     # 협력사 확정값 — SubmissionCompleted(=협력사 확정 시점) payload의 confirmed_fields를
