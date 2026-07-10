@@ -1035,6 +1035,9 @@ CREATE INDEX idx_doc_extraction_document ON document_extraction_results(document
 CREATE INDEX idx_submission_docs_request  ON submission_documents(request_id);
 CREATE INDEX idx_submission_docs_supplier ON submission_documents(supplier_id);
 CREATE INDEX idx_submission_docs_factory  ON submission_documents(factory_id); -- prefill 공장별 그룹핑
+-- file_url(S3 키)은 문서 1건당 유일하다. 핸들러의 SELECT 후 INSERT 멱등성 검사는
+-- 동시 실행 시 둘 다 통과하므로(레이스), 최종 방어선은 DB 제약이어야 한다.
+CREATE UNIQUE INDEX uq_submission_docs_file_url ON submission_documents(file_url);
 
 -- [신설] supplier_audit_records 워크플로우 컬럼 인덱스 (v_action_items 큐 조회 최적화)
 CREATE INDEX idx_audit_records_status     ON supplier_audit_records(audit_status) WHERE audit_status IN ('requested', 'assigned', 'in_progress');
