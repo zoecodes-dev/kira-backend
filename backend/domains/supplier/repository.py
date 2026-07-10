@@ -224,11 +224,19 @@ async def set_self_reported_risk_level(
     level: str,
 ) -> None:
     """협력사 실사 자가진단 결과 갱신(supplier_risk_profiles.self_reported_risk_level).
-    프로필 row는 초대 시점에 생성돼 존재하므로 UPDATE. flush만 — 커밋은 service."""
+
+    UPSERT — 프로필 row는 어느 코드 경로에서도 생성되지 않는다(시드에만 존재). 시드 밖에서
+    만들어진 협력사는 row가 없어, UPDATE만 하면 0행에 걸려 SAQ 등급이 조용히 사라졌다.
+    나머지 컬럼은 스키마 기본값(risk_level='low', overall_risk_score=0 등)에 맡긴다 —
+    자가신고 등급은 시스템 산정 risk_level과 별개 축이라 여기서 추정해 쓰면 안 된다.
+    flush만 — 커밋은 service."""
     await db.execute(
-        update(SupplierRiskProfile)
-        .where(SupplierRiskProfile.supplier_id == supplier_id)
-        .values(self_reported_risk_level=level)
+        pg_insert(SupplierRiskProfile)
+        .values(supplier_id=supplier_id, self_reported_risk_level=level)
+        .on_conflict_do_update(
+            index_elements=[SupplierRiskProfile.supplier_id],
+            set_={"self_reported_risk_level": level},
+        )
     )
     await db.flush()
 
@@ -353,6 +361,7 @@ async def get_factories(db: AsyncSession, supplier_id: UUID) -> List[dict]:
             SupplierFactory.supply_ratio_percent,
             SupplierFactory.supply_quantity,
             SupplierFactory.core_minerals,
+            SupplierFactory.material_composition_doc_url,
             SupplierFactory.factory_manager_name,
             SupplierFactory.factory_manager_role,
             SupplierFactory.factory_manager_phone,
@@ -365,6 +374,27 @@ async def get_factories(db: AsyncSession, supplier_id: UUID) -> List[dict]:
     )
     result = await db.execute(stmt)
     return [dict(row._mapping) for row in result]
+
+
+async def get_factory(db: AsyncSession, supplier_id: UUID, factory_id: UUID) -> Optional[SupplierFactory]:
+    """[SELECT] 소유 검증용 — 그 협력사의 공장이 아니면 None."""
+    stmt = select(SupplierFactory).where(
+        SupplierFactory.factory_id == factory_id,
+        SupplierFactory.supplier_id == supplier_id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def set_factory_material_doc(
+    db: AsyncSession, factory_id: UUID, s3_key: str
+) -> None:
+    """[UPDATE] 공장의 소재구성 문서 S3 키 갱신. commit은 service 책임(flush만)."""
+    await db.execute(
+        update(SupplierFactory)
+        .where(SupplierFactory.factory_id == factory_id)
+        .values(material_composition_doc_url=s3_key)
+    )
+    await db.flush()
 
 
 async def get_contacts(db: AsyncSession, supplier_id: UUID) -> List[dict]:

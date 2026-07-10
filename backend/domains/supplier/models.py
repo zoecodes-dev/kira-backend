@@ -74,6 +74,10 @@ class Supplier(Base):
     status: Mapped[str] = mapped_column(String(30), default="supplier_pending")
     risk_level: Mapped[str] = mapped_column(String(20), default="low")
 
+    # 소재구성·탄소발자국·SAQ 3종 AI 처리 종합 결론(domains/supplier/ai_synthesis.py). 1회 생성, 멱등.
+    ai_compliance_summary: Mapped[Optional[str]] = mapped_column(Text)
+    ai_compliance_summary_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -115,6 +119,8 @@ class SupplierFactory(Base):
     supply_ratio_percent: Mapped[Optional[float]] = mapped_column(NUMERIC(5, 2))
     supply_quantity: Mapped[Optional[str]] = mapped_column(String(100))
     core_minerals: Mapped[Optional[dict]] = mapped_column(JSONB)  # 공장(사이트)별 소재 구성
+    # 소재구성 문서(core_minerals 근거) — 공장 단위. 협력사 단위 컬럼과 달리 어느 공장의 근거인지 구분된다.
+    material_composition_doc_url: Mapped[Optional[str]] = mapped_column(String(500))
     # 공장 담당자(공장 단위) — supplier_contacts(협력사 PIC)와 구분: factory_manager_*
     factory_manager_name: Mapped[Optional[str]] = mapped_column(String(100))
     factory_manager_role: Mapped[Optional[str]] = mapped_column(String(100))
@@ -390,6 +396,8 @@ class SupplierDetailResponse(BaseModel):
     carbon_footprint_doc_url: Optional[str] = None  # 탄소발자국 신고서 업로드 URL(확인용)
     status: str
     risk_level: str
+    ai_compliance_summary: Optional[str] = None  # 소재구성·탄소발자국·SAQ 3종 AI 종합 결론
+    ai_compliance_summary_generated_at: Optional[datetime] = None
     manufacturer_detail: Optional[ManufacturerDetailDTO] = None
     miner_detail: Optional[MinerDetailDTO] = None
     model_config = {"from_attributes": True}
@@ -414,6 +422,7 @@ class FactoryDTO(BaseModel):
     supply_ratio_percent: Optional[float] = None
     supply_quantity: Optional[str] = None
     core_minerals: Optional[dict] = None
+    material_composition_doc_url: Optional[str] = None  # 이 공장의 소재구성 문서 S3 키(있으면 '업로드됨')
     factory_manager_name: Optional[str] = None
     factory_manager_role: Optional[str] = None
     factory_manager_phone: Optional[str] = None
@@ -426,6 +435,11 @@ class FactoryDTO(BaseModel):
 class SupplierFactoriesResponse(BaseModel):
     supplier_id: uuid.UUID
     factories: list[FactoryDTO] = []
+
+
+# 공장 단위 소재구성 문서 업로드 — PATCH /{supplier_id}/factories/{factory_id}/material-doc
+class FactoryMaterialDocRequest(BaseModel):
+    material_composition_doc_url: str  # files 버킷 S3 키(uploadFile 결과)
 
 
 # 담당자 연락처 탭 — supplier_contacts 다건.
@@ -670,17 +684,30 @@ class MasterFormResponse(BaseModel):
 
 
 # ----- AP: 마스터폼 AI 자동 채움(prefill) 응답 -----
+class FactoryMaterialsPrefill(BaseModel):
+    """공장 한 곳의 소재구성 자동 채움값 — 그 공장에 귀속된 문서의 추출결과만 모았다."""
+    factory_id: uuid.UUID
+    materials: dict = {}             # {"li_content": 7.1, "ni_content": 80.0, ...}
+    low_confidence_fields: list[dict] = []
+
+
 class MasterFormPrefillResponse(BaseModel):
     """
     GET /suppliers/{id}/master-form/prefill — 협력사 보완 문서 추출결과를 마스터폼
     섹션 구조로 모은 초안. 협력사는 prefill을 검토·정정 후 master-form으로 제출한다.
     low_confidence_fields는 신뢰도 임계치 미만이라 '확인 요청'이 필요한 항목 목록.
+
+    factory_prefill은 materials 섹션 전용이다 — 저장 위치가 공장 단위(core_minerals)라
+    협력사 단위 prefill 하나로는 어느 공장 값인지 표현할 수 없다. 소재구성 문서를 올린
+    공장(submission_documents.factory_id)별로 나뉜다.
     """
     supplier_id: uuid.UUID
     document_count: int = 0          # 추출결과가 모인 문서 수(0이면 업로드 전)
     unconfirmed_documents: int = 0   # 협력사 미확인(confirm 전) 문서 수
     prefill: dict = {}               # {"company": {...}, "manufacturing": {...}, ...}
     low_confidence_fields: list[dict] = []
+    # [{"factory_id": UUID, "materials": {"ni_content": 80.0, ...}, "low_confidence_fields": [...]}]
+    factory_prefill: list[FactoryMaterialsPrefill] = []
 
 
 # ============================================================

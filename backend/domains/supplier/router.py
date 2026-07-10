@@ -27,6 +27,7 @@ from backend.domains.supplier.models import (
     RiskScoreUpdateRequest,
     SupplierReliabilityResponse,
     SupplierFactoriesResponse,
+    FactoryMaterialDocRequest,
     SupplierContactsResponse,
     SupplierCompletenessResponse,
     SupplierCarbonDeclsResponse,
@@ -301,6 +302,32 @@ async def get_supplier_factories_endpoint(
     data = await service.get_factories(db, supplier_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    return data
+
+
+@router.patch(
+    "/{supplier_id}/factories/{factory_id}/material-doc",
+    response_model=SupplierFactoriesResponse,
+    dependencies=[Depends(require_supplier_consent)],  # 제3자 동의 게이트(detail PATCH와 동일)
+)
+async def update_factory_material_doc_endpoint(
+    supplier_id: UUID,
+    factory_id: UUID,
+    request: FactoryMaterialDocRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    공장 단위 소재구성 문서 업로드 — 추출된 핵심광물 함량이 이 공장의 core_minerals로 간다.
+    협력사 계정은 본인 회사 것만 수정 가능. 그 협력사의 공장이 아니면 404.
+    """
+    if current_user.supplier_id is not None and current_user.supplier_id != supplier_id:
+        raise HTTPException(status_code=403, detail="본인 회사 정보만 수정할 수 있습니다.")
+    data = await service.update_factory_material_doc(
+        db, supplier_id, factory_id, request.material_composition_doc_url, current_user.tenant_id
+    )
+    if data is None:
+        raise HTTPException(status_code=404, detail="Factory not found")
     return data
 
 

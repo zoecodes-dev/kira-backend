@@ -134,6 +134,8 @@ class SubmissionDocument(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4(), default=uuid.uuid4)
     request_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("data_request_log.request_id", ondelete="CASCADE"), nullable=True)
     supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=True)
+    # 공장 단위 문서(소재구성)의 귀속 공장. 협력사 단위 문서(사업자등록증 등)는 NULL.
+    factory_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("supplier_factories.factory_id", ondelete="SET NULL"), nullable=True)
     file_url: Mapped[str] = mapped_column(String(500), nullable=False)
     file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     file_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)

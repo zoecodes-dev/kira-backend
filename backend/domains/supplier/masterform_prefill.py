@@ -99,6 +99,17 @@ FIELD_CATALOG: Dict[str, _FIELD] = {
 }
 
 
+# materials 섹션만 저장 위치가 공장 단위(supplier_factories.core_minerals)다. 나머지 섹션은
+# 협력사 단위(suppliers·supplier_manufacturer_details) → prefill도 협력사 단위로 하나만 만든다.
+MATERIALS_SECTION = "materials"
+
+
+def section_of(field: str) -> Optional[str]:
+    """카탈로그상 이 추출 필드가 속한 마스터폼 섹션. 카탈로그 밖 키(__locations__ 등)는 None."""
+    entry = FIELD_CATALOG.get(field)
+    return entry[0] if entry else None
+
+
 def catalog_prompt_lines() -> str:
     """
     추출 프롬프트에 끼울 '대상 필드 목록' 문자열을 만든다(섹션별 그룹핑·한글 라벨 포함).
