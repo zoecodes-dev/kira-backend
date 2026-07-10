@@ -32,6 +32,21 @@ _suppliers_tbl = Table(
     Column("company_name", String(255)),
 )
 
+# products도 product 도메인 소유 테이블이라 같은 이유로 최소 Table 매핑만 둔다.
+# submit_data_request_endpoint에서 batch 생성 시 tenant_id를 채우기 위한 동기 조회 전용.
+_products_tbl = Table(
+    "products", _supplier_meta,
+    Column("product_id", PG_UUID(as_uuid=True), primary_key=True),
+    Column("tenant_id", PG_UUID(as_uuid=True)),
+)
+
+async def get_product_tenant_id(db: AsyncSession, product_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """[SELECT] product_id로 products.tenant_id만 조회한다 (batch 생성 시 tenant_id 채움용)."""
+    stmt = select(_products_tbl.c.tenant_id).where(_products_tbl.c.product_id == product_id)
+    result = await db.execute(stmt)
+    row = result.first()
+    return row[0] if row else None
+
 async def create_data_request(db: AsyncSession, log_record: DataRequestLog) -> DataRequestLog:
     """
     [INSERT] 새로운 공급망 데이터 요청(DataRequestLog) 마스터 기록을 DB에 삽입합니다.
@@ -128,6 +143,7 @@ async def create_submission_document(
     request_id: uuid.UUID,
     supplier_id: uuid.UUID,
     file_url: str,
+    factory_id: Optional[uuid.UUID] = None,
     file_name: Optional[str] = None,
     file_type: Optional[str] = None,
     doc_category: Optional[str] = None,
@@ -136,11 +152,13 @@ async def create_submission_document(
     """
     [INSERT] 파싱 대상 원본 문서 메타를 submission_documents에 적재한다.
     file_url엔 S3 키를 저장한다(data_gateway가 이 키로 바이트를 읽는다).
+    factory_id는 공장 단위 문서(소재구성)만 채운다 — 협력사 단위 문서는 None.
     document_id/uploaded_at은 모델 server_default에 맡긴다. commit은 호출부 책임.
     """
     doc = SubmissionDocument(
         request_id=request_id,
         supplier_id=supplier_id,
+        factory_id=factory_id,
         file_url=file_url,
         file_name=file_name,
         file_type=file_type,
@@ -224,6 +242,34 @@ async def list_extraction_results_by_suppliers(
             _suppliers_tbl.c.supplier_id == DataRequestLog.target_supplier_id,
         )
         .where(DataRequestLog.target_supplier_id.in_(supplier_ids))
+    )
+    result = await db.execute(stmt)
+    return list(result.all())
+
+
+async def list_extraction_results_with_factory(
+    db: AsyncSession,
+    supplier_id: uuid.UUID,
+) -> list[tuple[DocumentExtractionResult, Optional[uuid.UUID]]]:   # ← (추출결과, factory_id|None)
+    """
+    [SELECT] 한 협력사의 문서 추출결과를 '귀속 공장'과 함께 모은다(마스터폼 prefill용).
+
+    list_extraction_results_by_suppliers와 별개로 두는 이유: 그쪽은 data_gateway가
+    provider_type 기준으로 승격 게이트를 판정하는 경로라 반환 튜플 모양을 바꾸면 안 된다.
+    여기서는 factory_id만 필요하므로 submission_documents로 LEFT JOIN 한다
+    (document_id가 없는 옛 추출결과도 협력사 단위로 남아야 하므로 outer join).
+    """
+    stmt = (
+        select(DocumentExtractionResult, SubmissionDocument.factory_id)
+        .join(
+            DataRequestLog,
+            DataRequestLog.request_id == DocumentExtractionResult.request_id,
+        )
+        .outerjoin(
+            SubmissionDocument,
+            SubmissionDocument.document_id == DocumentExtractionResult.document_id,
+        )
+        .where(DataRequestLog.target_supplier_id == supplier_id)
     )
     result = await db.execute(stmt)
     return list(result.all())

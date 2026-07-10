@@ -29,6 +29,7 @@ document_extraction_results에 적재한다. (spec 3-5 라이프사이클 1~2단
   (SAQ 카드 표시용 파싱과 완성도 게이트용 컬럼이 서로 다른 경로였음). 값이 enum 밖이거나
   없으면 손대지 않는다(추측 저장 금지 — 기존 unknown 유지).
 """
+import dataclasses
 import uuid
 
 from arq.connections import RedisSettings
@@ -39,7 +40,10 @@ from backend.core.config import config
 from backend.agents.data_gateway import parse_document
 from backend.domains.submission import repository as submission_repo
 from backend.domains.supplier import repository as supplier_repo
+from backend.domains.supplier import ai_synthesis
+from backend.events.types import SupplierAiSynthesisReadyEvent
 from backend.infrastructure.database import AsyncSessionLocal
+from backend.infrastructure.event_bus import publish
 from backend.infrastructure.queue import DOCUMENT_PARSE_QUEUE, enqueue
 
 _SELF_RISK_LEVELS = {"low", "medium", "high", "critical"}
@@ -103,17 +107,34 @@ async def process_document_parse(ctx, document_id: str, request_id: str | None =
                 evidence_summary=result.get("evidence_summary") or None,
             )
 
-            if result.get("doc_category") == "dd_audit_report":
+            # [3종 AI 종합] doc_category가 소재구성/탄소발자국/SAQ 중 하나면 이 협력사의
+            #   target_supplier_id를 한 번만 조회해 SAQ 리스크 동기화 + 종합 결론 생성에 재사용.
+            doc_category = result.get("doc_category")
+            target_supplier_id = None
+            if doc_category in ai_synthesis.SYNTHESIS_TARGET_CATEGORIES:
+                req = await submission_repo.get_data_request(db, uuid.UUID(str(rid)))
+                if req is not None and req.target_supplier_id is not None:
+                    target_supplier_id = req.target_supplier_id
+
+            if doc_category == "dd_audit_report" and target_supplier_id is not None:
                 saq_level = str((result.get("parsed_fields") or {}).get("saq_risk_level") or "").strip().lower()
                 if saq_level in _SELF_RISK_LEVELS:
-                    req = await submission_repo.get_data_request(db, uuid.UUID(str(rid)))
-                    if req is not None and req.target_supplier_id is not None:
-                        await supplier_repo.set_self_reported_risk_level(
-                            db, req.target_supplier_id, saq_level
-                        )
+                    await supplier_repo.set_self_reported_risk_level(db, target_supplier_id, saq_level)
+
+            # 3종이 이 시점에 전부 갖춰졌을 때만(멱등 가드) LLM으로 종합 결론을 만든다.
+            new_summary = None
+            if target_supplier_id is not None:
+                new_summary = await ai_synthesis.maybe_synthesize_compliance_summary(db, target_supplier_id)
 
             await submission_repo.mark_job_done(db, idempotency_key=idempotency_key)
-            await db.commit()   # 워커가 트랜잭션 경계 소유 (claim+적재+done 원자 커밋)
+            await db.commit()   # 워커가 트랜잭션 경계 소유 (claim+적재+done+종합 원자 커밋)
+
+            # 커밋 성공 후에만 발행(이벤트 발행 순서 규칙) — 종합 결론이 방금 새로 생겼을 때만.
+            if new_summary:
+                await publish(
+                    "SupplierAiSynthesisReady",
+                    dataclasses.asdict(SupplierAiSynthesisReadyEvent(supplier_id=target_supplier_id)),
+                )
 
         except Exception as exc:
             await db.rollback()

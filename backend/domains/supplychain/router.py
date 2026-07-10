@@ -312,7 +312,6 @@ async def get_supply_chain_map_endpoint(
     period_from: Optional[str] = None,
     period_to: Optional[str] = None,
     factory_id: Optional[str] = None,
-    po_number: Optional[str] = None,
     current_user: CurrentUser = Depends(get_current_user),
     service: SupplyChainService = Depends(get_supply_chain_service),
 ):
@@ -330,7 +329,6 @@ async def get_supply_chain_map_endpoint(
         period_from=period_from,
         period_to=period_to,
         factory_id=factory_id,
-        po_number=po_number,
     )
 
 
