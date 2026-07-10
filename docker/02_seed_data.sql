@@ -1427,6 +1427,13 @@ WHERE NOT EXISTS (SELECT 1 FROM supplier_manufacturer_details WHERE supplier_id 
 -- 기존 공장(100%)을 60/40으로 분할하고 2번째 공장을 신규 추가(uuid_generate_v4 자동생성),
 -- 엣지(edge_id)별로 공급비율/물량을 같은 비율로 재분배, 신규 공장 탄소선언도 함께 삽입.
 
+-- [FIX] 동성머티리얼 천안 양극재공장(f2222222)의 supply_ratio 최초 행이 어느 엣지에도 없어서
+--   아래 두 factory 60/40 분할 중 60% UPDATE가 대상 행 없이 매번 no-op 되어 합계가 40%로 남던 문제 보정.
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
+('51111111-0000-4000-8000-000000000004', 'f2222222-0000-4000-8000-000000000002', 100.00, 40000.0, 'kg'),
+('52222222-0000-4000-8000-000000000004', 'f2222222-0000-4000-8000-000000000002', 100.00, 38000.0, 'kg'),
+('54444444-0000-4000-8000-000000000003', 'f2222222-0000-4000-8000-000000000002', 100.00, 45000.0, 'kg');
+
 -- 동성머티리얼(주) (천안 양극재공장 -> +2번째 공장)
 WITH new_factory AS (
   INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
@@ -1595,6 +1602,10 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '85555555-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 16800.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 25200.0 WHERE edge_id = '85555555-0000-4000-8000-000000000004' AND factory_id = '72111111-0000-4000-8000-000000000001';
 
+-- [FIX] 청정전구체 광양 전구체공장(f6666666)의 supply_ratio 최초 행 누락 보정(동일 패턴 버그).
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
+('53111111-0000-4000-8000-000000000003', 'f6666666-0000-4000-8000-000000000006', 100.00, 22000.0, 'kg');
+
 -- 청정전구체(주) (광양 전구체공장 -> +2번째 공장)
 WITH new_factory AS (
   INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
@@ -1703,6 +1714,11 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '85555555-0000-4000-8000-000000000006'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 8000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 12000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000006' AND factory_id = '74111111-0000-4000-8000-000000000001';
 
+-- [FIX] 한중제련 온산 제련소(faaaaaaa)의 supply_ratio 최초 행 누락 보정(동일 패턴 버그).
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
+('51111111-0000-4000-8000-000000000005', 'faaaaaaa-0000-4000-8000-00000000000a', 100.00, 24000.0, 'kg'),
+('54444444-0000-4000-8000-000000000004', 'faaaaaaa-0000-4000-8000-00000000000a', 100.00, 25000.0, 'kg');
+
 -- 한중제련(주) (온산 제련소 -> +2번째 공장)
 WITH new_factory AS (
   INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
@@ -1778,6 +1794,10 @@ INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '86666666-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 40.00::numeric AS ratio_percentage, 7400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 60.00, volume = 11100.0 WHERE edge_id = '86666666-0000-4000-8000-000000000005' AND factory_id = '74222222-0000-4000-8000-000000000002';
 
+-- [FIX] Xinjiang Refinery(facacaca)의 supply_ratio 최초 행 누락 보정(동일 패턴 버그).
+INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit) VALUES
+('53222222-0000-4000-8000-000000000003', 'facacaca-0000-4000-8000-0000000000ac', 100.00, 22000.0, 'kg');
+
 -- Xinjiang Nickel Refinery (Xinjiang Refinery -> +2번째 공장)
 WITH new_factory AS (
   INSERT INTO supplier_factories (supplier_id, factory_name, factory_name_en, country, region, location, factory_role, destination, applicable_regulations, supply_ratio_percent, factory_manager_name, factory_manager_role, factory_manager_phone, factory_manager_email)
@@ -1832,7 +1852,11 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '73444444-0000-4000-8000-000000000004' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'ed48f9c1-8cac-4634-b0a3-35509aac9fd3' RETURNING factory_id
+  -- [FIX] 하드코딩 factory_id는 new_factory INSERT가 매번 새로 발급하는 랜덤 id와 어긋나 no-op 되던 버그.
+  --   (supplier_id, factory_name)으로 실제 2번째 공장 row를 찾도록 보정.
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '63444444-0000-4000-8000-000000000004' AND factory_name = '세종 제2공장')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -1842,7 +1866,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '88888888-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4200.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 10500.0 WHERE edge_id = '88888888-0000-4000-8000-000000000004' AND factory_id = '73444444-0000-4000-8000-000000000004';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6300.0 WHERE edge_id = '88888888-0000-4000-8000-000000000004' AND factory_id = 'ed48f9c1-8cac-4634-b0a3-35509aac9fd3';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6300.0
+WHERE edge_id = '88888888-0000-4000-8000-000000000004'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '63444444-0000-4000-8000-000000000004' AND factory_name = '세종 제2공장');
 
 -- 포스피케미칼(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -1854,7 +1880,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '72222222-0000-4000-8000-000000000002' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'db0de79f-e282-4b25-8a22-4d009e1fa746' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '62222222-0000-4000-8000-000000000002' AND factory_name = '포항 제2공장')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -1864,7 +1892,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '86666666-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 7600.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 19000.0 WHERE edge_id = '86666666-0000-4000-8000-000000000003' AND factory_id = '72222222-0000-4000-8000-000000000002';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 11400.0 WHERE edge_id = '86666666-0000-4000-8000-000000000003' AND factory_id = 'db0de79f-e282-4b25-8a22-4d009e1fa746';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 11400.0
+WHERE edge_id = '86666666-0000-4000-8000-000000000003'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '62222222-0000-4000-8000-000000000002' AND factory_name = '포항 제2공장');
 
 -- 하나에너지셀(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -1898,7 +1928,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '73555555-0000-4000-8000-000000000005' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'c292f097-bf0c-4212-9942-e5ffbbbb43ca' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '63555555-0000-4000-8000-000000000005' AND factory_name = '남해 제2공장')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -1908,7 +1940,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '89999999-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '89999999-0000-4000-8000-000000000004' AND factory_id = '73555555-0000-4000-8000-000000000005';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '89999999-0000-4000-8000-000000000004' AND factory_id = 'c292f097-bf0c-4212-9942-e5ffbbbb43ca';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0
+WHERE edge_id = '89999999-0000-4000-8000-000000000004'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '63555555-0000-4000-8000-000000000005' AND factory_name = '남해 제2공장');
 
 -- 동신전구체(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -1920,7 +1954,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '73111111-0000-4000-8000-000000000001' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '686c97e5-7c44-42a2-8a7c-2c932f24d182' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '63111111-0000-4000-8000-000000000001' AND factory_name = '군산 제2공장')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -1930,7 +1966,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '85555555-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 5000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12500.0 WHERE edge_id = '85555555-0000-4000-8000-000000000005' AND factory_id = '73111111-0000-4000-8000-000000000001';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0 WHERE edge_id = '85555555-0000-4000-8000-000000000005' AND factory_id = '686c97e5-7c44-42a2-8a7c-2c932f24d182';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0
+WHERE edge_id = '85555555-0000-4000-8000-000000000005'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '63111111-0000-4000-8000-000000000001' AND factory_name = '군산 제2공장');
 
 -- 청정전구체(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -1942,7 +1980,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = 'f6666666-0000-4000-8000-000000000006' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'a71be771-2add-42bd-9a8e-b610c653e927' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'a6666666-6666-4000-8000-000000000006' AND factory_name = '광양 제2공장')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -1952,7 +1992,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '53111111-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '53111111-0000-4000-8000-000000000003' AND factory_id = 'f6666666-0000-4000-8000-000000000006';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '53111111-0000-4000-8000-000000000003' AND factory_id = 'a71be771-2add-42bd-9a8e-b610c653e927';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0
+WHERE edge_id = '53111111-0000-4000-8000-000000000003'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'a6666666-6666-4000-8000-000000000006' AND factory_name = '광양 제2공장');
 
 -- 한독배터리(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -1986,7 +2028,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '74111111-0000-4000-8000-000000000001' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '47213770-8ea8-4dbd-9af8-749402efa9a3' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '64111111-0000-4000-8000-000000000001' AND factory_name = '온산 제2제련소')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -1996,7 +2040,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '85555555-0000-4000-8000-000000000006'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 10000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000006' AND factory_id = '74111111-0000-4000-8000-000000000001';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6000.0 WHERE edge_id = '85555555-0000-4000-8000-000000000006' AND factory_id = '47213770-8ea8-4dbd-9af8-749402efa9a3';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6000.0
+WHERE edge_id = '85555555-0000-4000-8000-000000000006'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '64111111-0000-4000-8000-000000000001' AND factory_name = '온산 제2제련소');
 
 -- 한중제련(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -2008,7 +2054,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = 'faaaaaaa-0000-4000-8000-00000000000a' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a' AND factory_name = '온산 제2제련소')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -2021,13 +2069,11 @@ UNION ALL
 SELECT '54444444-0000-4000-8000-000000000004'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 5000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12000.0 WHERE edge_id = '51111111-0000-4000-8000-000000000005' AND factory_id = 'faaaaaaa-0000-4000-8000-00000000000a';
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 12500.0 WHERE edge_id = '54444444-0000-4000-8000-000000000004' AND factory_id = 'faaaaaaa-0000-4000-8000-00000000000a';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7200.0 WHERE edge_id = '51111111-0000-4000-8000-000000000005' AND factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0 WHERE edge_id = '54444444-0000-4000-8000-000000000004' AND factory_id = 'e3ae46e6-975d-43c2-8ab1-0ee8ec90bf13';
-
--- [FIX] iX3 50(51111111-...005) 비율 합 100% 미달 보정.
---   위 upd_secondary(2001줄)가 하드코딩 factory_id(e3ae46e6)를 참조해 실제 온산 제2제련소 row를 못 찾아 40%에서 안 내려감(50+40+20=110%, 100% 아님).
 UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7200.0
 WHERE edge_id = '51111111-0000-4000-8000-000000000005'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a' AND factory_name = '온산 제2제련소');
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 7500.0
+WHERE edge_id = '54444444-0000-4000-8000-000000000004'
   AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'aaaaaaaa-aaaa-4000-8000-00000000000a' AND factory_name = '온산 제2제련소');
 
 -- Brazil Nickel Refining SA (3번째 공장 추가, 50/30/20 재분배)
@@ -2040,7 +2086,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '74555555-0000-4000-8000-000000000005' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = 'c0a6e2cd-4181-4a30-8716-363cad1401a1' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '64555555-0000-4000-8000-000000000005' AND factory_name = 'Niquelândia Refinery 2')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -2050,7 +2098,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '89999999-0000-4000-8000-000000000005'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 3500.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 8750.0 WHERE edge_id = '89999999-0000-4000-8000-000000000005' AND factory_id = '74555555-0000-4000-8000-000000000005';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 5250.0 WHERE edge_id = '89999999-0000-4000-8000-000000000005' AND factory_id = 'c0a6e2cd-4181-4a30-8716-363cad1401a1';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 5250.0
+WHERE edge_id = '89999999-0000-4000-8000-000000000005'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '64555555-0000-4000-8000-000000000005' AND factory_name = 'Niquelândia Refinery 2');
 
 -- 신진CAM(주) (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -2062,7 +2112,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = '72333333-0000-4000-8000-000000000003' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '1303efc1-70d8-410a-a091-0c5341ad611e' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '62333333-0000-4000-8000-000000000003' AND factory_name = '군산 제2공장')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -2072,7 +2124,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '87777777-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 8000.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 20000.0 WHERE edge_id = '87777777-0000-4000-8000-000000000003' AND factory_id = '72333333-0000-4000-8000-000000000003';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 12000.0 WHERE edge_id = '87777777-0000-4000-8000-000000000003' AND factory_id = '1303efc1-70d8-410a-a091-0c5341ad611e';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 12000.0
+WHERE edge_id = '87777777-0000-4000-8000-000000000003'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = '62333333-0000-4000-8000-000000000003' AND factory_name = '군산 제2공장');
 
 -- Xinjiang Nickel Refinery (3번째 공장 추가, 50/30/20 재분배)
 WITH new_factory AS (
@@ -2084,7 +2138,9 @@ upd_primary AS (
   UPDATE supplier_factories SET supply_ratio_percent = 50.00 WHERE factory_id = 'facacaca-0000-4000-8000-0000000000ac' RETURNING factory_id
 ),
 upd_secondary AS (
-  UPDATE supplier_factories SET supply_ratio_percent = 30.00 WHERE factory_id = '8203ba63-ad8f-4b48-a278-064e91cfbf9e' RETURNING factory_id
+  UPDATE supplier_factories SET supply_ratio_percent = 30.00
+  WHERE factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'acacacac-acac-4000-8000-0000000000ac' AND factory_name = 'Xinjiang Refinery 2')
+  RETURNING factory_id
 ),
 new_carbon AS (
   INSERT INTO factory_carbon_declarations (factory_id, carbon_intensity, methodology, declared_at, valid_from, source)
@@ -2094,7 +2150,9 @@ new_carbon AS (
 INSERT INTO supply_ratio (edge_id, factory_id, ratio_percentage, volume, unit)
 SELECT '53222222-0000-4000-8000-000000000003'::uuid AS edge_id, factory_id, 20.00::numeric AS ratio_percentage, 4400.0::numeric AS volume, 'kg' AS unit FROM new_factory;
 UPDATE supply_ratio SET ratio_percentage = 50.00, volume = 11000.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = 'facacaca-0000-4000-8000-0000000000ac';
-UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0 WHERE edge_id = '53222222-0000-4000-8000-000000000003' AND factory_id = '8203ba63-ad8f-4b48-a278-064e91cfbf9e';
+UPDATE supply_ratio SET ratio_percentage = 30.00, volume = 6600.0
+WHERE edge_id = '53222222-0000-4000-8000-000000000003'
+  AND factory_id = (SELECT factory_id FROM supplier_factories WHERE supplier_id = 'acacacac-acac-4000-8000-0000000000ac' AND factory_name = 'Xinjiang Refinery 2');
 
 
 -- ============================================================
