@@ -38,25 +38,93 @@ router → service → repository → models
 ### 에이전트 파이프라인 (LangGraph)
 ```
 stage_queued
-  → data_gateway   (supplier_ids·추출결과 검증)
+  → data_gateway   (supplier_ids·추출결과 검증 — 추출 자체는 문서 업로드 시 워커가 이미 처리)
   → geo_audit      (지리 위험 판정, risk_flags 생성)
   → compliance     (규제별 judge, verdict 판정)
   → risk_scoring   (compliance·geo 결과 종합 점수)
+  → final_judgment (종합 판정 롤업 + 요약문 생성)
   → completed
 ```
 공유 상태는 `backend/agents/state.py`의 `BatchState`(schema `batches` 테이블과 1:1 정렬).
 HITL 분기는 `error_reason`(`low_confidence`/`geographical_risk`/`risk_escalated`)으로 라우팅됩니다.
 
-### AI vs 결정론 — **AI 호출은 2곳뿐**
+### AI vs 결정론 — 그래프 노드 기준 2곳, 전체론 5곳
+> **주의**: `data_gateway` 노드 자체는 이미 저장된 추출 결과를 집계·신뢰도 게이트만 하는 결정론 코드다.
+> 실제 AI 문서 추출(`parse_document()`, 같은 파일)은 그래프 실행 시점이 아니라 **협력사가 문서를 업로드하는 순간** `document_parse_worker`가 호출한다. 아래 표는 "이 단계의 결과가 AI로 만들어졌는가"를 기준으로 표시한다.
+
 | 노드/모듈 | AI | 기법 |
 |---|---|---|
 | `supervisor.route()` | ❌ 결정론 | `current_stage`/`confidence_score` 규칙 라우터 (LLM 없음) |
-| `data_gateway` | ✅ AI | Claude 멀티모달 문서 추출(AWS Bedrock). S3 PDF/이미지 → 구조화 JSON |
+| `data_gateway` | ✅ AI (호출은 워커에서) | Claude Sonnet 멀티모달 문서 추출(AWS Bedrock). S3 PDF/이미지 → 구조화 JSON. 그래프 노드는 결과 집계·신뢰도 게이트만 수행 |
 | `geo_audit` | ❌ 결정론 | PostGIS 공간쿼리 + 고위험 좌표 판정 |
-| `compliance` | ✅ AI(하이브리드) | RAG(Bedrock 임베딩 + pgvector 코사인) + Claude Sonnet judge(`cited_clauses` 강제) |
+| `compliance` | ✅ AI(하이브리드) | RAG(Bedrock Cohere Embed v4 + pgvector 코사인) + Claude Sonnet judge(`cited_clauses` 강제) |
 | `automation`(risk_scoring) | ❌ 결정론 | 규칙 엔진: 규제 판정·지리 위험을 종합한 가점식 리스크 점수 |
+| `final_judgment` | ❌ 결정론 | verdict·geo·risk를 롤업해 종합판정 + 요약문 생성(파이썬 템플릿, LLM 없음) |
 
 > LLM tool-use(function calling)는 사용하지 않습니다. **구조화 JSON 프롬프트 + RAG** 방식.
+
+### 파이프라인 밖 AI 호출 지점 (총 3곳 추가)
+그래프 노드가 아니라 **이벤트/업로드에 반응해 단발로 호출되는** 지점들이다. 모두 `bedrock_factory.get_llm_for_agent("lightweight")`(Claude Haiku)를 공유한다.
+
+| 위치 | 트리거 | 역할 |
+|---|---|---|
+| `domains/supplier/ai_synthesis.py` | `document_parse_worker`가 문서 파싱 직후 호출 (소재구성·탄소발자국·SAQ 중 하나라도 파싱되면) | 협력사가 읽을 한국어 종합 결론 생성 → `suppliers.ai_compliance_summary` 갱신 |
+| `hitl/service.py::_summarize_hitl_context` | 심사관이 HITL 리뷰 컨텍스트를 조회할 때(`get_review_context`) | 보류(HITL) 사유를 3줄 한국어로 요약(참고용, 승인/반려 판단은 하지 않음) |
+| `infrastructure/geocode.py::_translate_region` | 마스터폼 공장 주소 저장 시, 정적 지역명 매핑(`_REGION_MAP`)에 없는 지역명일 때만 | 한글/현지어 지역명 → 영문 로마자 표기 1줄 번역 (AWS geo-places/OSM 지오코딩 입력용) |
+
+> 임베딩(Cohere Embed v4)은 `compliance.generate_embedding`(검색 시점)과 `domains/regulation/embeddings.py`(부팅 시 1회, 규제·조항 텍스트를 pgvector에 인덱싱)에서 공유해서 쓴다 — 이건 판단을 만드는 호출이 아니라 RAG 인덱스를 채우는 호출이라 위 표에서는 제외했다.
+
+### AI 에이전트 구조도
+```mermaid
+flowchart TD
+    classDef ai fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef det fill:#f1f5f9,stroke:#64748b,color:#1e293b;
+    classDef human fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef store fill:#e0e7ff,stroke:#4338ca,color:#312e81;
+
+    subgraph UP["문서 업로드 워커 (document_parse_queue)"]
+        U1[협력사 문서 업로드] --> U2["parse_document()<br/>Claude Sonnet 4.6 · Vision<br/>S3 PDF/이미지 → 구조화 JSON"]:::ai
+        U2 --> U3[(document_extraction_results)]:::store
+        U2 -. "doc_category가 소재구성·탄소발자국·SAQ 중 하나" .-> U4["ai_synthesis<br/>Claude Haiku<br/>협력사용 한국어 종합 결론"]:::ai
+        U4 --> U5[(suppliers.ai_compliance_summary)]:::store
+    end
+
+    subgraph MF["마스터폼 공장 주소 제출"]
+        M1[공장 주소 입력] --> M2{"정적 지역명 매핑<br/>(_REGION_MAP) hit?"}:::det
+        M2 -- Yes --> M3[영문 지역명]:::det
+        M2 -- No --> M4["Bedrock Haiku<br/>지역명 영문 번역 폴백"]:::ai
+        M4 --> M3
+        M3 --> M5["AWS geo-places → (미스 시) OSM 폴백"]:::det
+    end
+
+    subgraph GRAPH["LangGraph 배치 파이프라인 (agents/graph.py)"]
+        S["supervisor.route()<br/>결정론 라우터"]:::det
+        S --> DG["data_gateway<br/>추출결과 집계·신뢰도 게이트<br/>(LLM 직접호출 없음 — U3 결과를 읽음)"]:::det
+        DG --> GEO["geo_audit<br/>PostGIS 공간쿼리 · 고위험 판정"]:::det
+        GEO --> COMP["compliance<br/>RAG(Cohere Embed v4 + pgvector) + Claude Sonnet judge"]:::ai
+        COMP --> RISK["risk_scoring (automation)<br/>규칙엔진 가점식 점수"]:::det
+        RISK --> FJ["final_judgment<br/>종합판정 롤업 + 요약문 생성<br/>(템플릿, LLM 없음)"]:::det
+        FJ --> DONE(["completed"]):::det
+        DG -. error_reason .-> HITL
+        GEO -. geographical_risk .-> HITL
+        COMP -. low_confidence .-> HITL
+        RISK -. risk_escalated .-> HITL
+        HITL["hitl_interrupt<br/>사람 심사 대기 (interrupt)"]:::human --> S
+    end
+
+    subgraph REVIEW["HITL 심사관 조회 시점"]
+        H1[심사관이 리뷰 컨텍스트 조회] --> H2["_summarize_hitl_context<br/>Claude Haiku<br/>보류 사유 3줄 요약(참고용)"]:::ai
+    end
+
+    subgraph SEED["규제 임베딩 적재 (부팅 1회, 멱등)"]
+        R1["regulations / regulation_clauses"] --> R2["Bedrock Cohere Embed v4"]:::ai
+        R2 --> R3[(pgvector 인덱스)]:::store
+    end
+
+    U3 --> DG
+    R3 -. "검색 대상" .-> COMP
+    HITL -.-> H1
+```
 
 ---
 
@@ -85,17 +153,19 @@ backend/
 │   ├── graph.py            #   그래프 빌드 · 체크포인터
 │   ├── supervisor.py       #   결정론 라우터
 │   ├── state.py            #   BatchState (공유 상태 SSOT)
-│   ├── data_gateway.py     #   AI 문서 추출 (Bedrock)
+│   ├── data_gateway.py     #   parse_document(AI 문서추출) + 결정론 집계 노드
 │   ├── geo_audit.py        #   PostGIS 지리 위험
 │   ├── compliance.py       #   RAG + Sonnet judge
-│   └── automation.py       #   결정론 후처리 (risk_scoring)
+│   ├── automation.py       #   결정론 후처리 (risk_scoring)
+│   └── final_judgment.py   #   결정론 종합판정 롤업 + 요약문 생성
 ├── domains/<name>/         # 도메인별 {router, service, repository, models}.py
 │   ├── supplier  supplychain  regulation  product  submission
+│   │     (supplier/ai_synthesis.py — AI 협력사용 종합 결론, Haiku, 파이프라인 밖)
 │   ├── verification  risk  hitl  audit  batches  users  acl  report
 ├── events/types.py         # 이벤트 계약 (팀 전체 SSOT)
-├── infrastructure/         # database · event_bus(LISTEN/NOTIFY) · queue(ARQ) · auth · trace
+├── infrastructure/         # database · event_bus(LISTEN/NOTIFY) · queue(ARQ) · auth · trace · geocode(AI 폴백 포함)
 ├── llm/                    # bedrock_factory · embedding_factory
-├── workers/                # ARQ 큐 컨슈머
+├── workers/                # ARQ 큐 컨슈머 (document_parse_worker가 AI 추출·종합 트리거)
 └── scripts/                # 시드 · 검증 스크립트
 docker/
 ├── 01_schema.sql           # DB 스키마 SSOT (DDL 직접 편집) — 빈 볼륨 최초 init에 적용
