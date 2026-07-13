@@ -1197,12 +1197,35 @@ CARBON_COMPLIANCE_SYSTEM_PROMPT = (
     '"regulation_name": "<법령명>", '
     '"citation": "<조항 표기, 예: EU 2023/1542 Art.7(2)>", '
     '"clause_text": "<인용한 조항 원문 발췌>", '
-    '"reasoning": "<한국어 근거 설명>"}\n'
+    '"checks": [{"label": "<심사 기준 한 줄, 쉬운 말>", "passed": true|false, "note": "<판단 근거 한 줄, 쉬운 말>"}], '
+    '"reasoning": "<전체 결론 한 줄 — 필요한 조치가 있으면 함께 적기>"}\n'
     "규칙:\n"
     "- context에 없는 규정/조항은 절대 인용하지 마세요(환각 금지). context가 비면 verdict='warning', citation=''.\n"
     "- 수치 기준이 조항에 있으면 협력사 값과 비교해 pass/violation을 명확히 판정하세요.\n"
-    "- citation은 context의 조항 표기를 그대로 사용하세요."
+    "- citation은 context의 조항 표기를 그대로 사용하세요.\n"
+    "- checks는 이 판정에 사용한 개별 심사 기준을 2~4개 항목으로 나눠 각각 통과 여부를 표시하세요.\n"
+    "- checks의 label·note와 reasoning은 법률 용어·조항 번호·영어 약어(예: Art.7, Annex 등) 없이 "
+    "담당자가 바로 이해할 수 있는 쉬운 한국어로 쓰고, 문장 끝은 '-습니다/-입니다'체로 통일하세요."
 )
+
+
+def _normalize_checks(raw) -> list[dict]:
+    """LLM이 만든 checks 배열을 안전하게 정규화한다. 형식이 어긋난 항목은 건너뛴다."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()
+        if not label:
+            continue
+        out.append({
+            "label": label,
+            "passed": bool(item.get("passed")),
+            "note": str(item.get("note") or "").strip(),
+        })
+    return out
 
 
 def _extract_json_block(text_str: str) -> dict:
@@ -1262,6 +1285,7 @@ async def analyze_carbon_compliance(
         "regulation_name": result.get("regulation_name") or first.get("name") or "EU 배터리법",
         "citation": result.get("citation") or first.get("citation") or "",
         "clause_text": result.get("clause_text") or first.get("content") or "",
+        "checks": _normalize_checks(result.get("checks")),
         "reasoning": result.get("reasoning") or "규제 조항을 찾지 못해 자동 판정할 수 없습니다. 수동 검토가 필요합니다.",
         "carbon_intensity": carbon_intensity,
         "energy_source": energy_source,
@@ -1283,13 +1307,18 @@ SAQ_COMPLIANCE_SYSTEM_PROMPT = (
     '"regulation_name": "<법령명, 예: CSDDD(기업 지속가능성 실사 지침)>", '
     '"citation": "<조항 표기, 예: CSDDD Art.9>", '
     '"clause_text": "<인용한 조항 원문 발췌>", '
-    '"reasoning": "<한국어 근거 설명 — 어떤 SAQ 항목이 어느 조항 리스크에 해당하는지>"}\n'
+    '"checks": [{"label": "<심사 기준 한 줄, 쉬운 말>", "passed": true|false, "note": "<판단 근거 한 줄, 쉬운 말>"}], '
+    '"reasoning": "<전체 결론 한 줄 — 필요한 조치가 있으면 함께 적기>"}\n'
     "규칙:\n"
     "- context에 없는 규정/조항은 절대 인용하지 마세요(환각 금지). context가 비면 verdict='warning', citation=''.\n"
     "- 고충처리 채널 부재·강제노동/아동노동 징후·실사 절차 미비 등 인권 리스크가 확인되면 verdict='violation'.\n"
     "- 리스크가 애매하거나 자료가 부족하면 verdict='warning'.\n"
     "- 명백한 리스크가 없고 실사 요건을 충족하면 verdict='pass'.\n"
-    "- citation은 context의 조항 표기를 그대로 사용하세요."
+    "- citation은 context의 조항 표기를 그대로 사용하세요.\n"
+    "- checks는 고충처리 절차·강제노동/아동노동 여부·안전보건 관리 등 실제로 확인한 개별 항목을 "
+    "3~5개로 나눠 각각 통과 여부를 표시하세요.\n"
+    "- checks의 label·note와 reasoning은 법률 용어·조항 번호·영어 약어(예: Art.9, grievance mechanism 등) "
+    "없이 담당자가 바로 이해할 수 있는 쉬운 한국어로 쓰고, 문장 끝은 '-습니다/-입니다'체로 통일하세요."
 )
 
 
@@ -1336,6 +1365,7 @@ async def analyze_saq_compliance(
         "regulation_name": result.get("regulation_name") or first.get("name") or "CSDDD(기업 지속가능성 실사 지침)",
         "citation": result.get("citation") or first.get("citation") or "",
         "clause_text": result.get("clause_text") or first.get("content") or "",
+        "checks": _normalize_checks(result.get("checks")),
         "reasoning": result.get("reasoning") or "규제 조항을 찾지 못해 자동 판정할 수 없습니다. 수동 검토가 필요합니다.",
         "saq_fields": saq_fields,
     }

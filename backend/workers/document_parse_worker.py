@@ -121,7 +121,7 @@ async def process_document_parse(ctx, document_id: str, request_id: str | None =
                 if saq_level in _SELF_RISK_LEVELS:
                     await supplier_repo.set_self_reported_risk_level(db, target_supplier_id, saq_level)
 
-            # 3종이 이 시점에 전부 갖춰졌을 때만(멱등 가드) LLM으로 종합 결론을 만든다.
+            # 3종 중 하나라도 파싱됐으면 그 시점까지 확보된 카테고리만으로 종합 결론을 (재)생성한다.
             new_summary = None
             if target_supplier_id is not None:
                 new_summary = await ai_synthesis.maybe_synthesize_compliance_summary(db, target_supplier_id)

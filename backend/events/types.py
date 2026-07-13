@@ -80,11 +80,12 @@ class MasterFormSubmittedEvent:
 @dataclass
 class SupplierAiSynthesisReadyEvent:
     """
-    소재구성·탄소발자국·SAQ(dd_audit_report) 3종 AI 처리 결과가 한 협력사에게 전부
-    갖춰져 종합 결론(suppliers.ai_compliance_summary)이 생성됐을 때 발행.
+    소재구성·탄소발자국·SAQ(dd_audit_report) 3종 중 하나라도 파싱된 협력사에게
+    종합 결론(suppliers.ai_compliance_summary)이 (재)생성됐을 때 발행. 3종을
+    전부 기다리지 않으며, 문서가 늘거나 재파싱될 때마다 매번 재발행될 수 있다.
     발행: B(workers.document_parse_worker, ai_synthesis.maybe_synthesize_compliance_summary
     성공 후 커밋 성공 시점) → 수신: 협력사 본인 + 원청 알림(supplier_ai_synthesis_notify).
-    3종 중 하나라도 없거나 이미 생성된 적 있으면(멱등) 발행되지 않는다.
+    대상 문서가 하나도 파싱되지 않았으면 발행되지 않는다.
     """
     supplier_id: Optional[UUID] = None
     event_name: str = "SupplierAiSynthesisReady"
